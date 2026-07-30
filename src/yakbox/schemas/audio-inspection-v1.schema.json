@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audio-inspection-v1.schema.json",
+  "title": "yakbox audio inspection",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "path", "format_name", "codec", "duration_seconds", "sample_rate", "channels", "size", "valid", "issues"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audio-inspection-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "path": {"type": "string"},
+    "format_name": {"type": "string"},
+    "codec": {"type": "string"},
+    "duration_seconds": {"type": "number", "minimum": 0},
+    "sample_rate": {"type": "integer", "minimum": 1},
+    "channels": {"type": "integer", "minimum": 1},
+    "size": {"type": "integer", "minimum": 1},
+    "valid": {"type": "boolean"},
+    "issues": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

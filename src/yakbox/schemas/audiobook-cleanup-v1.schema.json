@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-cleanup-v1.schema.json",
+  "title": "yakbox cleanup or quarantine manifest",
+  "type": "object",
+  "required": ["schema_version", "cleanup_id"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "cleanup_id": {"type": "string"},
+    "items": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

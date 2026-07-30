@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/batch-report-v1.schema.json",
+  "title": "yakbox cloud batch report",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "run_id", "started_at", "ended_at", "results", "summary"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/batch-report-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "run_id": {"type": "string"},
+    "started_at": {"type": "string"},
+    "ended_at": {"type": "string"},
+    "results": {"type": "array", "items": {"type": "object"}},
+    "summary": {"type": "object"},
+    "aborted": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

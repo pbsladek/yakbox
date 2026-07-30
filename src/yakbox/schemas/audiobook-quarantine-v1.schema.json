@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-quarantine-v1.schema.json",
+  "title": "yakbox quarantine manifest",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "cleanup_id", "created_at", "artifact_root", "items"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-quarantine-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "cleanup_id": {"type": "string"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "artifact_root": {"type": "string"},
+    "target": {"type": "string"},
+    "items": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false
+}

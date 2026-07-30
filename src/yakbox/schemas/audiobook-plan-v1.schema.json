@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-plan-v1.schema.json",
+  "title": "yakbox resolved audiobook plan",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "target", "profile", "document_sha256", "fingerprint", "nodes"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-plan-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "target": {"type": "string"},
+    "profile": {"type": "string"},
+    "document_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nodes": {"type": "array", "items": {"type": "object", "required": ["id", "stage", "fingerprint", "output"]}},
+    "execution": {
+      "type": "object",
+      "required": ["from_stage", "through_stage", "node_ids"],
+      "properties": {
+        "from_stage": {"enum": ["synthesize", "master", "encode_mp3", "inspect"]},
+        "through_stage": {"enum": ["synthesize", "master", "encode_mp3", "inspect"]},
+        "node_ids": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "change_summary": {"type": "object"},
+    "preflight": {"type": "object"}
+  },
+  "additionalProperties": false
+}

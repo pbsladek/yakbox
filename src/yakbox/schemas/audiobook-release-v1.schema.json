@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-release-v1.schema.json",
+  "title": "yakbox immutable release manifest",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "release_id", "book", "voices", "master_wavs", "delivery_mp3s"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-release-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "release_id": {"type": "string"},
+    "book": {"type": "object", "required": ["title"]},
+    "voices": {"type": "array", "items": {"type": "object", "required": ["name", "rights_basis", "reference_audio_sha256"]}},
+    "master_wavs": {"type": "array", "items": {"type": "object", "required": ["path", "sha256"]}},
+    "delivery_mp3s": {"type": "array", "items": {"type": "object", "required": ["path", "sha256"]}}
+  },
+  "additionalProperties": false
+}

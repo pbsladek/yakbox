@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-journal-v1.schema.json",
+  "title": "yakbox audiobook journal event",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "run_id", "event"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-journal-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "run_id": {"type": "string"},
+    "event": {"type": "string"},
+    "node_id": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-shard-v1.schema.json",
+  "title": "yakbox audiobook shard",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "plan_fingerprint", "target", "index", "count", "node_ids", "artifact_paths"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-shard-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "plan_fingerprint": {"type": "string"},
+    "target": {"type": "string"},
+    "index": {"type": "integer", "minimum": 1},
+    "count": {"type": "integer", "minimum": 1},
+    "node_ids": {"type": "array", "items": {"type": "string"}},
+    "artifact_paths": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

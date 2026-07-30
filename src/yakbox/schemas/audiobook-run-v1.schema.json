@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-run-v1.schema.json",
+  "title": "yakbox audiobook run summary",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "run_id", "target", "status", "plan_fingerprint"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-run-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "run_id": {"type": "string"},
+    "target": {"type": "string"},
+    "status": {"enum": ["planned", "complete", "failed", "cancelled"]},
+    "plan_fingerprint": {"type": "string"}
+  },
+  "additionalProperties": true
+}

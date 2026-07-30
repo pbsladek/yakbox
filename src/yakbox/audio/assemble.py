@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+from yakbox._files import commit_temporary_file
+from yakbox.audio.inspect import inspect_audio
+from yakbox.errors import ArtifactError, BackendUnavailableError
+
+
+def assemble_m4b(
+    chapters: tuple[Path, ...],
+    destination: Path,
+    *,
+    title: str,
+    author: str | None = None,
+    overwrite: bool = False,
+) -> None:
+    _validate_assembly_inputs(chapters, destination, overwrite=overwrite)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, list_name = tempfile.mkstemp(
+        prefix=".yakbox-concat-", suffix=".txt", dir=destination.parent
+    )
+    list_path = Path(list_name)
+    metadata_path = list_path.with_suffix(".ffmetadata")
+    output_descriptor, output_name = tempfile.mkstemp(
+        prefix=f".{destination.stem}.", suffix=".m4b", dir=destination.parent
+    )
+    os.close(output_descriptor)
+    output = Path(output_name)
+    output.unlink()
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            for chapter in chapters:
+                escaped = str(chapter.resolve()).replace("'", "'\\''")
+                stream.write(f"file '{escaped}'\n")
+        _write_chapter_metadata(metadata_path, chapters, title=title, author=author)
+        command = [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_path),
+            "-i",
+            str(metadata_path),
+            "-map",
+            "0:a:0",
+            "-map_metadata",
+            "1",
+            "-map_chapters",
+            "1",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-metadata",
+            f"title={title}",
+        ]
+        if author:
+            command.extend(["-metadata", f"artist={author}"])
+        command.append(str(output))
+        _run_ffmpeg_assembly(command)
+        inspection = inspect_audio(output)
+        if not inspection.valid:
+            raise ArtifactError(
+                "Assembled M4B is invalid: " + "; ".join(inspection.issues)
+            )
+        commit_temporary_file(output, destination, overwrite=overwrite)
+    finally:
+        list_path.unlink(missing_ok=True)
+        metadata_path.unlink(missing_ok=True)
+        output.unlink(missing_ok=True)
+
+
+def _validate_assembly_inputs(
+    chapters: tuple[Path, ...],
+    destination: Path,
+    *,
+    overwrite: bool,
+) -> None:
+    if not chapters:
+        raise ArtifactError("At least one chapter is required for assembly")
+    if shutil.which("ffmpeg") is None:
+        raise BackendUnavailableError("FFmpeg is required for M4B assembly")
+    if destination.exists() and not overwrite:
+        raise ArtifactError(f"Output already exists: {destination}")
+    missing = next((chapter for chapter in chapters if not chapter.is_file()), None)
+    if missing is not None:
+        raise ArtifactError(f"Missing chapter for assembly: {missing}")
+    if len({chapter.resolve() for chapter in chapters}) != len(chapters):
+        raise ArtifactError("Assembly chapters must not contain duplicates")
+
+
+def _run_ffmpeg_assembly(command: list[str]) -> None:
+    try:
+        result = subprocess.run(
+            command, check=False, capture_output=True, text=True, timeout=1800
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ArtifactError("FFmpeg assembly timed out") from error
+    except OSError as error:
+        raise ArtifactError(f"Cannot start FFmpeg assembly: {error}") from error
+    if result.returncode:
+        raise ArtifactError(f"FFmpeg assembly failed: {result.stderr[-2048:]}")
+
+
+def _write_chapter_metadata(
+    destination: Path,
+    chapters: tuple[Path, ...],
+    *,
+    title: str,
+    author: str | None,
+) -> None:
+    lines = [";FFMETADATA1", f"title={_escape_metadata(title)}"]
+    if author:
+        lines.append(f"artist={_escape_metadata(author)}")
+    start = 0
+    for chapter in chapters:
+        inspection = inspect_audio(chapter)
+        if not inspection.valid:
+            raise ArtifactError(
+                f"Cannot assemble invalid chapter {chapter}: "
+                + "; ".join(inspection.issues)
+            )
+        duration = max(1, round(inspection.duration_seconds * 1_000))
+        end = start + duration
+        lines.extend(
+            [
+                "[CHAPTER]",
+                "TIMEBASE=1/1000",
+                f"START={start}",
+                f"END={end}",
+                f"title={_escape_metadata(chapter.stem)}",
+            ]
+        )
+        start = end
+    destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _escape_metadata(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace("=", "\\=")
+        .replace(";", "\\;")
+        .replace("#", "\\#")
+        .replace("\n", " ")
+    )

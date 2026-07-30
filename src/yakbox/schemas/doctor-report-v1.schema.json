@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/doctor-report-v1.schema.json",
+  "title": "yakbox doctor report",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "healthy", "diagnostics"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/doctor-report-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "healthy": {"type": "boolean"},
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "severity", "summary"]
+      }
+    }
+  },
+  "additionalProperties": false
+}

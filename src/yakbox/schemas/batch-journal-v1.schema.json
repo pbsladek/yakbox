@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/batch-journal-v1.schema.json",
+  "title": "yakbox cloud batch journal record",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "record_type"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/batch-journal-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "record_type": {"enum": ["header", "row", "usage_reserved", "resumed", "complete", "aborted", "interrupted"]},
+    "run_id": {"type": "string"},
+    "index": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["ok", "error", "not_run", "skipped"]}
+  },
+  "additionalProperties": true
+}

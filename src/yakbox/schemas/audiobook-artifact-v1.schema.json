@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-artifact-v1.schema.json",
+  "title": "yakbox artifact manifest",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "id", "kind", "path", "sha256", "size", "fingerprint", "target", "run_id", "protected"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-artifact-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "id": {"type": "string"},
+    "kind": {"type": "string"},
+    "path": {"type": "string"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "size": {"type": "integer", "minimum": 0},
+    "fingerprint": {"type": "string"},
+    "target": {"type": "string"},
+    "run_id": {"type": "string"},
+    "protected": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

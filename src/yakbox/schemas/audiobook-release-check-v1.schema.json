@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-release-check-v1.schema.json",
+  "title": "yakbox release check",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "complete", "issues", "master_wavs", "delivery_mp3s", "release_manifest"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-release-check-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "complete": {"type": "boolean"},
+    "issues": {"type": "array", "items": {"type": "string"}},
+    "master_wavs": {"type": "array", "items": {"type": "string"}},
+    "delivery_mp3s": {"type": "array", "items": {"type": "string"}},
+    "release_manifest": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

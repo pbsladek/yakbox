@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-cleanup-plan-v1.schema.json",
+  "title": "yakbox cleanup plan",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "cleanup_id", "workspace", "artifact_root", "bytes_reclaimable", "candidates"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-cleanup-plan-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "cleanup_id": {"type": "string"},
+    "workspace": {"type": "string"},
+    "artifact_root": {"type": "string"},
+    "target": {"type": "string"},
+    "current_paths": {"type": "array", "items": {"type": "string"}},
+    "bytes_to_quarantine": {"type": "integer", "minimum": 0},
+    "bytes_reclaimable_after_purge": {"type": "integer", "minimum": 0},
+    "bytes_reclaimable": {"type": "integer", "minimum": 0},
+    "candidates": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false
+}
