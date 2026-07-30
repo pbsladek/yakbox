@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from packaging.requirements import Requirement
 
 from yakbox.audiobook.manifest import load_manifest
 from yakbox.cli import main
@@ -115,9 +117,53 @@ def test_ci_installs_ffmpeg_on_every_supported_runner_and_allows_only_local_ipc(
 
     for runner in ("Linux", "macOS", "Windows"):
         assert f"runner.os == '{runner}'" in workflow
+    assert 'python: "3.12"' not in workflow
+    assert all(
+        'python-version: "3.12"' not in path.read_text(encoding="utf-8")
+        for path in (root / ".github" / "workflows").glob("*.yml")
+    )
     assert "--disable-socket" not in project
     assert "localhost,127.0.0.0/8,::1/128" in project
     assert "--allow-unix-socket" in project
+
+
+def test_local_extra_and_distributed_security_overrides_stay_aligned() -> None:
+    root = Path(__file__).parents[2]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    expected = {
+        "diffusers",
+        "gradio",
+        "numpy",
+        "onnx",
+        "safetensors",
+        "setuptools",
+        "starlette",
+        "torch",
+        "torchaudio",
+        "transformers",
+    }
+    local = {
+        Requirement(value).name
+        for value in project["project"]["optional-dependencies"]["local"]
+    }
+    configured = {
+        Requirement(value).name
+        for value in project["tool"]["uv"]["override-dependencies"]
+    }
+    override_lines = (
+        (root / "constraints" / "chatterbox-security-overrides.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    distributed = {
+        Requirement(line).name
+        for line in override_lines
+        if line and not line.startswith("#")
+    }
+
+    assert expected <= local
+    assert configured == expected
+    assert distributed == expected
 
 
 def test_live_workflow_and_canaries_are_explicitly_bounded() -> None:

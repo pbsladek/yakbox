@@ -86,7 +86,10 @@ def commit_temporary_file(
         raise ArtifactError("Atomic commit requires a sibling temporary file")
     if not temporary.is_file() or temporary.stat().st_size == 0:
         raise ArtifactError(f"Output writer produced no data: {temporary}")
-    with temporary.open("rb") as stream:
+    # Windows requires a writable file descriptor for fsync().  Reopening the
+    # completed artifact read-only works on POSIX but fails with EBADF on
+    # Windows before the atomic replace can happen.
+    with temporary.open("rb+") as stream:
         os.fsync(stream.fileno())
     if overwrite:
         temporary.replace(destination)

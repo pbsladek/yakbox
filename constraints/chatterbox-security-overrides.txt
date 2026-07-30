@@ -1,0 +1,13 @@
+# Chatterbox 0.1.7 pins vulnerable versions of these packages. Pass this file
+# to Astral uv with --overrides when installing yakbox's local extra.
+diffusers==0.39.0
+gradio==6.21.0
+numpy==1.26.4; python_version < "3.13"
+numpy==2.4.6; python_version >= "3.13"
+onnx==1.22.0
+safetensors==0.8.0
+setuptools==83.0.0
+starlette==1.3.1
+torch==2.13.0
+torchaudio==2.11.0
+transformers==5.14.1

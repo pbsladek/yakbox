@@ -35,12 +35,13 @@ Keep auditions short. Profile controls include `device`, `cfg_weight`,
 `exaggeration`, `seed`, worker timeout, and one-process resource declarations.
 Reference audio must have a documented rights basis.
 
-The current upstream Chatterbox package is maintained but deliberately pins
-its ML/UI dependency stack. Some pinned versions currently have published
-advisories and cannot be safely overridden without breaking the supported
-model contract. The default yakbox install does not contain that stack. Read
-the [operations guide](operations.md), use only trusted model/input files, and
-treat the full local extra audit as a release blocker rather than ignoring it.
+The current upstream Chatterbox package is maintained but pins several stale
+ML/UI dependencies. Yakbox applies reviewed, versioned uv overrides to fixed
+releases and audits the complete local stack as a release blocker. Use the
+local installation command in the
+[installation guide](installing-and-releasing.md); omitting its override file
+is intentionally unsupported. The default yakbox install does not contain the
+machine-learning stack.
 
 ## Direct text sources
 

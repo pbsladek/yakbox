@@ -142,16 +142,7 @@ def run_release_preflight(
         ("uv", "run", "ruff", "check", "."),
         ("uv", "run", "ty", "check"),
         ("uv", "run", "pytest"),
-        (
-            "uv",
-            "audit",
-            "--frozen",
-            "--no-extra",
-            "local",
-            "--no-extra",
-            "credentials",
-            "--no-dev",
-        ),
+        ("uv", "audit", "--frozen"),
     )
     for command in quality_commands:
         command_runner(command, root)

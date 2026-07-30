@@ -20,7 +20,8 @@ yakbox doctor
 For local Chatterbox synthesis:
 
 ```console
-uv tool install "yakbox[local]"
+uv tool install "yakbox[local]" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
 ```
 
 FFmpeg and FFprobe are required to master, encode, inspect, and assemble audio.

@@ -76,8 +76,10 @@ than accepting unexplained bytes.
 on `PATH`, then rerun Doctor.
 
 `Local Chatterbox package is not installed`: install `yakbox[local]` in the
-same environment. Start with a one-sentence direct test. Worker heartbeat logs
-are under `.yakbox/runs/RUN_ID/logs/local-worker.log`.
+same environment using the versioned security override command in the
+[installation guide](installing-and-releasing.md). Start with a one-sentence
+direct test. Worker heartbeat logs are under
+`.yakbox/runs/RUN_ID/logs/local-worker.log`.
 
 `No Resemble API key found`: set `RESEMBLE_API_KEY` or install
 `yakbox[credentials]`, run `config auth login`, and select the profile before

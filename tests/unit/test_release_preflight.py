@@ -164,5 +164,5 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
         == 1
     )
     assert ("uv", "run", "pytest") in commands
-    assert any(command[:2] == ("uv", "audit") for command in commands)
+    assert ("uv", "audit", "--frozen") in commands
     assert sum(command[:2] == ("uv", "run") for command in commands) >= 6

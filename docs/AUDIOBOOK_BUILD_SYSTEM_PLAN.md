@@ -982,9 +982,11 @@ credentials = [
     "keyring>=25.7,<26",
 ]
 local = [
-    # Preserve the existing tested chatterbox/PyTorch constraints after the
-    # phase-0 inventory; do not guess new GPU pins in the cloud rewrite.
-    "chatterbox-tts",
+    "chatterbox-tts>=0.1.7,<0.2",
+    # Secure floors and the reviewed Torch/TorchAudio pair are declared
+    # directly; see the versioned uv override file for upstream pin conflicts.
+    "torch==2.13.0",
+    "torchaudio==2.11.0",
 ]
 ```
 
@@ -1008,8 +1010,9 @@ local = [
   inspection, and assembly. Their absence must not break synthesis or help;
   affected audiobook stages fail at validation with installation guidance.
 - The default install contains no PyTorch/chatterbox dependency. Install local
-  support with `uv tool install "yakbox[local]"`; direct dependencies imported
-  by local code must be declared explicitly rather than assumed transitively.
+  support with the versioned uv security override command documented in the
+  installation guide; direct dependencies imported by local code must be
+  declared explicitly rather than assumed transitively.
 - This split keeps audiobook installations that use only hosted backends
   small; it is not a product priority boundary. The local extra, supported
   model combinations, and local build/direct examples are documented and

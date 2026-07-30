@@ -400,7 +400,9 @@ async def build_audiobook(
         )
         atomic_write_json(run_directory / "run.json", _result_dict(result))
     if failed:
-        raise BuildError(f"Build failed at {failed[0]}; see {run_directory}")
+        detail = _failed_node_detail(journal, failed[0])
+        suffix = f": {detail}" if detail else ""
+        raise BuildError(f"Build failed at {failed[0]}{suffix}; see {run_directory}")
     return result
 
 
@@ -2196,6 +2198,15 @@ def _usage_dict(snapshot: HostedUsageSnapshot | None) -> dict[str, object] | Non
 
 def _safe_error(error: Exception) -> str:
     return str(error).replace("\n", " ")[:2048]
+
+
+def _failed_node_detail(journal: RunJournal, node_id: str) -> str | None:
+    for event in reversed(journal.events()):
+        if event.get("event") == "node_failed" and event.get("node_id") == node_id:
+            detail = event.get("error")
+            if isinstance(detail, str):
+                return detail[:512]
+    return None
 
 
 def _safe_name(value: str) -> str:

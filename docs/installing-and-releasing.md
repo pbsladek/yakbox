@@ -21,14 +21,17 @@ Install optional secure credential storage, local Chatterbox, or both:
 
 ```console
 uv tool install "yakbox[credentials]"
-uv tool install "yakbox[local]"
-uv tool install "yakbox[credentials,local]"
+uv tool install "yakbox[local]" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
+uv tool install "yakbox[credentials,local]" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
 ```
 
 Local Chatterbox has a much larger machine-learning dependency graph. Install
-it only on a machine that will run the model. FFmpeg and FFprobe are separate
-system tools required for mastering, MP3 encoding, inspection, and M4B
-assembly.
+it only on a machine that will run the model. The versioned override file
+replaces vulnerable exact pins in Chatterbox 0.1.7; do not omit it. FFmpeg and
+FFprobe are separate system tools required for mastering, MP3 encoding,
+inspection, and M4B assembly.
 
 ## Install a GitHub Release
 
@@ -54,10 +57,10 @@ uv run yakbox-release-preflight --tag vX.Y.Z
 ```
 
 The command requires a clean worktree; validates the version and proposed tag;
-runs the lock, formatting, lint, typing, test, and default dependency-audit
-gates; builds the wheel and source archive once; isolated-install tests both;
-exports a CycloneDX 1.5 SBOM; and writes `SHA256SUMS` plus a JSON preflight
-report under `release-metadata/`.
+runs the lock, formatting, lint, typing, test, and universal dependency-audit
+gates—including optional local-model dependencies; builds the wheel and source
+archive once; isolated-install tests both; exports a CycloneDX 1.5 SBOM; and
+writes `SHA256SUMS` plus a JSON preflight report under `release-metadata/`.
 
 After reviewing that evidence, create the tag:
 

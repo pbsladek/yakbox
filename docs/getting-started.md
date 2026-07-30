@@ -12,7 +12,8 @@ uv tool install yakbox
 Install local Chatterbox only on a machine intended to run the model:
 
 ```console
-uv tool install "yakbox[local]"
+uv tool install "yakbox[local]" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
 ```
 
 FFmpeg and FFprobe are required for mastering, encoding, inspection, and M4B

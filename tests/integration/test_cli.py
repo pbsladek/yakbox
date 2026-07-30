@@ -115,7 +115,7 @@ def test_build_dry_run_and_preview_are_audiobook_first(tmp_path: Path) -> None:
     preview_payload = json.loads(preview.output)
     artifact = preview_payload["data"]["artifact"]
     assert artifact["kind"] == "preview"
-    assert "previews/" in artifact["path"]
+    assert "previews" in Path(artifact["path"]).parts
     validate_contract("cli-output", preview_payload)
     validate_contract("audiobook-artifact", artifact)
 
