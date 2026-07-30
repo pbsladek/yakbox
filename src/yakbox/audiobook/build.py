@@ -1214,14 +1214,14 @@ def _snapshot_release(
                 ],
                 "master_wavs": [
                     {
-                        "path": str(path.relative_to(target.output_root)),
+                        "path": path.relative_to(target.output_root).as_posix(),
                         "sha256": sha256_file(path),
                     }
                     for path in snapshot_masters
                 ],
                 "delivery_mp3s": [
                     {
-                        "path": str(path.relative_to(target.output_root)),
+                        "path": path.relative_to(target.output_root).as_posix(),
                         "sha256": sha256_file(path),
                     }
                     for path in snapshot_mp3s
