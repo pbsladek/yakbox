@@ -58,6 +58,9 @@ jobs:
       - name: Install FFmpeg (Ubuntu)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
         run: choco install ffmpeg --yes --no-progress

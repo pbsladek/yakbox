@@ -1,0 +1,33 @@
+"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"
+schema_version = 1
+sources = ["source/book.md"]
+
+[book]
+title = "Local Chatterbox Example"
+author = "Example Author"
+narrator = "Example Narrator"
+language = "en"
+
+[voices.narrator]
+display_name = "Narrator"
+rights_basis = "not_applicable"
+
+[profiles.local]
+backend = "chatterbox-local"
+voice = "narrator"
+device = "auto"
+cfg_weight = 0.5
+exaggeration = 0.5
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[targets.default]
+profile = "local"
+output_root = "build/yakbox"
+chunk_chars = 1000
+mastering = true
+wav_sample_rate = 44100
+mp3_bitrate = "192k"
+m4b = false

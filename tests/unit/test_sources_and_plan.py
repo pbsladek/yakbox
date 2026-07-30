@@ -150,6 +150,14 @@ def test_chunking_does_not_split_combining_or_joiner_sequences() -> None:
             'written = "word"\nspoken = "say"\nstatus = "approved"\nenabled = "yes"\n',
             "enabled must be boolean",
         ),
+        (
+            'written = "word"\nspoken = "say"\nstatus = "approved"\nlanguage = 42\n',
+            "language must be a non-empty string",
+        ),
+        (
+            'written = "word"\nspoken = "say"\nstatus = "approved"\nnotes = 42\n',
+            "notes must be a string",
+        ),
     ],
 )
 def test_pronunciation_contract_rejects_ambiguous_values(

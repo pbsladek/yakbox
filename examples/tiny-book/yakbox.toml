@@ -1,0 +1,35 @@
+"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"
+schema_version = 1
+sources = ["source/book.md"]
+pronunciations = "pronunciations.toml"
+
+[book]
+title = "The Tiny Journey"
+author = "Example Author"
+narrator = "Example Narrator"
+language = "en"
+
+[voices.narrator]
+display_name = "Narrator"
+rights_basis = "not_applicable"
+
+[profiles.default]
+backend = "fake"
+voice = "narrator"
+sample_rate = 16000
+
+[targets.default]
+profile = "default"
+output_root = "build/yakbox"
+chunk_chars = 1000
+mastering = true
+wav_sample_rate = 44100
+mp3_bitrate = "128k"
+m4b = false
+provider_concurrency = 5
+
+[retention]
+keep_successful_runs = 3
+audition_days = 30
+preview_days = 7
+raw_until_release = true

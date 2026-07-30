@@ -68,6 +68,8 @@ class Pronunciation:
     match: str
     case: str
     priority: int
+    language: str | None = None
+    notes: str | None = None
 
 
 def normalize_sources(
@@ -426,6 +428,7 @@ def _parse_pronunciation(value: object, index: int) -> Pronunciation | None:
         "priority",
         "status",
         "enabled",
+        "notes",
     }
     if unknown:
         raise ValidationError(
@@ -445,6 +448,14 @@ def _parse_pronunciation(value: object, index: int) -> Pronunciation | None:
         raise ValidationError(f"Pronunciation term {index} needs written")
     if not isinstance(spoken, str) or not spoken.strip():
         raise ValidationError(f"Pronunciation term {index} needs spoken")
+    language = value.get("language")
+    if language is not None and (not isinstance(language, str) or not language.strip()):
+        raise ValidationError(
+            f"Pronunciation term {index} language must be a non-empty string"
+        )
+    notes = value.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        raise ValidationError(f"Pronunciation term {index} notes must be a string")
     priority = value.get("priority", 0)
     if not isinstance(priority, int) or isinstance(priority, bool):
         raise ValidationError(f"Pronunciation term {index} priority must be integer")
@@ -457,6 +468,12 @@ def _parse_pronunciation(value: object, index: int) -> Pronunciation | None:
         match=str(match_mode),
         case=str(case_mode),
         priority=priority,
+        language=(
+            unicodedata.normalize("NFC", language.strip())
+            if isinstance(language, str)
+            else None
+        ),
+        notes=unicodedata.normalize("NFC", notes) if isinstance(notes, str) else None,
     )
 
 

@@ -1,0 +1,34 @@
+schema_version = 1
+
+[[terms]]
+written = "Weyland"
+spoken = "Way land"
+language = "en"
+match = "whole_word"
+case = "sensitive"
+priority = 100
+status = "approved"
+enabled = true
+notes = "Reviewed in the narrator voice."
+
+[[terms]]
+written = "Aurelia"
+spoken = "Aw ree lee ah"
+language = "en"
+match = "whole_word"
+case = "sensitive"
+priority = 90
+status = "approved"
+enabled = true
+notes = "Character name."
+
+[[terms]]
+written = "XK-17"
+spoken = "X K seventeen"
+language = "en"
+match = "whole_word"
+case = "sensitive"
+priority = 80
+status = "approved"
+enabled = true
+notes = "Read letters separately."

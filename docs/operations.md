@@ -48,6 +48,28 @@ Supported environment overrides include `YAKBOX_BACKEND`,
   consent evidence with project records.
 - Hosted confirmation and budget caps are independent of concurrency.
 
+## Failure recovery
+
+Every build stage journals its start, completion, or failure. A failed or
+cancelled build releases its target lock and is resumed by the next ordinary
+`yakbox build`. Completed artifacts are reused only after their sidecar,
+fingerprint, size, and digest match.
+
+Use these read-only checks before repairing anything:
+
+```console
+yakbox status
+yakbox artifacts verify
+yakbox doctor yakbox.toml
+```
+
+Provider authentication failures are never retried. Provider timeouts are
+bounded and leave no destination file. FFmpeg, FFprobe, local-worker, disk
+preflight, and stage failures retain the run journal and do not leave owned
+`.part` or chunk files. If valid audio was externally changed,
+`yakbox artifacts verify` reports the mismatch; rebuild from source rather
+than accepting unexplained bytes.
+
 ## Troubleshooting
 
 `FFmpeg is required`: install FFmpeg and ensure both `ffmpeg` and `ffprobe` are

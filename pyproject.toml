@@ -53,6 +53,7 @@ dev = [
 
 [project.scripts]
 yakbox = "yakbox.cli:main"
+yakbox-release-preflight = "yakbox.release_preflight:main"
 
 [tool.uv]
 required-version = ">=0.11.26,<0.12"
@@ -62,15 +63,24 @@ default-groups = ["dev"]
 module-name = "yakbox"
 source-include = [
     "docs/**",
+    "examples/**",
     "tests/**",
 ]
 
 [tool.pytest.ini_options]
-addopts = "--strict-config --strict-markers --disable-socket --allow-unix-socket"
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+    "--allow-hosts",
+    "localhost,127.0.0.0/8,::1/128",
+    "--allow-unix-socket",
+    "-m",
+    "not live",
+]
 asyncio_mode = "strict"
 testpaths = ["tests"]
 markers = [
-    "live: opt-in tests that may use external provider or model resources",
+    "live: explicit opt-in tests that use a provider or real model",
 ]
 
 [tool.coverage.run]

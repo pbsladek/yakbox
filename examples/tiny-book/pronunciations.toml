@@ -1,0 +1,12 @@
+schema_version = 1
+
+[[terms]]
+written = "Yakbox"
+spoken = "Yak box"
+language = "en"
+match = "whole_word"
+case = "sensitive"
+priority = 100
+status = "approved"
+enabled = true
+notes = "Example of a reviewed project pronunciation."

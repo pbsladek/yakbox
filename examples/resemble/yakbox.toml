@@ -1,0 +1,33 @@
+"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"
+schema_version = 1
+sources = ["source/book.md"]
+
+[book]
+title = "Hosted Example"
+author = "Example Author"
+narrator = "Example Narrator"
+language = "en"
+
+[voices.narrator]
+display_name = "Narrator"
+rights_basis = "not_applicable"
+
+[profiles.hosted]
+backend = "resemble"
+voice = "narrator"
+voice_uuid = "REPLACE_WITH_RESEMBLE_VOICE_UUID"
+use_hd = false
+
+[targets.default]
+profile = "hosted"
+output_root = "build/yakbox"
+chunk_chars = 1000
+mastering = true
+wav_sample_rate = 44100
+mp3_bitrate = "192k"
+m4b = false
+provider_concurrency = 2
+max_submitted_characters = 1000
+max_provider_requests = 4
+confirm_above_characters = 100
+confirm_above_requests = 1

@@ -1071,22 +1071,30 @@ warning-emitting re-export shim for the 1.x series; otherwise do not create it.
 │   ├── dependabot.yml
 │   └── workflows/
 │       ├── ci.yml
+│       ├── live-canary.yml
 │       ├── release.yml
 │       └── scheduled.yml
 ├── docs/
-│   ├── audiobook.md
-│   ├── manifest.md
-│   ├── sources-and-pronunciations.md
-│   ├── backends.md
-│   ├── direct-speech.md
-│   ├── hosted-budgets.md
-│   ├── doctor.md
-│   ├── mastering-and-release.md
-│   ├── cloud.md
-│   ├── python-api.md
-│   ├── batch-format.md
-│   ├── compatibility.md
-│   └── schemas.md
+│   ├── README.md
+│   ├── AUDIOBOOK_BUILD_SYSTEM_PLAN.md
+│   ├── artifacts-and-releases.md
+│   ├── backends-and-speech.md
+│   ├── cloud-and-budgets.md
+│   ├── getting-started.md
+│   ├── installing-and-releasing.md
+│   ├── manifests-and-sources.md
+│   ├── migration.md
+│   ├── operations.md
+│   └── python-api.md
+├── examples/
+│   ├── README.md
+│   ├── local-chatterbox/
+│   ├── m4b-release/
+│   ├── multiple-voices/
+│   ├── pronunciation-heavy/
+│   ├── resemble/
+│   ├── selective-rebuild/
+│   └── tiny-book/
 ├── src/
 │   ├── yakbox/
 │   │   ├── __init__.py
@@ -1098,6 +1106,7 @@ warning-emitting re-export shim for the 1.x series; otherwise do not create it.
 │   │   │   ├── checks.py
 │   │   │   └── models.py
 │   │   ├── local.py
+│   │   ├── release_preflight.py
 │   │   ├── textutils.py
 │   │   ├── py.typed
 │   │   ├── audio/

@@ -8,6 +8,7 @@ from typing import cast
 import pytest
 
 from yakbox.errors import BuildError, ValidationError
+from yakbox.speech.models import SpeechSynthesisRequest
 from yakbox.speech.workers import (
     IsolatedLocalSpeechService,
     _read_request,
@@ -40,6 +41,23 @@ class _SilentProcess:
     async def wait(self) -> int:
         await self.finished.wait()
         return self.returncode or 0
+
+
+class _TerminatedProcess:
+    pid = 5678
+    returncode = -9
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        return b"", b"worker was terminated"
+
+    async def wait(self) -> int:
+        return self.returncode
+
+    def terminate(self) -> None:
+        pass
+
+    def kill(self) -> None:
+        pass
 
 
 @pytest.mark.asyncio
@@ -105,3 +123,24 @@ def test_worker_request_validates_resources_and_typed_controls(
     assert item.chatterbox.cfg_weight == 0.3
     assert item.chatterbox.exaggeration == 0.6
     assert item.chatterbox.seed == 7
+
+
+@pytest.mark.asyncio
+async def test_terminated_worker_is_reported_and_protocol_files_are_cleaned(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def create_process(*_args: object, **_kwargs: object) -> _TerminatedProcess:
+        return _TerminatedProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+    service = IsolatedLocalSpeechService(timeout_seconds=30)
+
+    with pytest.raises(BuildError, match="worker was terminated"):
+        await service.synthesize_to_file(
+            SpeechSynthesisRequest(text="Hi.", voice="narrator"),
+            tmp_path / "never.wav",
+        )
+
+    assert not tuple(tmp_path.glob(".yakbox-worker-*"))
+    assert not (tmp_path / "never.wav").exists()

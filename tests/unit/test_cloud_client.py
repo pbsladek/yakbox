@@ -147,6 +147,50 @@ async def test_auth_failure_is_not_retried() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_calls"),
+    [
+        ("expired-credentials", 1),
+        ("read-timeout", 2),
+    ],
+)
+async def test_provider_failures_leave_no_output_or_temporary_file(
+    tmp_path: Path,
+    failure: str,
+    expected_calls: int,
+) -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if failure == "expired-credentials":
+            return httpx.Response(401, text="token expired")
+        raise httpx.ReadTimeout("provider timed out", request=request)
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    options = ClientOptions(
+        synthesis_base_url="https://example.test",
+        retry=RetryPolicy(max_attempts=2, base_delay=0),
+    )
+    destination = tmp_path / "failed.wav"
+    async with ResembleClient("secret", options=options, http_client=http) as client:
+        expected = (
+            ProviderError if failure == "expired-credentials" else RetryExhaustedError
+        )
+        with pytest.raises(expected):
+            await client.synthesize_to_file(
+                SynthesisRequest(text="Hi.", voice_uuid="voice"),
+                destination,
+            )
+    await http.aclose()
+
+    assert calls == expected_calls
+    assert not destination.exists()
+    assert not tuple(tmp_path.glob("*.part"))
+
+
+@pytest.mark.asyncio
 async def test_client_requires_context() -> None:
     client = ResembleClient("secret")
     with pytest.raises(ClientStateError):

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import errno
 import json
+import os
 from pathlib import Path
+from types import TracebackType
 
 import pytest
 
-from yakbox._files import sha256_file
+from yakbox._files import atomic_write_bytes, sha256_file
 from yakbox.audiobook.artifacts import (
     ArtifactKind,
     ArtifactRecord,
@@ -15,6 +18,54 @@ from yakbox.audiobook.artifacts import (
     write_artifact_record,
 )
 from yakbox.errors import ArtifactError
+
+
+class _DiskFullStream:
+    def __init__(self, descriptor: int) -> None:
+        self.descriptor = descriptor
+
+    def __enter__(self) -> _DiskFullStream:
+        return self
+
+    def __exit__(
+        self,
+        _exception_type: type[BaseException] | None,
+        _exception: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> None:
+        os.close(self.descriptor)
+
+    def write(self, _data: bytes) -> int:
+        raise OSError(errno.ENOSPC, "simulated disk full")
+
+    def flush(self) -> None:
+        pass
+
+    def fileno(self) -> int:
+        return self.descriptor
+
+
+def test_atomic_write_disk_exhaustion_removes_partial_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "audio.wav"
+
+    def disk_full(
+        descriptor: int,
+        *_args: object,
+        **_kwargs: object,
+    ) -> _DiskFullStream:
+        return _DiskFullStream(descriptor)
+
+    monkeypatch.setattr("yakbox._files.os.fdopen", disk_full)
+
+    with pytest.raises(OSError) as raised:
+        atomic_write_bytes(destination, b"audio")
+
+    assert raised.value.errno == errno.ENOSPC
+    assert not destination.exists()
+    assert not tuple(tmp_path.glob("*.part"))
 
 
 def _record(root: Path, name: str, *, artifact_id: str) -> ArtifactRecord:

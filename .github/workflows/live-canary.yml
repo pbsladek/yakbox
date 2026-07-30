@@ -1,0 +1,73 @@
+name: Live backend canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: Backend canary to run
+        required: true
+        default: resemble
+        type: choice
+        options:
+          - resemble
+          - chatterbox-local
+          - both
+      local_device:
+        description: Chatterbox device for a configured self-hosted runner
+        required: false
+        default: auto
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resemble:
+    if: inputs.backend == 'resemble' || inputs.backend == 'both'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: live-resemble
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.32"
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --frozen --all-groups
+      - name: Synthesize one bounded hosted canary
+        env:
+          YAKBOX_RUN_RESEMBLE_LIVE: "1"
+          RESEMBLE_API_KEY: ${{ secrets.RESEMBLE_API_KEY }}
+          YAKBOX_CLOUD_VOICE_UUID: ${{ secrets.RESEMBLE_VOICE_UUID }}
+        run: >-
+          uv run pytest --force-enable-socket -m live
+          tests/live/test_resemble_live.py
+
+  chatterbox-local:
+    if: inputs.backend == 'chatterbox-local' || inputs.backend == 'both'
+    runs-on:
+      - self-hosted
+      - yakbox-chatterbox
+    timeout-minutes: 15
+    environment: live-chatterbox
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.32"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen --all-groups --extra local
+      - name: Synthesize one short local canary
+        env:
+          YAKBOX_RUN_LOCAL_LIVE: "1"
+          YAKBOX_LIVE_LOCAL_DEVICE: ${{ inputs.local_device }}
+          YAKBOX_LIVE_LOCAL_TIMEOUT_SECONDS: "600"
+        run: >-
+          uv run pytest --force-enable-socket -m live
+          tests/live/test_local_chatterbox_live.py
