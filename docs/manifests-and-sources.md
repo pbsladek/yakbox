@@ -14,6 +14,14 @@ title = "Example Book"
 author = "Example Author"
 narrator = "Example Narrator"
 language = "en"
+subtitle = "An Example"
+publisher = "Example Press"
+genre = "Science Fiction"
+series = "Example Cycle"
+series_position = 1
+isbn = "9780000000000"
+publication_date = "2026-07-31"
+cover = "assets/cover.jpg"
 
 [voices.narrator]
 display_name = "Narrator"
@@ -38,7 +46,19 @@ mastering = true
 wav_sample_rate = 44100
 mp3_bitrate = "192k"
 m4b = false
+m4b_bitrate = "192k"
 provider_concurrency = 5
+media_concurrency = 2
+
+[targets.release]
+extends = "default"
+output_root = "build/yakbox-release"
+m4b = true
+quality_min_lufs = -23.0
+quality_max_lufs = -16.0
+quality_max_true_peak_dbfs = -1.0
+quality_max_leading_silence_seconds = 2.0
+quality_max_trailing_silence_seconds = 2.0
 
 [retention]
 keep_successful_runs = 3
@@ -100,6 +120,16 @@ notes = "Auditioned in the selected narrator voice."
 Only enabled, approved entries are applied. Replacement is deterministic and
 non-recursive. A source or pronunciation change invalidates only dependent
 nodes.
+
+Audit the lexicon before a paid or long local render:
+
+```console
+yakbox pronunciations audit
+yakbox pronunciations audit --fail-unused
+```
+
+The report identifies applied rules, unused approved rules, priority-shadowed
+matches, and manuscript line locations.
 
 Use UTF-8 `.md` or `.txt` sources. Keep manuscript files, the pronunciation
 sidecar, and licensed reference audio under normal project backup/versioning;

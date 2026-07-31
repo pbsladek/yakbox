@@ -8,6 +8,7 @@ import os
 import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 
 from yakbox.errors import ArtifactError
@@ -18,11 +19,38 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def sha256_file(path: Path) -> str:
+    resolved = path.resolve()
+    before = _file_signature(resolved)
+    digest = _sha256_snapshot(str(resolved), *before)
+    after = _file_signature(resolved)
+    if after != before:
+        digest = _sha256_snapshot(str(resolved), *after)
+    return digest
+
+
+@lru_cache(maxsize=4_096)
+def _sha256_snapshot(
+    path: str,
+    _size: int,
+    _mtime_ns: int,
+    _ctime_ns: int,
+    _inode: int,
+) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    with Path(path).open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _file_signature(path: Path) -> tuple[int, int, int, int]:
+    status = path.stat()
+    return (
+        status.st_size,
+        status.st_mtime_ns,
+        status.st_ctime_ns,
+        status.st_ino,
+    )
 
 
 def atomic_write_bytes(path: Path, data: bytes, *, overwrite: bool = False) -> None:

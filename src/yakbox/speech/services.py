@@ -214,7 +214,14 @@ async def open_speech_backend(
             options=options,
             usage_gate=usage,
         ) as client:
-            yield ResembleSpeechService(client)
+            service = ResembleSpeechService(
+                client,
+                concurrency=max_connections or 1,
+            )
+            try:
+                yield service
+            finally:
+                await service.aclose()
         return
     if normalized in {"remote", "chatterbox-remote"}:
         raise BackendUnavailableError(

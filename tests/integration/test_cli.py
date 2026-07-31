@@ -107,6 +107,15 @@ def test_build_dry_run_and_preview_are_audiobook_first(tmp_path: Path) -> None:
     assert not (workspace / ".yakbox").exists()
     validate_contract("cli-output", build_payload)
 
+    draft = runner.invoke(
+        main,
+        ["--json", "build", str(manifest), "--mode", "draft", "--dry-run"],
+    )
+    assert draft.exit_code == 0, draft.output
+    draft_payload = json.loads(draft.output)
+    assert draft_payload["data"]["target"] == "draft"
+    assert draft_payload["data"]["preflight"]["planned_nodes"] == 1
+
     preview = runner.invoke(
         main,
         ["--json", "preview", str(manifest), "--text", "A tiny preview."],

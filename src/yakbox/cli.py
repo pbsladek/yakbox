@@ -6,7 +6,7 @@ import importlib.util
 import json
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
@@ -22,22 +22,29 @@ from yakbox._files import atomic_write_bytes
 from yakbox.audio import inspect_audio
 from yakbox.audiobook import (
     ArtifactKind,
+    BuildProgress,
+    apply_cache_cleanup,
     apply_cleanup,
     assemble_release,
+    audit_pronunciations,
     audition_audiobook,
     build_audiobook,
     check_release,
+    diff_releases,
     export_shard_manifests,
     inventory_artifacts,
+    inventory_synthesis_cache,
     load_manifest,
     normalize_sources,
     plan_audiobook,
+    plan_cache_cleanup,
     plan_cleanup,
     preflight_audiobook_build,
     preview_audiobook,
     purge_trash,
     repair_artifact_metadata,
     restore_trash,
+    select_build_chapters,
     verify_shard_manifests,
 )
 from yakbox.audiobook.artifacts import verify_artifact
@@ -89,7 +96,7 @@ from yakbox.speech import (
     open_transformation_backend,
     validate_hosted_preflight,
 )
-from yakbox.textutils import BatchRow, read_batch_rows
+from yakbox.textutils import BatchRow, iter_batch_rows, read_batch_rows
 
 console = Console(stderr=False)
 error_console = Console(stderr=True)
@@ -244,6 +251,29 @@ wav_sample_rate = 44100
 mp3_bitrate = "192k"
 m4b = false
 provider_concurrency = 5
+media_concurrency = 2
+
+[targets.draft]
+extends = "default"
+output_root = "build/yakbox-draft"
+chunk_chars = 1200
+mastering = false
+through_stage = "synthesize"
+
+[targets.proof]
+extends = "default"
+output_root = "build/yakbox-proof"
+mastering = false
+
+[targets.release]
+extends = "default"
+output_root = "build/yakbox-release"
+m4b = true
+quality_min_lufs = -23.0
+quality_max_lufs = -16.0
+quality_max_true_peak_dbfs = -1.0
+quality_max_leading_silence_seconds = 2.0
+quality_max_trailing_silence_seconds = 2.0
 
 [retention]
 keep_successful_runs = 3
@@ -301,7 +331,7 @@ def validate_command(manifest: Path) -> None:
 @main.command("plan")
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--target", default="default", show_default=True)
-@click.option("--chapter")
+@click.option("--chapter", "--chapters")
 def plan_command(manifest: Path, target: str, chapter: str | None) -> None:
     """Resolve a deterministic build plan without generating audio."""
     try:
@@ -331,10 +361,68 @@ def plan_command(manifest: Path, target: str, chapter: str | None) -> None:
     )
 
 
+@main.group("pronunciations")
+def pronunciations_group() -> None:
+    """Inspect the pronunciation lexicon against speakable source text."""
+
+
+@pronunciations_group.command("audit")
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+@click.option(
+    "--fail-unused",
+    is_flag=True,
+    help="Exit non-zero when an approved rule has no source matches.",
+)
+def pronunciations_audit_command(manifest: Path, fail_unused: bool) -> None:
+    """Report applied, unused, and priority-shadowed pronunciation rules."""
+    try:
+        loaded = load_manifest(manifest)
+        audit = audit_pronunciations(
+            loaded.sources,
+            loaded.pronunciations,
+            max_pause_ms=loaded.max_pause_ms,
+        )
+    except (YakboxError, OSError) as error:
+        _fail(error)
+    failed = fail_unused and audit.unused_rules > 0
+    _emit(
+        audit.to_dict(root=loaded.root),
+        f"{len(audit.rules)} rule(s): {audit.unused_rules} unused, "
+        f"{audit.shadowed_matches} shadowed match(es)",
+        status="error" if failed else "ok",
+        exit_code=1 if failed else 0,
+    )
+    if failed:
+        raise click.exceptions.Exit(1)
+
+
 @main.command("build")
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--target", default="default", show_default=True)
-@click.option("--chapter")
+@click.option(
+    "--mode",
+    type=click.Choice(["draft", "proof", "release"]),
+    help="Select a target named draft, proof, or release.",
+)
+@click.option("--chapter", "--chapters")
+@click.option(
+    "--changed",
+    is_flag=True,
+    help="Build only chapters changed since the last success.",
+)
+@click.option(
+    "--failed", is_flag=True, help="Build only chapters from the latest failed run."
+)
+@click.option(
+    "--missing",
+    is_flag=True,
+    help="Build only chapters with missing or invalid artifacts.",
+)
+@click.option(
+    "--since",
+    metavar="RELEASE_ID_OR_PATH",
+    help="With --changed, compare against a release manifest.",
+)
 @click.option("--profile")
 @click.option("--resume/--no-resume", default=True, show_default=True)
 @click.option("--dry-run", is_flag=True)
@@ -348,6 +436,11 @@ def plan_command(manifest: Path, target: str, chapter: str | None) -> None:
     "through_stage",
     type=click.Choice(["synthesize", "master", "encode_mp3", "inspect"]),
 )
+@click.option(
+    "--stage",
+    type=click.Choice(["synthesize", "master", "encode_mp3", "inspect"]),
+    help="Run exactly one stage; cannot be combined with --from/--through.",
+)
 @click.option("--max-submitted-characters", type=click.IntRange(min=0))
 @click.option("--max-provider-requests", type=click.IntRange(min=0))
 @click.option("--max-estimated-spend", type=Decimal)
@@ -357,16 +450,25 @@ def plan_command(manifest: Path, target: str, chapter: str | None) -> None:
 @click.option("--confirm-above-characters", type=click.IntRange(min=0))
 @click.option("--confirm-above-requests", type=click.IntRange(min=0))
 @click.option("--yes", is_flag=True)
+@click.option(
+    "--no-progress", is_flag=True, help="Disable the interactive progress bar."
+)
 @click.option("--api-key", hidden=True)
-def build_command(
+def build_command(  # noqa: C901, PLR0915
     manifest: Path,
     target: str,
+    mode: str | None,
     chapter: str | None,
+    changed: bool,
+    failed: bool,
+    missing: bool,
+    since: str | None,
     profile: str | None,
     resume: bool,
     dry_run: bool,
     from_stage: str | None,
     through_stage: str | None,
+    stage: str | None,
     max_submitted_characters: int | None,
     max_provider_requests: int | None,
     max_estimated_spend: Decimal | None,
@@ -376,13 +478,69 @@ def build_command(
     confirm_above_characters: int | None,
     confirm_above_requests: int | None,
     yes: bool,
+    no_progress: bool,
     api_key: str | None,
 ) -> None:
     """Build raw, mastered WAV, MP3, and inspection artifacts."""
+    if mode is not None and target != "default":
+        raise click.UsageError("--mode cannot be combined with a non-default --target")
+    selected_target = mode or target
+    if stage is not None and (from_stage is not None or through_stage is not None):
+        raise click.UsageError("--stage cannot be combined with --from or --through")
+    if stage is not None:
+        from_stage = through_stage = stage
+    selectors = sum((changed, failed, missing))
+    if selectors > 1:
+        raise click.UsageError(
+            "--changed, --failed, and --missing are mutually exclusive"
+        )
+    if since is not None and not changed:
+        raise click.UsageError("--since requires --changed")
     config = _load_config()
     try:
         loaded = load_manifest(manifest)
-        selected_target = loaded.target(target)
+        target_config = loaded.target(selected_target)
+        selection = (
+            "changed"
+            if changed
+            else "failed"
+            if failed
+            else "missing"
+            if missing
+            else None
+        )
+        if selection is not None:
+            since_manifest = (
+                _release_manifest_path(
+                    since,
+                    target_config.output_root / "release",
+                )
+                if since is not None
+                else None
+            )
+            selected_chapters = select_build_chapters(
+                loaded,
+                selection=selection,
+                target_name=selected_target,
+                profile_override=profile,
+                chapter_selector=chapter,
+                since_release=since_manifest,
+                from_stage=from_stage,
+                through_stage=through_stage,
+            )
+            if not selected_chapters:
+                _emit(
+                    {
+                        "schema_version": 1,
+                        "status": "up_to_date",
+                        "target": selected_target,
+                        "selection": selection,
+                        "chapters": [],
+                    },
+                    f"No {selection} chapters to build",
+                )
+                return
+            chapter = ",".join(selected_chapters)
         budget = _resolved_hosted_budget(
             max_submitted_characters=max_submitted_characters,
             max_provider_requests=max_provider_requests,
@@ -391,11 +549,11 @@ def build_command(
             pricing_source=pricing_source,
             confirm_above_characters=confirm_above_characters,
             confirm_above_requests=confirm_above_requests,
-            target=selected_target,
+            target=target_config,
         )
         preflight = preflight_audiobook_build(
             loaded,
-            target_name=target,
+            target_name=selected_target,
             profile_override=profile,
             chapter_selector=chapter,
             price_per_character=price_per_character,
@@ -411,27 +569,68 @@ def build_command(
                 dry_run=dry_run,
                 operation="audiobook build",
             )
-        result = asyncio.run(
-            build_audiobook(
-                loaded,
-                target_name=target,
-                profile_override=profile,
-                chapter_selector=chapter,
-                dry_run=dry_run,
-                resume=resume,
-                api_key=api_key or config.resemble_api_key,
-                max_submitted_characters=max_submitted_characters,
-                max_provider_requests=max_provider_requests,
-                max_estimated_spend=max_estimated_spend,
-                currency=currency,
-                pricing_source=pricing_source,
-                price_per_character=price_per_character,
-                confirm_above_characters=confirm_above_characters,
-                confirm_above_requests=confirm_above_requests,
-                from_stage=from_stage,
-                through_stage=through_stage,
-            )
+        progress_enabled = (
+            not no_progress
+            and not dry_run
+            and not _context().json_output
+            and not _context().quiet
+            and sys.stderr.isatty()
         )
+        progress_display: Progress | None = None
+        progress_task: int | None = None
+        if progress_enabled:
+            progress_display = Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                console=error_console,
+            )
+            progress_display.start()
+            progress_task = progress_display.add_task(
+                "Building audiobook",
+                total=preflight.planned_nodes,
+            )
+
+        def update_progress(event: BuildProgress) -> None:
+            if progress_display is None or progress_task is None:
+                return
+            if event.event == "started":
+                progress_display.update(
+                    progress_task,
+                    description=f"{event.stage}: {event.node_id}",
+                )
+            else:
+                progress_display.update(
+                    progress_task,
+                    completed=event.completed,
+                )
+
+        try:
+            result = asyncio.run(
+                build_audiobook(
+                    loaded,
+                    target_name=selected_target,
+                    profile_override=profile,
+                    chapter_selector=chapter,
+                    dry_run=dry_run,
+                    resume=resume,
+                    api_key=api_key or config.resemble_api_key,
+                    max_submitted_characters=max_submitted_characters,
+                    max_provider_requests=max_provider_requests,
+                    max_estimated_spend=max_estimated_spend,
+                    currency=currency,
+                    pricing_source=pricing_source,
+                    price_per_character=price_per_character,
+                    confirm_above_characters=confirm_above_characters,
+                    confirm_above_requests=confirm_above_requests,
+                    from_stage=from_stage,
+                    through_stage=through_stage,
+                    progress=update_progress if progress_enabled else None,
+                )
+            )
+        finally:
+            if progress_display is not None:
+                progress_display.stop()
     except (YakboxError, OSError) as error:
         _fail(error)
     _emit(
@@ -457,7 +656,7 @@ def build_command(
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--target", default="default", show_default=True)
 @click.option("--profile", "--profiles", "profiles", multiple=True, required=True)
-@click.option("--chapter")
+@click.option("--chapter", "--chapters")
 @click.option("--text")
 @click.option("--text-file", type=click.Path(path_type=Path))
 @click.option(
@@ -512,7 +711,7 @@ def audition_command(
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--target", default="default", show_default=True)
 @click.option("--profile")
-@click.option("--chapter")
+@click.option("--chapter", "--chapters")
 @click.option("--text")
 @click.option("--text-file", type=click.Path(path_type=Path))
 @click.option("--api-key", hidden=True)
@@ -610,6 +809,44 @@ def release_check_command(manifest: Path, target: str, write_manifest: bool) -> 
         raise click.exceptions.Exit(1)
 
 
+@release_group.command("diff")
+@click.argument("left")
+@click.argument("right")
+@click.option(
+    "--manifest",
+    type=click.Path(path_type=Path),
+    default="yakbox.toml",
+    show_default=True,
+)
+@click.option("--target", default="default", show_default=True)
+def release_diff_command(
+    left: str,
+    right: str,
+    manifest: Path,
+    target: str,
+) -> None:
+    """Compare two release IDs or release.json paths."""
+    try:
+        loaded = load_manifest(manifest)
+        release_root = loaded.target(target).output_root / "release"
+        left_path = _release_manifest_path(left, release_root)
+        right_path = _release_manifest_path(right, release_root)
+        result = diff_releases(left_path, right_path)
+    except (YakboxError, OSError) as error:
+        _fail(error)
+    _emit(
+        result.to_dict(),
+        (
+            "Releases are identical"
+            if result.identical
+            else f"{len(result.added_artifacts)} added, "
+            f"{len(result.removed_artifacts)} removed, "
+            f"{len(result.changed_artifacts)} changed artifact(s), "
+            f"{len(result.metadata_changes)} metadata change(s)"
+        ),
+    )
+
+
 @main.command("status")
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--target", default="default", show_default=True)
@@ -637,7 +874,7 @@ def status_command(manifest: Path, target: str) -> None:
 @main.command("explain")
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--target", default="default", show_default=True)
-@click.option("--chapter")
+@click.option("--chapter", "--chapters")
 @click.option("--artifact")
 def explain_command(
     manifest: Path, target: str, chapter: str | None, artifact: str | None
@@ -777,6 +1014,60 @@ def artifacts_usage_command(manifest: Path, target: str) -> None:
             "unknown_files": [str(path) for path in report.unknown_files],
         },
         f"Managed {report.managed_bytes} of {report.total_bytes} bytes",
+    )
+
+
+@artifacts_group.group("cache")
+def artifacts_cache_group() -> None:
+    """Inspect and prune reusable synthesis chunks."""
+
+
+@artifacts_cache_group.command("list")
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+def artifacts_cache_list_command(manifest: Path) -> None:
+    loaded = _manifest(manifest)
+    inventory = inventory_synthesis_cache(loaded.root)
+    _emit(
+        inventory.to_dict(root=loaded.root),
+        f"{len(inventory.entries)} cached chunk(s), "
+        f"{inventory.total_bytes} bytes, {inventory.invalid_entries} invalid",
+    )
+
+
+@artifacts_cache_group.command("clean")
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+@click.option("--max-age-days", type=click.IntRange(min=0))
+@click.option("--max-bytes", type=click.IntRange(min=0))
+@click.option("--apply", "apply_changes", is_flag=True)
+def artifacts_cache_clean_command(
+    manifest: Path,
+    max_age_days: int | None,
+    max_bytes: int | None,
+    apply_changes: bool,
+) -> None:
+    """Plan cache cleanup; delete only when --apply is explicit."""
+    loaded = _manifest(manifest)
+    try:
+        plan = plan_cache_cleanup(
+            loaded.root,
+            max_age_days=max_age_days,
+            max_bytes=max_bytes,
+        )
+        removed = apply_cache_cleanup(plan) if apply_changes else 0
+    except (YakboxError, OSError) as error:
+        _fail(error)
+    value = plan.to_dict(workspace=loaded.root)
+    value["applied"] = apply_changes
+    value["removed"] = removed
+    _emit(
+        value,
+        (
+            f"Removed {removed} cached chunk(s), reclaimed up to "
+            f"{plan.bytes_reclaimed} bytes"
+            if apply_changes
+            else f"Would remove {len(plan.candidates)} cached chunk(s), "
+            f"reclaiming {plan.bytes_reclaimed} bytes; pass --apply"
+        ),
     )
 
 
@@ -1519,7 +1810,7 @@ def cloud_batch_command(
     api_key: str | None,
 ) -> None:
     config = _load_config()
-    rows = read_batch_rows(script_file)
+    total_rows = sum(1 for _ in iter_batch_rows(script_file))
     selected_concurrency = concurrency or config.cloud_concurrency
     budget = _resolved_hosted_budget(
         max_submitted_characters=max_submitted_characters,
@@ -1533,7 +1824,7 @@ def cloud_batch_command(
     estimate = estimate_hosted_work(
         (
             row.text
-            for row in rows
+            for row in iter_batch_rows(script_file)
             if row.validation_error is None
             and 0 < len(row.text) <= MAX_SYNTHESIS_CHARACTERS
         ),
@@ -1568,7 +1859,7 @@ def cloud_batch_command(
         progress_display.start()
         progress_task = progress_display.add_task(
             "Synthesizing",
-            total=len(rows),
+            total=total_rows,
         )
 
     def progress(_result: BatchResult) -> None:
@@ -1585,7 +1876,7 @@ def cloud_batch_command(
             batch_report = asyncio.run(
                 _cloud_batch(
                     resolved_key,
-                    rows,
+                    iter_batch_rows(script_file),
                     budget,
                     price_per_character,
                     voice_uuid or config.resemble_voice_uuid,
@@ -1962,7 +2253,7 @@ async def _cloud_stream(
 
 async def _cloud_batch(
     api_key: str,
-    rows: tuple[BatchRow, ...],
+    rows: Iterable[BatchRow],
     budget: HostedUsageBudget,
     price_per_character: Decimal | None,
     voice: str | None,
@@ -1989,29 +2280,32 @@ async def _cloud_batch(
         max_keepalive_connections=max(20, concurrency),
     )
     async with ResembleClient(api_key, options=options, usage_gate=usage) as client:
-        service = ResembleSpeechService(client)
-        return await run_cloud_batch(
-            rows,
-            service,
-            default_voice=voice,
-            project_uuid=project,
-            out_dir=out_dir,
-            concurrency=concurrency,
-            output_format=output_format,
-            use_hd=hd,
-            precision=precision,
-            sample_rate=sample_rate,
-            apply_custom_pronunciations=custom_pronunciations,
-            overwrite=overwrite,
-            dry_run=dry_run,
-            progress=progress,
-            journal_path=journal,
-            resume_path=resume,
-            report_path=report,
-            write_report=write_report,
-            usage_gate=usage,
-            preflight=preflight,
-        )
+        service = ResembleSpeechService(client, concurrency=concurrency)
+        try:
+            return await run_cloud_batch(
+                rows,
+                service,
+                default_voice=voice,
+                project_uuid=project,
+                out_dir=out_dir,
+                concurrency=concurrency,
+                output_format=output_format,
+                use_hd=hd,
+                precision=precision,
+                sample_rate=sample_rate,
+                apply_custom_pronunciations=custom_pronunciations,
+                overwrite=overwrite,
+                dry_run=dry_run,
+                progress=progress,
+                journal_path=journal,
+                resume_path=resume,
+                report_path=report,
+                write_report=write_report,
+                usage_gate=usage,
+                preflight=preflight,
+            )
+        finally:
+            await service.aclose()
 
 
 async def _list_voices(api_key: str, page: int, page_size: int) -> Page[Voice]:
@@ -2126,6 +2420,13 @@ def _manifest(path: Path) -> AudiobookManifest:
         return load_manifest(path)
     except YakboxError as error:
         _fail(error)
+
+
+def _release_manifest_path(value: str, release_root: Path) -> Path:
+    candidate = Path(value).expanduser()
+    if candidate.is_file():
+        return candidate.resolve()
+    return (release_root / value / "release.json").resolve()
 
 
 def _emit(

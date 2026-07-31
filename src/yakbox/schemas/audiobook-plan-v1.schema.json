@@ -13,6 +13,7 @@
     "profile": {"type": "string"},
     "document_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "complete_document": {"type": "boolean"},
     "nodes": {"type": "array", "items": {"type": "object", "required": ["id", "stage", "fingerprint", "output"]}},
     "execution": {
       "type": "object",

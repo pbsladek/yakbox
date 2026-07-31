@@ -62,6 +62,35 @@ def test_manifest_parses_hosted_confirmation_and_storage_limits(
     assert manifest.retention.raw_until_release
 
 
+def test_target_inheritance_supports_draft_proof_and_release_modes(
+    tmp_path: Path,
+) -> None:
+    manifest = load_manifest(
+        _write_manifest(
+            tmp_path,
+            "media_concurrency = 3\n"
+            "[targets.draft]\n"
+            'extends = "default"\n'
+            'output_root = "build/draft"\n'
+            "mastering = false\n"
+            'through_stage = "synthesize"\n'
+            "[targets.release]\n"
+            'extends = "default"\n'
+            'output_root = "build/release"\n'
+            "m4b = true\n",
+        )
+    )
+
+    draft = manifest.target("draft")
+    release = manifest.target("release")
+    assert draft.profile == "default"
+    assert draft.media_concurrency == 3
+    assert draft.mastering is False
+    assert draft.through_stage == "synthesize"
+    assert release.m4b is True
+    assert release.through_stage == "inspect"
+
+
 @pytest.mark.parametrize(
     ("extra", "match"),
     [
@@ -71,6 +100,7 @@ def test_manifest_parses_hosted_confirmation_and_storage_limits(
             "monetary budget requires",
         ),
         ("provider_concurrency = 101\n", "at most 100"),
+        ("media_concurrency = 33\n", "at most 32"),
         ("storage_budget_bytes = -1\n", "non-negative"),
         ('mastering = "yes"\n', "mastering must be boolean"),
         ('mp3_bitrate = "fast"\n', "must look like"),

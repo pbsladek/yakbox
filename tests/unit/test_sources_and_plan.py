@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 from hypothesis import given
@@ -11,6 +12,7 @@ from yakbox.audiobook.planner import plan_audiobook, shard_plan
 from yakbox.audiobook.sources import (
     Pause,
     SpeechSegment,
+    audit_pronunciations,
     chunk_text,
     normalize_sources,
 )
@@ -33,6 +35,35 @@ def test_normalizes_directives_and_pronunciations(book_workspace: Path) -> None:
         if isinstance(item, SpeechSegment)
     )
     assert "brief opening" in spoken
+
+
+def test_pronunciation_audit_reports_usage_locations_and_shadowing(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.md"
+    source.write_text("# One\n\nNew York and unused text.\n", encoding="utf-8")
+    pronunciations = tmp_path / "pronunciations.toml"
+    pronunciations.write_text(
+        "schema_version = 1\n\n"
+        '[[terms]]\nwritten = "New York"\nspoken = "New York City"\n'
+        'status = "approved"\nenabled = true\npriority = 10\n\n'
+        '[[terms]]\nwritten = "York"\nspoken = "Yorkshire"\n'
+        'status = "approved"\nenabled = true\n\n'
+        '[[terms]]\nwritten = "missing"\nspoken = "present"\n'
+        'status = "approved"\nenabled = true\n',
+        encoding="utf-8",
+    )
+
+    audit = audit_pronunciations((source,), pronunciations)
+
+    by_written = {rule.written: rule for rule in audit.rules}
+    assert by_written["New York"].applied == 1
+    assert by_written["New York"].locations[0].start_line == 3
+    assert by_written["York"].matches == 1
+    assert by_written["York"].shadowed == 1
+    assert by_written["missing"].unused
+    assert audit.unused_rules == 1
+    assert audit.shadowed_matches == 1
 
 
 def test_exclude_only_and_omitted_markdown(tmp_path: Path) -> None:
@@ -199,6 +230,21 @@ def test_twenty_chapter_plan_is_deterministic(tmp_path: Path) -> None:
 
     assert len(document.chapters) == 21
     assert first == second
+    synthesis = next(node for node in first.nodes if node.stage.value == "synthesize")
+    assert len(synthesis.chunk_sources) == len(synthesis.chunks)
+    serialized = first.to_dict(root=tmp_path)
+    nodes = cast(list[dict[str, object]], serialized["nodes"])
+    chunks = cast(list[dict[str, object]], nodes[0]["chunks"])
+    source_value = cast(dict[str, object], chunks[0]["source"])
+    assert source_value["path"] == "book.md"
+    assert cast(int, source_value["start_line"]) > 0
     shards = shard_plan(first, 4)
     chapter_ids = [node.chapter_id for shard in shards for node in shard]
     assert set(chapter_ids) == {chapter.id for chapter in document.chapters}
+
+    selected = plan_audiobook(manifest, document, chapter_selector="2-4,7")
+    assert {node.chapter_id for node in selected.nodes} == {
+        document.chapters[index - 1].id for index in (2, 3, 4, 7)
+    }
+    with pytest.raises(ValueError, match="starts after"):
+        plan_audiobook(manifest, document, chapter_selector="4-2")

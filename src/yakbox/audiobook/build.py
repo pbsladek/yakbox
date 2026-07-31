@@ -2,23 +2,29 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import io
 import itertools
 import json
 import math
+import os
 import re
 import shutil
 import wave
-from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import cast
 
-from yakbox._files import atomic_write_bytes, atomic_write_json, sha256_file
-from yakbox.audio import assemble_m4b, encode_mp3, inspect_audio, master_wav
+from yakbox._files import atomic_output_path, atomic_write_json, sha256_file
+from yakbox.audio import (
+    AudioQualityPolicy,
+    assemble_m4b,
+    encode_mp3,
+    inspect_audio,
+    master_wav,
+)
 from yakbox.audio.master import copy_audio
 from yakbox.audiobook.artifacts import (
     ArtifactKind,
@@ -49,6 +55,13 @@ from yakbox.errors import (
     BackendUnavailableError,
     BuildError,
     ValidationError,
+)
+from yakbox.fingerprints import (
+    backend_fingerprint,
+    backend_runtime_fingerprint,
+    backend_versions,
+    media_tool_fingerprint,
+    media_tool_versions,
 )
 from yakbox.speech import (
     AudioFormat,
@@ -166,6 +179,55 @@ class BuildResult:
 
 
 @dataclass(frozen=True, slots=True)
+class BuildProgress:
+    event: str
+    node_id: str
+    stage: str
+    completed: int
+    total: int
+    reused: bool = False
+    error: str | None = None
+
+
+type BuildProgressCallback = Callable[[BuildProgress], None]
+
+
+@dataclass(slots=True)
+class _BuildProgressTracker:
+    callback: BuildProgressCallback | None
+    total: int
+    completed: int = 0
+
+    def emit(
+        self,
+        event: str,
+        node: PlanNode,
+        *,
+        terminal: bool = False,
+        reused: bool = False,
+        error: str | None = None,
+    ) -> None:
+        if terminal:
+            self.completed += 1
+        if self.callback is None:
+            return
+        try:
+            self.callback(
+                BuildProgress(
+                    event=event,
+                    node_id=node.id,
+                    stage=node.stage.value,
+                    completed=self.completed,
+                    total=self.total,
+                    reused=reused,
+                    error=error,
+                )
+            )
+        except Exception:
+            return
+
+
+@dataclass(frozen=True, slots=True)
 class ReleaseCheck:
     complete: bool
     issues: tuple[str, ...]
@@ -187,6 +249,114 @@ class ReleaseCheck:
 
 
 @dataclass(frozen=True, slots=True)
+class ReleaseDiff:
+    left_release_id: str
+    right_release_id: str
+    added_artifacts: tuple[str, ...]
+    removed_artifacts: tuple[str, ...]
+    changed_artifacts: tuple[str, ...]
+    metadata_changes: tuple[str, ...]
+
+    @property
+    def identical(self) -> bool:
+        return not (
+            self.added_artifacts
+            or self.removed_artifacts
+            or self.changed_artifacts
+            or self.metadata_changes
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "left_release_id": self.left_release_id,
+            "right_release_id": self.right_release_id,
+            "identical": self.identical,
+            "added_artifacts": list(self.added_artifacts),
+            "removed_artifacts": list(self.removed_artifacts),
+            "changed_artifacts": list(self.changed_artifacts),
+            "metadata_changes": list(self.metadata_changes),
+        }
+
+
+def select_build_chapters(
+    manifest: AudiobookManifest,
+    *,
+    selection: str,
+    target_name: str = "default",
+    profile_override: str | None = None,
+    chapter_selector: str | None = None,
+    since_release: Path | None = None,
+    from_stage: BuildStage | str | None = None,
+    through_stage: BuildStage | str | None = None,
+) -> tuple[str, ...]:
+    """Resolve changed, failed, or missing chapter selectors without mutation."""
+    document = normalize_sources(
+        manifest.sources,
+        pronunciations=manifest.pronunciations,
+        max_pause_ms=manifest.max_pause_ms,
+    )
+    plan = plan_audiobook(
+        manifest,
+        document,
+        target_name=target_name,
+        profile_override=profile_override,
+        chapter_selector=chapter_selector,
+    )
+    target = manifest.target(target_name)
+    _, nodes, _, _ = _select_stages(
+        plan,
+        from_stage=from_stage or target.from_stage,
+        through_stage=through_stage or target.through_stage,
+    )
+    node_ids: set[str]
+    selection_preflight: BuildPreflight | None = None
+    if selection == "missing":
+        selection_preflight = preflight_audiobook_build(
+            manifest,
+            target_name=target_name,
+            profile_override=profile_override,
+            chapter_selector=chapter_selector,
+            from_stage=from_stage,
+            through_stage=through_stage,
+        )
+        node_ids = {
+            node.id
+            for node in nodes
+            if node.id not in set(selection_preflight.reusable_node_ids)
+        }
+    elif selection == "changed":
+        if since_release is not None:
+            release = _load_release_document(since_release)
+            prior = _release_node_fingerprints(release)
+            node_ids = {
+                node.id for node in nodes if prior.get(node.id) != node.fingerprint
+            }
+        else:
+            changes = _compare_to_previous_success(manifest, plan)
+            node_ids = set(changes.added_nodes) | set(changes.changed_nodes)
+    elif selection == "failed":
+        node_ids = _latest_failed_node_ids(manifest.root, target_name)
+    else:
+        raise ValidationError(f"Unsupported build selection: {selection}")
+    current_ids = {node.id for node in nodes}
+    if selection_preflight is None:
+        selection_preflight = preflight_audiobook_build(
+            manifest,
+            target_name=target_name,
+            profile_override=profile_override,
+            chapter_selector=chapter_selector,
+            from_stage=from_stage,
+            through_stage=through_stage,
+        )
+    pending_ids = current_ids - set(selection_preflight.reusable_node_ids)
+    node_ids &= pending_ids
+    return tuple(
+        dict.fromkeys(node.chapter_id for node in nodes if node.id in node_ids)
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class _ExecutionOutcome:
     records: tuple[ArtifactRecord, ...]
     reused: tuple[str, ...]
@@ -201,6 +371,8 @@ class _ExecutionContext:
     run_id: str
     service: TextToSpeechService
     journal: RunJournal
+    media_semaphore: asyncio.Semaphore
+    progress: _BuildProgressTracker
 
 
 async def build_audiobook(
@@ -222,6 +394,7 @@ async def build_audiobook(
     confirm_above_requests: int | None = None,
     from_stage: BuildStage | str | None = None,
     through_stage: BuildStage | str | None = None,
+    progress: BuildProgressCallback | None = None,
 ) -> BuildResult:
     (
         document,
@@ -298,12 +471,12 @@ async def build_audiobook(
             preflight=preflight,
             resumed=False,
         )
-    state_root = manifest.root / ".yakbox"
     artifacts: list[ArtifactRecord] = []
     reused: list[str] = []
     failed: list[str] = []
     hosted_usage: HostedUsageSnapshot | None = None
-    with target_lock(state_root, target_name):
+    progress_tracker = _BuildProgressTracker(progress, len(execution_nodes))
+    with target_lock(manifest.root / ".yakbox", target_name):
         run_directory.mkdir(parents=True, exist_ok=resumed_run is not None)
         if resumed_run is None:
             atomic_write_json(
@@ -354,6 +527,8 @@ async def build_audiobook(
                         service=service,
                         journal=journal,
                         concurrency=target.provider_concurrency,
+                        media_semaphore=asyncio.Semaphore(target.media_concurrency),
+                        progress=progress_tracker,
                     )
                 else:
                     outcome = await _execute_node_chain(
@@ -364,6 +539,8 @@ async def build_audiobook(
                         run_id=run_id,
                         service=service,
                         journal=journal,
+                        media_semaphore=asyncio.Semaphore(target.media_concurrency),
+                        progress=progress_tracker,
                     )
                 artifacts.extend(outcome.records)
                 reused.extend(outcome.reused)
@@ -435,10 +612,11 @@ def _prepare_execution(
         profile_override=profile_override,
         chapter_selector=chapter_selector,
     )
+    target = manifest.target(target_name)
     plan, nodes, start, end = _select_stages(
         full_plan,
-        from_stage=from_stage,
-        through_stage=through_stage,
+        from_stage=from_stage or target.from_stage,
+        through_stage=through_stage or target.through_stage,
     )
     return (
         document,
@@ -447,7 +625,7 @@ def _prepare_execution(
         start,
         end,
         manifest.profile(plan.profile),
-        manifest.target(target_name),
+        target,
     )
 
 
@@ -551,13 +729,13 @@ def preflight_audiobook_build(
         profile_override=profile_override,
         chapter_selector=chapter_selector,
     )
+    target = manifest.target(target_name)
     plan, execution_nodes, resolved_from, resolved_through = _select_stages(
         full_plan,
-        from_stage=from_stage,
-        through_stage=through_stage,
+        from_stage=from_stage or target.from_stage,
+        through_stage=through_stage or target.through_stage,
     )
     profile = manifest.profile(plan.profile)
-    target = manifest.target(target_name)
     return _preflight_for_plan(
         manifest,
         plan,
@@ -584,6 +762,8 @@ async def _execute_hosted_plan(
     service: TextToSpeechService,
     journal: RunJournal,
     concurrency: int,
+    media_semaphore: asyncio.Semaphore,
+    progress: _BuildProgressTracker,
 ) -> _ExecutionOutcome:
     chapter_ids = tuple(dict.fromkeys(node.chapter_id for node in execution_nodes))
     chains = tuple(
@@ -604,6 +784,8 @@ async def _execute_hosted_plan(
         run_id=run_id,
         service=service,
         journal=journal,
+        media_semaphore=media_semaphore,
+        progress=progress,
     )
     async with asyncio.TaskGroup() as group:
         group.create_task(_produce_chains(queue, chains, worker_count))
@@ -647,6 +829,12 @@ async def _hosted_worker(
                     fingerprint=node.fingerprint,
                     error="build stopped after another chapter failed",
                 )
+                context.progress.emit(
+                    "not_run",
+                    node,
+                    terminal=True,
+                    error="build stopped after another chapter failed",
+                )
             outcomes[index] = _ExecutionOutcome((), (), ())
             continue
         outcome = await _execute_node_chain(
@@ -657,6 +845,8 @@ async def _hosted_worker(
             run_id=context.run_id,
             service=context.service,
             journal=context.journal,
+            media_semaphore=context.media_semaphore,
+            progress=context.progress,
         )
         outcomes[index] = outcome
         if outcome.failed:
@@ -672,6 +862,8 @@ async def _execute_node_chain(
     run_id: str,
     service: TextToSpeechService,
     journal: RunJournal,
+    media_semaphore: asyncio.Semaphore,
+    progress: _BuildProgressTracker,
 ) -> _ExecutionOutcome:
     target = manifest.target(plan.target)
     records: list[ArtifactRecord] = []
@@ -689,11 +881,13 @@ async def _execute_node_chain(
                 "node_reused",
                 node_id=node.id,
                 fingerprint=node.fingerprint,
-                artifact_path=str(existing.path.relative_to(manifest.root)),
+                artifact_path=existing.path.relative_to(manifest.root).as_posix(),
                 artifact_sha256=existing.sha256,
             )
+            progress.emit("reused", node, terminal=True, reused=True)
             continue
         journal.append("node_started", node_id=node.id, fingerprint=node.fingerprint)
+        progress.emit("started", node)
         try:
             record = await _execute_node(
                 node,
@@ -702,6 +896,7 @@ async def _execute_node_chain(
                 manifest=manifest,
                 run_id=run_id,
                 service=service,
+                media_semaphore=media_semaphore,
             )
         except Exception as error:
             journal.append(
@@ -710,15 +905,22 @@ async def _execute_node_chain(
                 fingerprint=node.fingerprint,
                 error=_safe_error(error),
             )
+            progress.emit(
+                "failed",
+                node,
+                terminal=True,
+                error=_safe_error(error),
+            )
             return _ExecutionOutcome(tuple(records), tuple(reused), (node.id,))
         records.append(record)
         journal.append(
             "node_completed",
             node_id=node.id,
             fingerprint=node.fingerprint,
-            artifact_path=str(record.path.relative_to(manifest.root)),
+            artifact_path=record.path.relative_to(manifest.root).as_posix(),
             artifact_sha256=record.sha256,
         )
+        progress.emit("completed", node, terminal=True)
     return _ExecutionOutcome(tuple(records), tuple(reused), ())
 
 
@@ -744,21 +946,29 @@ async def audition_audiobook(
     records: list[ArtifactRecord] = []
     comparisons: list[dict[str, object]] = []
     variants = _audition_variants(manifest, profiles, matrix)
-    for variant_name, profile, overrides in variants:
-        (
-            voice,
-            sample_rate,
-            project,
-            use_hd,
-            reference_audio,
-            chatterbox,
-        ) = _resolved_speech(profile, manifest)
-        destination = root / f"{variant_name}.wav"
-        async with open_speech_backend(
-            profile.backend,
-            api_key=api_key,
-            device=_profile_device(profile),
-        ) as service:
+    services: dict[tuple[str, str | None], TextToSpeechService] = {}
+    async with AsyncExitStack() as stack:
+        for variant_name, profile, overrides in variants:
+            (
+                voice,
+                sample_rate,
+                project,
+                use_hd,
+                reference_audio,
+                chatterbox,
+            ) = _resolved_speech(profile, manifest)
+            destination = root / f"{variant_name}.wav"
+            service_key = (profile.backend.casefold(), _profile_device(profile))
+            service = services.get(service_key)
+            if service is None:
+                service = await stack.enter_async_context(
+                    open_speech_backend(
+                        profile.backend,
+                        api_key=api_key,
+                        device=_profile_device(profile),
+                    )
+                )
+                services[service_key] = service
             artifact = await service.synthesize_to_file(
                 SpeechSynthesisRequest(
                     text=sample[: min(1_000, len(sample))],
@@ -774,62 +984,62 @@ async def audition_audiobook(
                 ),
                 destination,
             )
-        record = ArtifactRecord(
-            schema_version=1,
-            id=f"audition:{run_id}:{variant_name}",
-            kind=ArtifactKind.AUDITION,
-            path=artifact.path,
-            sha256=artifact.sha256,
-            size=artifact.bytes_written,
-            fingerprint=artifact.sha256,
-            target=target_name,
-            run_id=run_id,
-            protected=False,
-            media_type="audio/wav",
-            logical_voice=profile.voice,
-            reference_audio_sha256=(
-                sha256_file(reference_audio) if reference_audio else None
-            ),
-            reference_rights_basis=manifest.voice(profile.voice).rights_basis,
-            watermark_disclosure=_watermark_disclosure(profile),
-        )
-        write_artifact_record(record, root=target.output_root)
-        records.append(record)
-        comparisons.append(
-            {
-                "variant": variant_name,
-                "profile": profile.name,
-                "backend": profile.backend,
-                "logical_voice": profile.voice,
-                "resolved_settings": {
-                    "sample_rate": sample_rate,
-                    "project": project,
-                    "use_hd": use_hd,
-                    "chatterbox": (
-                        {
-                            "cfg_weight": chatterbox.cfg_weight,
-                            "exaggeration": chatterbox.exaggeration,
-                            "seed": chatterbox.seed,
-                        }
-                        if chatterbox is not None
-                        else None
-                    ),
-                    "matrix_overrides": overrides,
-                    "reference_audio_sha256": (
-                        sha256_file(reference_audio) if reference_audio else None
-                    ),
-                },
-                "duration_seconds": artifact.duration_seconds,
-                "attempts": artifact.attempts,
-                "artifact": record.to_dict(root=manifest.root),
-                "persist_as": _audition_persist_snippet(
-                    profile,
-                    variant_name,
-                    target_name,
-                    overrides,
+            record = ArtifactRecord(
+                schema_version=1,
+                id=f"audition:{run_id}:{variant_name}",
+                kind=ArtifactKind.AUDITION,
+                path=artifact.path,
+                sha256=artifact.sha256,
+                size=artifact.bytes_written,
+                fingerprint=artifact.sha256,
+                target=target_name,
+                run_id=run_id,
+                protected=False,
+                media_type="audio/wav",
+                logical_voice=profile.voice,
+                reference_audio_sha256=(
+                    sha256_file(reference_audio) if reference_audio else None
                 ),
-            }
-        )
+                reference_rights_basis=manifest.voice(profile.voice).rights_basis,
+                watermark_disclosure=_watermark_disclosure(profile),
+            )
+            write_artifact_record(record, root=target.output_root)
+            records.append(record)
+            comparisons.append(
+                {
+                    "variant": variant_name,
+                    "profile": profile.name,
+                    "backend": profile.backend,
+                    "logical_voice": profile.voice,
+                    "resolved_settings": {
+                        "sample_rate": sample_rate,
+                        "project": project,
+                        "use_hd": use_hd,
+                        "chatterbox": (
+                            {
+                                "cfg_weight": chatterbox.cfg_weight,
+                                "exaggeration": chatterbox.exaggeration,
+                                "seed": chatterbox.seed,
+                            }
+                            if chatterbox is not None
+                            else None
+                        ),
+                        "matrix_overrides": overrides,
+                        "reference_audio_sha256": (
+                            sha256_file(reference_audio) if reference_audio else None
+                        ),
+                    },
+                    "duration_seconds": artifact.duration_seconds,
+                    "attempts": artifact.attempts,
+                    "artifact": record.to_dict(root=manifest.root),
+                    "persist_as": _audition_persist_snippet(
+                        profile,
+                        variant_name,
+                        target_name,
+                        overrides,
+                    ),
+                }
+            )
     report_path = root / "audition.json"
     atomic_write_json(
         report_path,
@@ -1126,6 +1336,7 @@ def check_release(
                 expected.get(path.resolve()),
                 target_name=target_name,
                 release_voice=release_voice,
+                quality=_quality_policy(target),
             )
         )
     release_manifest: Path | None = None
@@ -1133,6 +1344,8 @@ def check_release(
         release_id = new_run_id()
         masters, mp3s, release_manifest = _snapshot_release(
             manifest,
+            document=document,
+            plan=plan,
             target=target,
             target_name=target_name,
             release_id=release_id,
@@ -1149,9 +1362,95 @@ def check_release(
     )
 
 
+def diff_releases(left: Path, right: Path) -> ReleaseDiff:
+    left_document = _load_release_document(left)
+    right_document = _load_release_document(right)
+    left_artifacts = _release_artifact_digests(left_document)
+    right_artifacts = _release_artifact_digests(right_document)
+    left_keys = set(left_artifacts)
+    right_keys = set(right_artifacts)
+    metadata_keys = (
+        "book",
+        "chapters",
+        "voices",
+        "target",
+        "profile",
+        "document_sha256",
+        "plan_fingerprint",
+        "runtime_fingerprints",
+        "runtime_versions",
+    )
+    return ReleaseDiff(
+        left_release_id=str(left_document.get("release_id", left.parent.name)),
+        right_release_id=str(right_document.get("release_id", right.parent.name)),
+        added_artifacts=tuple(sorted(right_keys - left_keys)),
+        removed_artifacts=tuple(sorted(left_keys - right_keys)),
+        changed_artifacts=tuple(
+            sorted(
+                key
+                for key in left_keys & right_keys
+                if left_artifacts[key] != right_artifacts[key]
+            )
+        ),
+        metadata_changes=tuple(
+            key
+            for key in metadata_keys
+            if left_document.get(key) != right_document.get(key)
+        ),
+    )
+
+
+def _load_release_document(path: Path) -> dict[str, object]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ArtifactError(f"Cannot read release manifest {path}: {error}") from error
+    if not isinstance(raw, dict) or not isinstance(raw.get("release_id"), str):
+        raise ArtifactError(f"Invalid release manifest: {path}")
+    return cast(dict[str, object], raw)
+
+
+def _release_artifact_digests(document: Mapping[str, object]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for group in ("master_wavs", "delivery_mp3s"):
+        values = document.get(group, [])
+        if not isinstance(values, list):
+            raise ArtifactError(f"Release manifest {group} must be an array")
+        for value in values:
+            if not isinstance(value, dict):
+                raise ArtifactError(f"Release manifest {group} entry is invalid")
+            path = value.get("path")
+            digest = value.get("sha256")
+            if not isinstance(path, str) or not isinstance(digest, str):
+                raise ArtifactError(f"Release manifest {group} entry is incomplete")
+            result[f"{group}/{Path(path).name}"] = digest
+    return result
+
+
+def _release_node_fingerprints(document: Mapping[str, object]) -> dict[str, str]:
+    values = document.get("nodes")
+    if not isinstance(values, list):
+        raise ArtifactError(
+            "Release manifest predates node fingerprints and cannot be used "
+            "with --since"
+        )
+    result: dict[str, str] = {}
+    for value in values:
+        if not isinstance(value, dict):
+            raise ArtifactError("Release manifest nodes entry is invalid")
+        node_id = value.get("id")
+        fingerprint = value.get("fingerprint")
+        if not isinstance(node_id, str) or not isinstance(fingerprint, str):
+            raise ArtifactError("Release manifest node fingerprint is incomplete")
+        result[node_id] = fingerprint
+    return result
+
+
 def _snapshot_release(
     manifest: AudiobookManifest,
     *,
+    document: NormalizedDocument,
+    plan: BuildPlan,
     target: BuildTarget,
     target_name: str,
     release_id: str,
@@ -1195,11 +1494,54 @@ def _snapshot_release(
             {
                 **runtime_metadata("audiobook-release"),
                 "release_id": release_id,
+                "target": target_name,
+                "profile": plan.profile,
+                "plan_fingerprint": plan.fingerprint,
+                "document_sha256": plan.document_sha256,
+                "runtime_fingerprints": {
+                    "backend": backend_fingerprint(profile),
+                    "media_tools": media_tool_fingerprint(),
+                },
+                "runtime_versions": {
+                    "backend": backend_versions(profile),
+                    "media_tools": media_tool_versions(),
+                },
                 "book": {
                     "title": manifest.book.title,
+                    "subtitle": manifest.book.subtitle,
                     "author": manifest.book.author,
                     "narrator": manifest.book.narrator,
+                    "language": manifest.book.language,
+                    "copyright": manifest.book.copyright,
+                    "publisher": manifest.book.publisher,
+                    "genre": manifest.book.genre,
+                    "series": manifest.book.series,
+                    "series_position": manifest.book.series_position,
+                    "isbn": manifest.book.isbn,
+                    "publication_date": manifest.book.publication_date,
+                    "cover_sha256": (
+                        sha256_file(manifest.book.cover)
+                        if manifest.book.cover is not None
+                        else None
+                    ),
                 },
+                "chapters": [
+                    {
+                        "id": chapter.id,
+                        "title": chapter.title,
+                        "order": chapter.order,
+                    }
+                    for chapter in document.chapters
+                ],
+                "nodes": [
+                    {
+                        "id": node.id,
+                        "stage": node.stage.value,
+                        "chapter_id": node.chapter_id,
+                        "fingerprint": node.fingerprint,
+                    }
+                    for node in plan.nodes
+                ],
                 "voices": [
                     {
                         "name": voice.name,
@@ -1335,6 +1677,7 @@ def _release_artifact_issues(
     *,
     target_name: str,
     release_voice: LogicalVoice,
+    quality: AudioQualityPolicy,
 ) -> tuple[str, ...]:
     metadata = path.with_suffix(f"{path.suffix}.artifact.json")
     if not path.is_file() or not metadata.is_file():
@@ -1355,7 +1698,7 @@ def _release_artifact_issues(
         issues.append(f"digest mismatch: {path}")
         return tuple(issues)
     try:
-        inspection = inspect_audio(path)
+        inspection = inspect_audio(path, quality=quality)
     except (ArtifactError, BackendUnavailableError) as error:
         issues.append(f"cannot inspect release artifact {path}: {error}")
         return tuple(issues)
@@ -1388,6 +1731,25 @@ def assemble_release(
         destination,
         title=manifest.book.title,
         author=manifest.book.author,
+        narrator=manifest.book.narrator,
+        subtitle=manifest.book.subtitle,
+        genre=manifest.book.genre,
+        publisher=manifest.book.publisher,
+        copyright=manifest.book.copyright,
+        language=manifest.book.language,
+        date=manifest.book.publication_date,
+        series=manifest.book.series,
+        series_position=manifest.book.series_position,
+        cover=manifest.book.cover,
+        chapter_titles=tuple(
+            chapter.title
+            for chapter in normalize_sources(
+                manifest.sources,
+                pronunciations=manifest.pronunciations,
+                max_pause_ms=manifest.max_pause_ms,
+            ).chapters
+        ),
+        bitrate=target.m4b_bitrate,
     )
     record = ArtifactRecord(
         schema_version=1,
@@ -1396,7 +1758,7 @@ def assemble_release(
         path=destination.resolve(),
         sha256=sha256_file(destination),
         size=destination.stat().st_size,
-        fingerprint=_assembly_fingerprint(check.master_wavs),
+        fingerprint=_assembly_fingerprint(check.master_wavs, manifest, target),
         target=target_name,
         run_id=assembly_id,
         protected=True,
@@ -1420,6 +1782,7 @@ async def _execute_node(
     manifest: AudiobookManifest,
     run_id: str,
     service: TextToSpeechService,
+    media_semaphore: asyncio.Semaphore,
 ) -> ArtifactRecord:
     target = manifest.target(plan.target)
     profile = manifest.profile(plan.profile)
@@ -1431,36 +1794,59 @@ async def _execute_node(
         media_type = "audio/wav"
     elif node.stage is BuildStage.MASTER:
         source = _dependency_output(plan, node, BuildStage.SYNTHESIZE)
-        if target.mastering:
-            master_wav(
-                source,
-                node.output,
-                sample_rate=target.wav_sample_rate,
-                overwrite=True,
-            )
-        else:
-            copy_audio(source, node.output, overwrite=True)
+        async with media_semaphore:
+            if target.mastering:
+                await asyncio.to_thread(
+                    master_wav,
+                    source,
+                    node.output,
+                    sample_rate=target.wav_sample_rate,
+                    overwrite=True,
+                )
+            else:
+                await asyncio.to_thread(
+                    copy_audio,
+                    source,
+                    node.output,
+                    overwrite=True,
+                )
         kind = ArtifactKind.MASTER
         protected = False
         media_type = "audio/wav"
     elif node.stage is BuildStage.ENCODE_MP3:
         source = _dependency_output(plan, node, BuildStage.MASTER)
         chapter = _chapter(document, node.chapter_id)
-        encode_mp3(
-            source,
-            node.output,
-            bitrate=target.mp3_bitrate,
-            title=chapter.title,
-            album=manifest.book.title,
-            artist=manifest.book.author or manifest.book.narrator,
-            track=chapter.order,
-            overwrite=True,
-        )
+        async with media_semaphore:
+            await asyncio.to_thread(
+                encode_mp3,
+                source,
+                node.output,
+                bitrate=target.mp3_bitrate,
+                title=chapter.title,
+                album=manifest.book.title,
+                artist=manifest.book.author or manifest.book.narrator,
+                album_artist=manifest.book.author,
+                composer=manifest.book.narrator,
+                genre=manifest.book.genre,
+                publisher=manifest.book.publisher,
+                copyright=manifest.book.copyright,
+                language=manifest.book.language,
+                date=manifest.book.publication_date,
+                cover=manifest.book.cover,
+                track=chapter.order,
+                overwrite=True,
+            )
         kind = ArtifactKind.DELIVERY
         protected = False
         media_type = "audio/mpeg"
     elif node.stage is BuildStage.INSPECT:
-        _write_inspection_report(node, plan)
+        async with media_semaphore:
+            await asyncio.to_thread(
+                _write_inspection_report,
+                node,
+                plan,
+                target,
+            )
         kind = ArtifactKind.REPORT
         protected = False
         media_type = "application/json"
@@ -1513,52 +1899,154 @@ async def _synthesize_node(
     try:
         for path in chunk_paths:
             path.unlink(missing_ok=True)
-        pending: list[tuple[SpeechSynthesisRequest, Path]] = []
-        for chunk, chunk_path in zip(node.chunks, chunk_paths, strict=True):
-            pause = _PAUSE.fullmatch(chunk)
-            if pause:
-                _write_silence(
-                    chunk_path,
-                    int(pause.group(1)),
-                    sample_rate=sample_rate or 16_000,
-                )
-            else:
-                pending.append(
-                    (
-                        SpeechSynthesisRequest(
-                            text=chunk,
-                            voice=voice,
-                            backend=profile.backend,
-                            profile=profile.name,
-                            output_format=AudioFormat.WAV,
-                            sample_rate=sample_rate,
-                            project=project,
-                            use_hd=use_hd,
-                            reference_audio=reference_audio,
-                            chatterbox=chatterbox,
-                        ),
-                        chunk_path,
-                    )
-                )
-        if pending and isinstance(service, BatchTextToSpeechService):
-            await service.synthesize_many_to_files(tuple(pending), overwrite=True)
-        else:
-            for request, destination in pending:
-                await service.synthesize_to_file(
-                    request,
-                    destination,
-                    overwrite=True,
-                )
+        pending = _prepare_synthesis_chunks(
+            node,
+            chunk_paths,
+            profile=profile,
+            workspace=manifest.root,
+            voice=voice,
+            sample_rate=sample_rate,
+            project=project,
+            use_hd=use_hd,
+            reference_audio=reference_audio,
+            chatterbox=chatterbox,
+        )
+        try:
+            await _render_pending_chunks(pending, service, workspace=manifest.root)
+        except Exception as error:
+            raise _chunk_failure(node, chunk_paths, manifest.root, error) from error
         _concatenate_wav(tuple(chunk_paths), node.output)
     finally:
         for path in chunk_paths:
             path.unlink(missing_ok=True)
 
 
-def _write_inspection_report(node: PlanNode, plan: BuildPlan) -> None:
+def _prepare_synthesis_chunks(
+    node: PlanNode,
+    chunk_paths: list[Path],
+    *,
+    profile: BackendProfile,
+    workspace: Path,
+    voice: str,
+    sample_rate: int | None,
+    project: str | None,
+    use_hd: bool,
+    reference_audio: Path | None,
+    chatterbox: ChatterboxSynthesisOptions | None,
+) -> list[tuple[SpeechSynthesisRequest, Path, str]]:
+    pending: list[tuple[SpeechSynthesisRequest, Path, str]] = []
+    for chunk, chunk_path in zip(node.chunks, chunk_paths, strict=True):
+        pause = _PAUSE.fullmatch(chunk)
+        if pause:
+            _write_silence(
+                chunk_path,
+                int(pause.group(1)),
+                sample_rate=sample_rate or 16_000,
+            )
+            continue
+        request = _new_speech_request(
+            chunk,
+            profile=profile,
+            voice=voice,
+            sample_rate=sample_rate,
+            project=project,
+            use_hd=use_hd,
+            reference_audio=reference_audio,
+            chatterbox=chatterbox,
+        )
+        fingerprint = _speech_request_fingerprint(request)
+        cached = _cached_chunk(workspace, fingerprint)
+        if cached is not None:
+            _materialize_cached_chunk(cached, chunk_path)
+        else:
+            pending.append((request, chunk_path, fingerprint))
+    return pending
+
+
+def _chunk_failure(
+    node: PlanNode,
+    chunk_paths: list[Path],
+    workspace: Path,
+    error: Exception,
+) -> BuildError:
+    failed_index = next(
+        (index for index, path in enumerate(chunk_paths) if not _is_readable_wav(path)),
+        0,
+    )
+    source = node.chunk_sources[failed_index]
+    source_path = (
+        source.path.relative_to(workspace).as_posix()
+        if source.path.is_relative_to(workspace)
+        else str(source.path)
+    )
+    return BuildError(
+        f"{node.chapter_id} chunk {failed_index + 1} "
+        f"({source_path}:{source.start_line}-{source.end_line}): {error}"
+    )
+
+
+def _new_speech_request(
+    text: str,
+    *,
+    profile: BackendProfile,
+    voice: str,
+    sample_rate: int | None,
+    project: str | None,
+    use_hd: bool,
+    reference_audio: Path | None,
+    chatterbox: ChatterboxSynthesisOptions | None,
+) -> SpeechSynthesisRequest:
+    return SpeechSynthesisRequest(
+        text=text,
+        voice=voice,
+        backend=profile.backend,
+        profile=profile.name,
+        output_format=AudioFormat.WAV,
+        sample_rate=sample_rate,
+        project=project,
+        use_hd=use_hd,
+        reference_audio=reference_audio,
+        chatterbox=chatterbox,
+    )
+
+
+async def _render_pending_chunks(
+    pending: list[tuple[SpeechSynthesisRequest, Path, str]],
+    service: TextToSpeechService,
+    *,
+    workspace: Path,
+) -> None:
+    try:
+        if pending and isinstance(service, BatchTextToSpeechService):
+            await service.synthesize_many_to_files(
+                tuple((request, destination) for request, destination, _ in pending),
+                overwrite=True,
+            )
+        else:
+            for request, destination, _ in pending:
+                await service.synthesize_to_file(
+                    request,
+                    destination,
+                    overwrite=True,
+                )
+    finally:
+        for _, destination, fingerprint in pending:
+            if _is_readable_wav(destination):
+                _store_cached_chunk(workspace, fingerprint, destination)
+
+
+def _write_inspection_report(
+    node: PlanNode,
+    plan: BuildPlan,
+    target: BuildTarget,
+) -> None:
     master = _dependency_output(plan, node, BuildStage.MASTER)
     mp3 = _dependency_output(plan, node, BuildStage.ENCODE_MP3)
-    inspected = (inspect_audio(master), inspect_audio(mp3))
+    policy = _quality_policy(target)
+    inspected = (
+        inspect_audio(master, quality=policy),
+        inspect_audio(mp3, quality=policy),
+    )
     invalid = tuple(
         issue
         for inspection in inspected
@@ -1574,8 +2062,20 @@ def _write_inspection_report(node: PlanNode, plan: BuildPlan) -> None:
         {
             **runtime_metadata("audiobook-chapter-inspection"),
             "chapter_id": node.chapter_id,
-            "inspections": [inspection.to_dict() for inspection in inspected],
+            "inspections": [
+                inspection.to_dict(root=target.output_root) for inspection in inspected
+            ],
         },
+    )
+
+
+def _quality_policy(target: BuildTarget) -> AudioQualityPolicy:
+    return AudioQualityPolicy(
+        minimum_loudness_lufs=target.quality_min_lufs,
+        maximum_loudness_lufs=target.quality_max_lufs,
+        maximum_true_peak_dbfs=target.quality_max_true_peak_dbfs,
+        maximum_leading_silence_seconds=target.quality_max_leading_silence_seconds,
+        maximum_trailing_silence_seconds=target.quality_max_trailing_silence_seconds,
     )
 
 
@@ -1701,39 +2201,140 @@ def _concatenate_wav(paths: tuple[Path, ...], destination: Path) -> None:
     if not paths:
         raise ArtifactError("Synthesis produced no chunks")
     params: tuple[int, int, int] | None = None
-    frames: list[bytes] = []
-    for path in paths:
-        with wave.open(str(path), "rb") as source:
-            current = (
-                source.getnchannels(),
-                source.getsampwidth(),
-                source.getframerate(),
-            )
-            if params is None:
-                params = current
-            elif params != current:
-                raise ArtifactError("Synthesized chunks have incompatible WAV formats")
-            frames.append(source.readframes(source.getnframes()))
-    if params is None:
-        raise ArtifactError("Synthesis produced no readable WAV chunks")
-    output = io.BytesIO()
-    with wave.open(output, "wb") as writer:
-        writer.setnchannels(params[0])
-        writer.setsampwidth(params[1])
-        writer.setframerate(params[2])
-        for frame in frames:
-            writer.writeframes(frame)
-    atomic_write_bytes(destination, output.getvalue(), overwrite=True)
+    with (
+        atomic_output_path(destination, overwrite=True) as temporary,
+        wave.open(str(temporary), "wb") as writer,
+    ):
+        for path in paths:
+            with wave.open(str(path), "rb") as source:
+                current = (
+                    source.getnchannels(),
+                    source.getsampwidth(),
+                    source.getframerate(),
+                )
+                if params is None:
+                    params = current
+                    writer.setnchannels(params[0])
+                    writer.setsampwidth(params[1])
+                    writer.setframerate(params[2])
+                elif params != current:
+                    raise ArtifactError(
+                        "Synthesized chunks have incompatible WAV formats"
+                    )
+                while frames := source.readframes(64 * 1024):
+                    writer.writeframesraw(frames)
+        if params is None:
+            raise ArtifactError("Synthesis produced no readable WAV chunks")
 
 
 def _write_silence(path: Path, milliseconds: int, *, sample_rate: int) -> None:
-    output = io.BytesIO()
-    with wave.open(output, "wb") as writer:
+    remaining = int(sample_rate * milliseconds / 1_000)
+    with (
+        atomic_output_path(path, overwrite=True) as temporary,
+        wave.open(str(temporary), "wb") as writer,
+    ):
         writer.setnchannels(1)
         writer.setsampwidth(2)
         writer.setframerate(sample_rate)
-        writer.writeframes(b"\0\0" * int(sample_rate * milliseconds / 1_000))
-    atomic_write_bytes(path, output.getvalue(), overwrite=True)
+        silence = b"\0\0" * min(64 * 1024, remaining)
+        while remaining:
+            frames = min(remaining, len(silence) // 2)
+            writer.writeframesraw(silence[: frames * 2])
+            remaining -= frames
+
+
+def _speech_request_fingerprint(request: SpeechSynthesisRequest) -> str:
+    chatterbox = request.chatterbox
+    payload = {
+        "version": 1,
+        "text": request.text,
+        "voice": request.voice,
+        "backend": request.backend,
+        "backend_runtime": backend_runtime_fingerprint(request.backend),
+        "output_format": request.output_format.value,
+        "sample_rate": request.sample_rate,
+        "use_hd": request.use_hd,
+        "precision": request.precision,
+        "apply_custom_pronunciations": request.apply_custom_pronunciations,
+        "project": request.project,
+        "reference_audio_sha256": (
+            sha256_file(request.reference_audio) if request.reference_audio else None
+        ),
+        "chatterbox": (
+            {
+                "cfg_weight": chatterbox.cfg_weight,
+                "exaggeration": chatterbox.exaggeration,
+                "seed": chatterbox.seed,
+            }
+            if chatterbox is not None
+            else None
+        ),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _cached_chunk(workspace: Path, fingerprint: str) -> Path | None:
+    audio, metadata = _chunk_cache_paths(workspace, fingerprint)
+    if not audio.is_file() or not metadata.is_file():
+        return None
+    try:
+        raw = json.loads(metadata.read_text(encoding="utf-8"))
+        if (
+            not isinstance(raw, dict)
+            or raw.get("schema_version") != 1
+            or raw.get("fingerprint") != fingerprint
+            or raw.get("size") != audio.stat().st_size
+            or raw.get("sha256") != sha256_file(audio)
+            or not _is_readable_wav(audio)
+        ):
+            return None
+    except (OSError, json.JSONDecodeError):
+        return None
+    return audio
+
+
+def _store_cached_chunk(workspace: Path, fingerprint: str, source: Path) -> None:
+    audio, metadata = _chunk_cache_paths(workspace, fingerprint)
+    audio.parent.mkdir(parents=True, exist_ok=True)
+    copy_audio(source, audio, overwrite=True)
+    atomic_write_json(
+        metadata,
+        {
+            "schema_version": 1,
+            "kind": "synthesis_chunk",
+            "fingerprint": fingerprint,
+            "sha256": sha256_file(audio),
+            "size": audio.stat().st_size,
+        },
+    )
+
+
+def _materialize_cached_chunk(source: Path, destination: Path) -> None:
+    destination.unlink(missing_ok=True)
+    try:
+        os.link(source, destination)
+    except OSError:
+        copy_audio(source, destination, overwrite=True)
+
+
+def _chunk_cache_paths(workspace: Path, fingerprint: str) -> tuple[Path, Path]:
+    root = workspace / ".yakbox" / "cache" / "synthesis" / fingerprint[:2]
+    return root / f"{fingerprint}.wav", root / f"{fingerprint}.json"
+
+
+def _is_readable_wav(path: Path) -> bool:
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            return False
+        with wave.open(str(path), "rb") as source:
+            return (
+                source.getnchannels() > 0
+                and source.getsampwidth() > 0
+                and source.getframerate() > 0
+            )
+    except (OSError, EOFError, wave.Error):
+        return False
 
 
 def _chapter(document: NormalizedDocument, chapter_id: str) -> Chapter:
@@ -1785,11 +2386,10 @@ def _preflight_for_plan(
     synthesis_nodes = tuple(
         node for node in pending if node.stage is BuildStage.SYNTHESIZE
     )
-    texts = tuple(
-        chunk
-        for node in synthesis_nodes
-        for chunk in node.chunks
-        if _PAUSE.fullmatch(chunk) is None
+    texts = _uncached_synthesis_texts(
+        manifest,
+        profile,
+        synthesis_nodes,
     )
     hosted_work = (
         estimate_hosted_work(texts, price_per_character=price_per_character)
@@ -1830,6 +2430,45 @@ def _preflight_for_plan(
     )
 
 
+def _uncached_synthesis_texts(
+    manifest: AudiobookManifest,
+    profile: BackendProfile,
+    nodes: tuple[PlanNode, ...],
+) -> tuple[str, ...]:
+    (
+        voice,
+        sample_rate,
+        project,
+        use_hd,
+        reference_audio,
+        chatterbox,
+    ) = _resolved_speech(profile, manifest)
+    texts: list[str] = []
+    for node in nodes:
+        for chunk in node.chunks:
+            if _PAUSE.fullmatch(chunk) is not None:
+                continue
+            request = _new_speech_request(
+                chunk,
+                profile=profile,
+                voice=voice,
+                sample_rate=sample_rate,
+                project=project,
+                use_hd=use_hd,
+                reference_audio=reference_audio,
+                chatterbox=chatterbox,
+            )
+            if (
+                _cached_chunk(
+                    manifest.root,
+                    _speech_request_fingerprint(request),
+                )
+                is None
+            ):
+                texts.append(chunk)
+    return tuple(texts)
+
+
 def _select_stages(
     plan: BuildPlan,
     *,
@@ -1856,6 +2495,7 @@ def _select_stages(
         document_sha256=plan.document_sha256,
         fingerprint=fingerprint,
         nodes=plan.nodes,
+        complete_document=plan.complete_document,
     )
     return effective, selected, start, end
 
@@ -1949,7 +2589,12 @@ def _compare_to_previous_success(
         }
         for node in plan.nodes
     }
-    previous = _latest_successful_plan(manifest.root, plan.target)
+    previous = _latest_successful_plan(
+        manifest.root,
+        plan.target,
+        complete_document=plan.complete_document,
+        current_node_ids=frozenset(current),
+    )
     if previous is None:
         added = tuple(sorted(current))
         return BuildChangeSummary(
@@ -2002,6 +2647,9 @@ def _compare_to_previous_success(
 def _latest_successful_plan(
     workspace: Path,
     target: str,
+    *,
+    complete_document: bool,
+    current_node_ids: frozenset[str],
 ) -> tuple[str, dict[str, object]] | None:
     runs = workspace.resolve() / ".yakbox" / "runs"
     if not runs.exists():
@@ -2027,6 +2675,13 @@ def _latest_successful_plan(
             or previous_plan.get("schema_version") != 1
         ):
             raise BuildError(f"Unsupported prior run plan: {plan_path}")
+        prior_complete = previous_plan.get("complete_document", True)
+        if complete_document and prior_complete is not True:
+            continue
+        if not complete_document:
+            prior_ids = set(_serialized_plan_nodes(previous_plan))
+            if not current_node_ids.issubset(prior_ids):
+                continue
         return directory.name, previous_plan
     return None
 
@@ -2104,6 +2759,46 @@ def _find_resumable_run(
         if result.get("status") != "complete":
             return directory
     return None
+
+
+def _latest_failed_node_ids(  # noqa: C901
+    workspace: Path,
+    target: str,
+) -> set[str]:
+    runs = workspace.resolve() / ".yakbox" / "runs"
+    if not runs.exists():
+        return set()
+    for directory in sorted(
+        (path for path in runs.iterdir() if path.is_dir()),
+        key=lambda path: path.name,
+        reverse=True,
+    ):
+        plan_path = directory / "plan.json"
+        journal_path = directory / "journal.ndjson"
+        if not plan_path.is_file() or not journal_path.is_file():
+            continue
+        plan = _load_json_object(plan_path, "prior run plan")
+        if plan.get("target") != target:
+            continue
+        failed: set[str] = set()
+        try:
+            lines = journal_path.read_text(encoding="utf-8").splitlines()
+        except OSError as error:
+            raise BuildError(
+                f"Cannot read run journal {journal_path}: {error}"
+            ) from error
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                break
+            if isinstance(event, dict) and event.get("event") == "node_failed":
+                node_id = event.get("node_id")
+                if isinstance(node_id, str):
+                    failed.add(node_id)
+        if failed:
+            return failed
+    return set()
 
 
 def _load_json_object(path: Path, description: str) -> dict[str, object]:
@@ -2213,8 +2908,34 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^\w-]+", "-", value.casefold()).strip("-") or "audiobook"
 
 
-def _assembly_fingerprint(chapters: tuple[Path, ...]) -> str:
-    digest = hashlib.sha256(b"audiobook-m4b-v1")
+def _assembly_fingerprint(
+    chapters: tuple[Path, ...],
+    manifest: AudiobookManifest,
+    target: BuildTarget,
+) -> str:
+    digest = hashlib.sha256(b"audiobook-m4b-v2")
     for chapter in chapters:
         digest.update(bytes.fromhex(sha256_file(chapter)))
+    metadata = {
+        "book": {
+            "title": manifest.book.title,
+            "subtitle": manifest.book.subtitle,
+            "author": manifest.book.author,
+            "narrator": manifest.book.narrator,
+            "language": manifest.book.language,
+            "copyright": manifest.book.copyright,
+            "publisher": manifest.book.publisher,
+            "genre": manifest.book.genre,
+            "series": manifest.book.series,
+            "series_position": manifest.book.series_position,
+            "publication_date": manifest.book.publication_date,
+            "cover_sha256": (
+                sha256_file(manifest.book.cover)
+                if manifest.book.cover is not None
+                else None
+            ),
+        },
+        "bitrate": target.m4b_bitrate,
+    }
+    digest.update(json.dumps(metadata, sort_keys=True).encode())
     return digest.hexdigest()

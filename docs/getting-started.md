@@ -57,6 +57,8 @@ the default delivery set. M4B assembly is optional.
 Use `yakbox audition` for short, isolated profile comparisons. Use
 `yakbox preview` for a bounded sample that does not mutate production state.
 Then run `yakbox build`; unchanged nodes are digest-verified and reused.
+The local Chatterbox worker stays alive for the build so the model is loaded
+once, while hosted profiles use one pooled client and bounded concurrency.
 
 Interrupted builds retain append-only journals and resume by default:
 
@@ -71,7 +73,18 @@ stage selectors cannot make an incomplete graph releasable:
 ```console
 yakbox build --through synthesize
 yakbox build --from master
+yakbox build --stage inspect
+yakbox build --changed
+yakbox build --changed --since RELEASE_ID
+yakbox build --failed
+yakbox build --missing
 ```
+
+`--chapters 2-4,7` accepts ranges and comma-separated titles or chapter IDs.
+Targets can inherit from another target and define their normal stage range.
+Starter projects include `--mode draft`, `--mode proof`, and `--mode release`
+targets. Interactive builds show live node progress; `--json`, `--quiet`,
+non-TTY output, and `--no-progress` remain clean for automation.
 
 All commands accept `--help`. Put global machine-output options before the
 command, for example `yakbox --json plan`.

@@ -1,0 +1,10 @@
+{
+  "planner_300_chapters": {
+    "max_peak_bytes": 104857600,
+    "max_seconds": 5.0
+  },
+  "stream_10000_rows": {
+    "max_peak_bytes": 8388608,
+    "max_seconds": 5.0
+  }
+}

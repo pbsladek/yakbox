@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -12,6 +13,7 @@ from yakbox.cloud import (
     AudioFormat,
     ClientOptions,
     ResembleClient,
+    ResembleSpeechService,
     RetryPolicy,
     StreamRequest,
     SynthesisRequest,
@@ -25,7 +27,11 @@ from yakbox.cloud.errors import (
 )
 from yakbox.cloud.usage import HostedUsageGate
 from yakbox.errors import ValidationError
-from yakbox.speech import HostedUsageBudget, HostedUsageSnapshot
+from yakbox.speech import (
+    HostedUsageBudget,
+    HostedUsageSnapshot,
+    SpeechSynthesisRequest,
+)
 
 
 @pytest.mark.asyncio
@@ -70,6 +76,49 @@ async def test_synthesis_retries_and_decodes(tmp_path: Path) -> None:
     assert result.path.read_bytes() == audio
     assert result.attempts == 2
     assert result.request_id == "req-1"
+
+
+@pytest.mark.asyncio
+async def test_speech_service_batch_uses_one_bounded_dispatcher(
+    tmp_path: Path,
+) -> None:
+    active = 0
+    maximum_active = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal active, maximum_active
+        active += 1
+        maximum_active = max(maximum_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return httpx.Response(
+            200,
+            json={
+                "audio_content": base64.b64encode(b"RIFF-audio").decode(),
+                "output_format": "wav",
+            },
+        )
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    options = ClientOptions(synthesis_base_url="https://example.test")
+    async with ResembleClient("secret", options=options, http_client=http) as client:
+        service = ResembleSpeechService(client, concurrency=3)
+        artifacts = await service.synthesize_many_to_files(
+            tuple(
+                (
+                    SpeechSynthesisRequest(text=f"line {index}", voice="voice"),
+                    tmp_path / f"{index}.wav",
+                )
+                for index in range(8)
+            )
+        )
+        await service.aclose()
+    await http.aclose()
+
+    assert maximum_active == 3
+    assert [artifact.path.name for artifact in artifacts] == [
+        f"{index}.wav" for index in range(8)
+    ]
 
 
 @pytest.mark.asyncio

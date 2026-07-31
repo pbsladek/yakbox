@@ -10,6 +10,7 @@ import asyncio
 from pathlib import Path
 
 from yakbox.audiobook import (
+    BuildProgress,
     build_audiobook,
     load_manifest,
     normalize_sources,
@@ -25,13 +26,25 @@ document = normalize_sources(
 plan = plan_audiobook(manifest, document, target_name="default")
 print(plan.fingerprint)
 
-result = asyncio.run(build_audiobook(manifest, target_name="default"))
+
+def progress(event: BuildProgress) -> None:
+    print(event.completed, event.total, event.node_id, event.event)
+
+
+result = asyncio.run(
+    build_audiobook(manifest, target_name="default", progress=progress)
+)
 print(result.run_id)
 ```
 
 Planning is pure with respect to models, workers, network, and artifacts.
 Build operations use target locks, append-only journals, atomic files, and
 digest-verified reuse.
+
+`audit_pronunciations`, `select_build_chapters`,
+`inventory_synthesis_cache`, `plan_cache_cleanup`, `diff_releases`, and their
+typed result models are also public application services. Presentation code
+does not need to parse terminal output or inspect private state.
 
 ## Direct speech service
 

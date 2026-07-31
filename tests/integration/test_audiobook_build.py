@@ -12,17 +12,22 @@ from tests.schema_helpers import validate_contract
 
 import yakbox.audiobook.build as build_module
 from yakbox.audiobook import (
+    apply_cache_cleanup,
     apply_cleanup,
     assemble_release,
     audition_audiobook,
     build_audiobook,
     check_release,
+    diff_releases,
     inventory_artifacts,
+    inventory_synthesis_cache,
     load_manifest,
+    plan_cache_cleanup,
     plan_cleanup,
     preflight_audiobook_build,
     preview_audiobook,
     restore_trash,
+    select_build_chapters,
 )
 from yakbox.audiobook.artifacts import ArtifactKind
 from yakbox.audiobook.planner import plan_audiobook
@@ -118,6 +123,7 @@ async def test_fake_build_release_resume_and_cleanup(book_workspace: Path) -> No
         validate_contract("audiobook-chapter-inspection", report)
         for inspection in report["inspections"]:
             validate_contract("audio-inspection", inspection)
+
     cleanup = plan_cleanup(
         manifest.root,
         manifest.target("default").output_root,
@@ -160,6 +166,42 @@ async def test_fake_build_release_resume_and_cleanup(book_workspace: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_build_reports_monotonic_application_progress(
+    book_workspace: Path,
+) -> None:
+    events: list[build_module.BuildProgress] = []
+
+    result = await build_audiobook(
+        load_manifest(book_workspace / "yakbox.toml"),
+        through_stage="synthesize",
+        progress=events.append,
+    )
+
+    assert result.status == "complete"
+    assert [event.event for event in events] == ["started", "completed"]
+    assert [event.completed for event in events] == [0, 1]
+    assert all(event.total == 1 for event in events)
+
+
+@pytest.mark.asyncio
+async def test_synthesis_cache_has_safe_inventory_and_explicit_cleanup(
+    book_workspace: Path,
+) -> None:
+    manifest = load_manifest(book_workspace / "yakbox.toml")
+    result = await build_audiobook(manifest, through_stage="synthesize")
+    inventory = inventory_synthesis_cache(manifest.root)
+
+    assert result.artifacts[0].path.is_file()
+    assert len(inventory.entries) == 2
+    assert inventory.invalid_entries == 0
+    cleanup = plan_cache_cleanup(manifest.root, max_bytes=0)
+    assert len(cleanup.candidates) == 2
+    assert apply_cache_cleanup(cleanup) == 2
+    assert inventory_synthesis_cache(manifest.root).entries == ()
+    assert result.artifacts[0].path.is_file()
+
+
+@pytest.mark.asyncio
 async def test_release_snapshots_survive_changed_source_rebuild(
     book_workspace: Path,
 ) -> None:
@@ -184,7 +226,13 @@ async def test_release_snapshots_survive_changed_source_rebuild(
         ),
         encoding="utf-8",
     )
-    rebuilt = await build_audiobook(load_manifest(manifest.path))
+    changed_manifest = load_manifest(manifest.path)
+    assert select_build_chapters(
+        changed_manifest,
+        selection="changed",
+        since_release=release.release_manifest,
+    ) == ("0001-chapter-one",)
+    rebuilt = await build_audiobook(changed_manifest)
 
     assert rebuilt.status == "complete"
     assert snapshot_master.read_bytes() == snapshot_master_bytes
@@ -193,6 +241,17 @@ async def test_release_snapshots_survive_changed_source_rebuild(
     assert release_document["master_wavs"][0]["path"].startswith(
         f"release/{release.release_manifest.parent.name}/wav/"
     )
+    next_release = check_release(changed_manifest, write_manifest=True)
+    assert next_release.release_manifest is not None
+    difference = diff_releases(
+        release.release_manifest,
+        next_release.release_manifest,
+    )
+    assert difference.changed_artifacts == (
+        "delivery_mp3s/0001-chapter-one.mp3",
+        "master_wavs/0001-chapter-one.wav",
+    )
+    assert "document_sha256" in difference.metadata_changes
 
 
 @pytest.mark.asyncio
@@ -254,8 +313,25 @@ async def test_preview_is_isolated_from_production(book_workspace: Path) -> None
 @pytest.mark.asyncio
 async def test_audition_matrix_is_deterministic_and_reports_persistable_settings(
     book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manifest = load_manifest(book_workspace / "yakbox.toml")
+    original_open = build_module.open_speech_backend
+    opened = 0
+
+    @asynccontextmanager
+    async def tracked_open(
+        name: str,
+        *,
+        api_key: str | None = None,
+        device: str | None = None,
+    ) -> AsyncIterator[TextToSpeechService]:
+        nonlocal opened
+        opened += 1
+        async with original_open(name, api_key=api_key, device=device) as service:
+            yield service
+
+    monkeypatch.setattr(build_module, "open_speech_backend", tracked_open)
     records = await audition_audiobook(
         manifest,
         profiles=("default",),
@@ -274,6 +350,7 @@ async def test_audition_matrix_is_deterministic_and_reports_persistable_settings
         comparison["resolved_settings"]["matrix_overrides"]["sample_rate"]
         for comparison in report["comparisons"]
     ] == [8000, 16000]
+    assert opened == 1
     assert "profiles.default" in report["comparisons"][0]["persist_as"]
     validate_contract("audiobook-audition", report)
 
@@ -506,6 +583,29 @@ class _BatchingFakeService(FakeSpeechService):
         )
 
 
+class _FailingFakeService(FakeSpeechService):
+    def __init__(self, *, fail_after: int | None) -> None:
+        self.fail_after = fail_after
+        self.calls = 0
+        self.delegate = FakeSpeechService()
+
+    async def synthesize_to_file(
+        self,
+        request: SpeechSynthesisRequest,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+    ) -> SpeechArtifact:
+        self.calls += 1
+        if self.fail_after is not None and self.calls > self.fail_after:
+            raise BuildError("injected chunk failure")
+        return await self.delegate.synthesize_to_file(
+            request,
+            destination,
+            overwrite=overwrite,
+        )
+
+
 class _JournaledHostedService(_HostedTrackingService):
     def __init__(self) -> None:
         super().__init__()
@@ -657,6 +757,54 @@ async def test_local_chapter_chunks_share_one_isolated_worker_request(
 
 
 @pytest.mark.asyncio
+async def test_failed_chapter_resumes_from_verified_file_backed_chunk_cache(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = book_workspace / "yakbox.toml"
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8").replace(
+            "chunk_chars = 100",
+            "chunk_chars = 10",
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_manifest(manifest_path)
+    plan = plan_audiobook(
+        manifest,
+        normalize_sources(
+            manifest.sources,
+            pronunciations=manifest.pronunciations,
+        ),
+    )
+    synthesis = next(node for node in plan.nodes if node.stage.value == "synthesize")
+    expected_requests = sum(
+        not chunk.startswith("__YAKBOX_PAUSE_MS=") for chunk in synthesis.chunks
+    )
+    failed = _FailingFakeService(fail_after=1)
+    resumed = _FailingFakeService(fail_after=None)
+    services = iter((failed, resumed))
+
+    @asynccontextmanager
+    async def backend(
+        _name: str, **_options: object
+    ) -> AsyncIterator[TextToSpeechService]:
+        yield next(services)
+
+    monkeypatch.setattr(build_module, "open_speech_backend", backend)
+
+    with pytest.raises(BuildError, match=r"book\.md:\d+-\d+.*injected chunk failure"):
+        await build_audiobook(manifest, through_stage="synthesize")
+    cached = tuple((book_workspace / ".yakbox" / "cache" / "synthesis").rglob("*.wav"))
+    assert len(cached) == 1
+
+    result = await build_audiobook(manifest, through_stage="synthesize")
+
+    assert result.status == "complete"
+    assert resumed.calls == expected_requests - 1
+
+
+@pytest.mark.asyncio
 async def test_hosted_audiobook_reservation_survives_failed_run_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -712,9 +860,11 @@ async def test_hosted_audiobook_reservation_survives_failed_run_resume(
     raw.unlink()
     raw.with_suffix(".wav.artifact.json").unlink()
     monkeypatch.setattr(build_module, "master_wav", original_master)
-    with pytest.raises(BuildError, match="Build failed"):
-        await build_audiobook(manifest, api_key="test")
+    resumed = await build_audiobook(manifest, api_key="test")
 
+    assert resumed.status == "complete"
+    assert resumed.preflight.hosted_work is not None
+    assert resumed.preflight.hosted_work.logical_items == 0
     assert len(services) == 2
     assert services[1].provider_sends == 0
     restored = await services[1].usage_snapshot()

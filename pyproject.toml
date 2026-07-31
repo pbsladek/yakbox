@@ -107,12 +107,13 @@ addopts = [
     "localhost,127.0.0.0/8,::1/128",
     "--allow-unix-socket",
     "-m",
-    "not live",
+    "not live and not performance",
 ]
 asyncio_mode = "strict"
 testpaths = ["tests"]
 markers = [
     "live: explicit opt-in tests that use a provider or real model",
+    "performance: scheduled time and peak-memory regression baselines",
 ]
 
 [tool.coverage.run]

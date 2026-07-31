@@ -2,19 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from yakbox._files import sha256_file
 from yakbox.audiobook.manifest import AudiobookManifest
 from yakbox.audiobook.sources import (
     Chapter,
     NormalizedDocument,
     Pause,
+    SourceLocation,
     SpeechSegment,
     chunk_text,
 )
 from yakbox.contracts import runtime_metadata
+from yakbox.fingerprints import backend_fingerprint, media_tool_fingerprint
 
 
 class BuildStage(StrEnum):
@@ -34,6 +38,7 @@ class PlanNode:
     dependencies: tuple[str, ...]
     output: Path
     chunks: tuple[str, ...] = ()
+    chunk_sources: tuple[SourceLocation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,12 +49,13 @@ class BuildPlan:
     document_sha256: str
     fingerprint: str
     nodes: tuple[PlanNode, ...]
+    complete_document: bool = True
 
     def to_dict(self, *, root: Path | None = None) -> dict[str, object]:
         def path_value(path: Path) -> str:
             if root is not None and path.is_relative_to(root):
-                return str(path.relative_to(root))
-            return str(path)
+                return path.relative_to(root).as_posix()
+            return path.as_posix()
 
         return {
             **runtime_metadata("audiobook-plan"),
@@ -57,6 +63,7 @@ class BuildPlan:
             "profile": self.profile,
             "document_sha256": self.document_sha256,
             "fingerprint": self.fingerprint,
+            "complete_document": self.complete_document,
             "nodes": [
                 {
                     "id": node.id,
@@ -69,8 +76,17 @@ class BuildPlan:
                         {
                             "sha256": hashlib.sha256(chunk.encode()).hexdigest(),
                             "characters": len(chunk),
+                            "source": {
+                                "path": path_value(source.path),
+                                "start_line": source.start_line,
+                                "end_line": source.end_line,
+                            },
                         }
-                        for chunk in node.chunks
+                        for chunk, source in zip(
+                            node.chunks,
+                            node.chunk_sources,
+                            strict=True,
+                        )
                     ],
                 }
                 for node in self.nodes
@@ -90,14 +106,42 @@ def plan_audiobook(
     profile = manifest.profile(profile_override or target.profile)
     chapters = _select_chapters(document.chapters, chapter_selector)
     profile_payload = json.dumps(asdict(profile), sort_keys=True, default=str)
+    synthesis_runtime = backend_fingerprint(profile)
+    media_runtime = media_tool_fingerprint()
+    book_payload = json.dumps(
+        {
+            "title": manifest.book.title,
+            "subtitle": manifest.book.subtitle,
+            "author": manifest.book.author,
+            "narrator": manifest.book.narrator,
+            "language": manifest.book.language,
+            "copyright": manifest.book.copyright,
+            "publisher": manifest.book.publisher,
+            "genre": manifest.book.genre,
+            "series": manifest.book.series,
+            "series_position": manifest.book.series_position,
+            "isbn": manifest.book.isbn,
+            "publication_date": manifest.book.publication_date,
+            "cover_sha256": (
+                sha256_file(manifest.book.cover)
+                if manifest.book.cover is not None
+                else None
+            ),
+        },
+        sort_keys=True,
+    )
     nodes: list[PlanNode] = []
     for chapter in chapters:
         chunk_items: list[str] = []
+        chunk_sources: list[SourceLocation] = []
         for item in chapter.segments:
             if isinstance(item, SpeechSegment):
-                chunk_items.extend(chunk_text(item.text, target.chunk_chars))
+                segment_chunks = chunk_text(item.text, target.chunk_chars)
+                chunk_items.extend(segment_chunks)
+                chunk_sources.extend(item.source for _ in segment_chunks)
             elif isinstance(item, Pause):
                 chunk_items.append(f"__YAKBOX_PAUSE_MS={item.milliseconds}__")
+                chunk_sources.append(item.source)
         chunks = tuple(chunk_items)
         speech_text = "\n".join(chunks)
         synthesis_fingerprint = _fingerprint(
@@ -105,6 +149,7 @@ def plan_audiobook(
             chapter.id,
             speech_text,
             profile_payload,
+            synthesis_runtime,
             str(target.chunk_chars),
         )
         raw_output = target.output_root / "raw" / f"{chapter.id}.wav"
@@ -118,6 +163,7 @@ def plan_audiobook(
                 dependencies=(),
                 output=raw_output,
                 chunks=chunks,
+                chunk_sources=tuple(chunk_sources),
             )
         )
         master_fingerprint = _fingerprint(
@@ -125,6 +171,7 @@ def plan_audiobook(
             synthesis_fingerprint,
             str(target.wav_sample_rate),
             str(target.mastering),
+            media_runtime,
         )
         master_id = f"{chapter.id}:master"
         master_output = target.output_root / "mastered" / f"{chapter.id}.wav"
@@ -138,7 +185,15 @@ def plan_audiobook(
                 output=master_output,
             )
         )
-        mp3_fingerprint = _fingerprint("mp3-v1", master_fingerprint, target.mp3_bitrate)
+        mp3_fingerprint = _fingerprint(
+            "mp3-v2",
+            master_fingerprint,
+            target.mp3_bitrate,
+            chapter.title,
+            str(chapter.order),
+            book_payload,
+            media_runtime,
+        )
         mp3_id = f"{chapter.id}:encode_mp3"
         mp3_output = target.output_root / "release" / "mp3" / f"{chapter.id}.mp3"
         nodes.append(
@@ -156,7 +211,16 @@ def plan_audiobook(
                 id=f"{chapter.id}:inspect",
                 stage=BuildStage.INSPECT,
                 chapter_id=chapter.id,
-                fingerprint=_fingerprint("inspect-v1", mp3_fingerprint),
+                fingerprint=_fingerprint(
+                    "inspect-v2",
+                    mp3_fingerprint,
+                    media_runtime,
+                    str(target.quality_min_lufs),
+                    str(target.quality_max_lufs),
+                    str(target.quality_max_true_peak_dbfs),
+                    str(target.quality_max_leading_silence_seconds),
+                    str(target.quality_max_trailing_silence_seconds),
+                ),
                 dependencies=(master_id, mp3_id),
                 output=target.output_root / "reports" / f"{chapter.id}.inspection.json",
             )
@@ -176,6 +240,7 @@ def plan_audiobook(
         document_sha256=document.sha256,
         fingerprint=plan_fingerprint,
         nodes=tuple(nodes),
+        complete_document=chapter_selector is None,
     )
 
 
@@ -197,12 +262,30 @@ def _select_chapters(
 ) -> tuple[Chapter, ...]:
     if selector is None:
         return chapters
+    terms = tuple(term.strip() for term in selector.split(",") if term.strip())
+    if not terms:
+        raise ValueError("Chapter selector must not be empty")
+    orders: set[int] = set()
+    labels: list[str] = []
+    for term in terms:
+        match = re.fullmatch(r"(\d+)-(\d+)", term)
+        if match:
+            start, end = (int(value) for value in match.groups())
+            if start > end:
+                raise ValueError(f"Chapter range starts after it ends: {term}")
+            orders.update(range(start, end + 1))
+        elif term.isdecimal():
+            orders.add(int(term))
+        else:
+            labels.append(term)
     selected = tuple(
         chapter
         for chapter in chapters
-        if selector == chapter.id
-        or selector.casefold() in chapter.title.casefold()
-        or selector == str(chapter.order)
+        if chapter.order in orders
+        or any(
+            label == chapter.id or label.casefold() in chapter.title.casefold()
+            for label in labels
+        )
     )
     if not selected:
         raise ValueError(f"No chapter matches {selector!r}")

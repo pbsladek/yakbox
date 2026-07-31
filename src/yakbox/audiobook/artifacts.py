@@ -46,7 +46,7 @@ class ArtifactRecord:
         value = asdict(self)
         value.update(runtime_metadata("audiobook-artifact"))
         value["kind"] = self.kind.value
-        value["path"] = str(self.path.resolve().relative_to(root.resolve()))
+        value["path"] = self.path.resolve().relative_to(root.resolve()).as_posix()
         value["dependencies"] = list(self.dependencies)
         return value
 

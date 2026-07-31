@@ -64,15 +64,18 @@ def estimate_hosted_work(
         not price_per_character.is_finite() or price_per_character < 0
     ):
         raise ValidationError("price_per_character must be finite and non-negative")
-    materialized = tuple(texts)
-    characters = sum(len(text) for text in materialized)
+    logical_items = 0
+    characters = 0
+    for text in texts:
+        logical_items += 1
+        characters += len(text)
     maximum_characters = characters * max_attempts
     return HostedWorkEstimate(
-        logical_items=len(materialized),
+        logical_items=logical_items,
         logical_characters=characters,
         max_attempts=max_attempts,
-        minimum_provider_requests=len(materialized),
-        maximum_provider_requests=len(materialized) * max_attempts,
+        minimum_provider_requests=logical_items,
+        maximum_provider_requests=logical_items * max_attempts,
         minimum_submitted_characters=characters,
         maximum_submitted_characters=maximum_characters,
         minimum_estimated_spend=(

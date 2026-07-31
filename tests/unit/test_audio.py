@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from yakbox.audio.assemble import assemble_m4b
-from yakbox.audio.inspect import AudioInspection, inspect_audio
+from yakbox.audio.inspect import AudioInspection, AudioQualityPolicy, inspect_audio
 from yakbox.audio.master import master_wav
 from yakbox.errors import ArtifactError
 
@@ -40,6 +40,59 @@ def test_inspection_translates_timeout_and_malformed_provider_output(
         pytest.raises(ArtifactError, match="Invalid FFprobe response"),
     ):
         inspect_audio(audio)
+
+
+def test_inspection_reports_loudness_silence_and_quality_gates(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "quality.wav"
+    audio.write_bytes(b"RIFF-quality")
+    probe = subprocess.CompletedProcess(
+        args=["ffprobe"],
+        returncode=0,
+        stdout=(
+            '{"streams":[{"codec_name":"pcm_s16le","sample_rate":"44100",'
+            '"channels":1}],"format":{"format_name":"wav","duration":"10.0",'
+            f'"size":"{audio.stat().st_size}"'
+            "}}"
+        ),
+        stderr="",
+    )
+    quality = subprocess.CompletedProcess(
+        args=["ffmpeg"],
+        returncode=0,
+        stdout="",
+        stderr=(
+            "silence_start: 0\nsilence_end: 0.5\nsilence_start: 8.0\n"
+            "Integrated loudness:\n I: -24.0 LUFS\n"
+            "Loudness range:\n LRA: 4.0 LU\n"
+            "True peak:\n Peak: -0.5 dBFS\n"
+        ),
+    )
+
+    with (
+        patch("yakbox.audio.inspect.shutil.which", return_value="/ffprobe"),
+        patch(
+            "yakbox.audio.inspect.subprocess.run",
+            side_effect=[probe, quality],
+        ),
+    ):
+        inspection = inspect_audio(
+            audio,
+            quality=AudioQualityPolicy(
+                minimum_loudness_lufs=-23.0,
+                maximum_true_peak_dbfs=-1.0,
+                maximum_trailing_silence_seconds=1.0,
+            ),
+        )
+
+    assert inspection.integrated_loudness_lufs == -24.0
+    assert inspection.true_peak_dbfs == -0.5
+    assert inspection.loudness_range_lu == 4.0
+    assert inspection.leading_silence_seconds == 0.5
+    assert inspection.trailing_silence_seconds == 2.0
+    assert not inspection.valid
+    assert len(inspection.issues) == 3
 
 
 def test_mastering_rejects_missing_output_and_cleans_temporary_file(

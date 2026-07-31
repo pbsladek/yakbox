@@ -209,7 +209,7 @@ def apply_cleanup(plan: CleanupPlan) -> Path:
                     {
                         "id": candidate.id,
                         "original": str(candidate.path),
-                        "quarantined": str(destination.relative_to(trash)),
+                        "quarantined": destination.relative_to(trash).as_posix(),
                         "metadata_original": str(candidate.metadata_path),
                         "metadata_quarantined": str(
                             metadata_destination.relative_to(trash)

@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import tempfile
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -123,6 +124,44 @@ MAX_CONCURRENCY = 100
 MAX_SYNTHESIS_CHARACTERS = 3_000
 
 
+class _RowSpool:
+    def __init__(self, rows: Iterable[BatchRow]) -> None:
+        self._stream = tempfile.SpooledTemporaryFile(  # noqa: SIM115
+            max_size=1024 * 1024,
+            mode="w+t",
+            encoding="utf-8",
+            newline="\n",
+        )
+        digest = hashlib.sha256()
+        self.count = 0
+        for row in rows:
+            self._stream.write(json.dumps(asdict(row), ensure_ascii=False) + "\n")
+            digest.update(str(row.index).encode())
+            digest.update(b"\0")
+            digest.update(row.text.encode())
+            digest.update(b"\0")
+            self.count += 1
+        self.input_digest = digest.hexdigest()
+        self._stream.flush()
+
+    def rows(self) -> Iterator[BatchRow]:
+        self._stream.seek(0)
+        for line in self._stream:
+            raw = json.loads(line)
+            yield BatchRow(
+                index=int(raw["index"]),
+                text=str(raw["text"]),
+                row_id=_string_or_none(raw.get("row_id")),
+                voice_uuid=_string_or_none(raw.get("voice_uuid")),
+                title=_string_or_none(raw.get("title")),
+                output=_string_or_none(raw.get("output")),
+                validation_error=_string_or_none(raw.get("validation_error")),
+            )
+
+    def close(self) -> None:
+        self._stream.close()
+
+
 async def run_cloud_batch(
     rows: Iterable[BatchRow],
     service: TextToSpeechService,
@@ -146,15 +185,64 @@ async def run_cloud_batch(
     usage_gate: HostedUsageGate | None = None,
     preflight: HostedWorkEstimate | None = None,
 ) -> BatchReport:
+    spool = _RowSpool(rows)
+    try:
+        return await _run_cloud_batch_spooled(
+            spool,
+            service,
+            default_voice=default_voice,
+            project_uuid=project_uuid,
+            out_dir=out_dir,
+            concurrency=concurrency,
+            output_format=output_format,
+            use_hd=use_hd,
+            precision=precision,
+            sample_rate=sample_rate,
+            apply_custom_pronunciations=apply_custom_pronunciations,
+            overwrite=overwrite,
+            dry_run=dry_run,
+            progress=progress,
+            journal_path=journal_path,
+            report_path=report_path,
+            resume_path=resume_path,
+            write_report=write_report,
+            usage_gate=usage_gate,
+            preflight=preflight,
+        )
+    finally:
+        spool.close()
+
+
+async def _run_cloud_batch_spooled(
+    rows: _RowSpool,
+    service: TextToSpeechService,
+    *,
+    default_voice: str | None,
+    project_uuid: str | None,
+    out_dir: Path,
+    concurrency: int = 5,
+    output_format: AudioFormat = AudioFormat.WAV,
+    use_hd: bool = False,
+    precision: str | None = None,
+    sample_rate: int | None = None,
+    apply_custom_pronunciations: bool = False,
+    overwrite: bool = False,
+    dry_run: bool = False,
+    progress: ProgressCallback | None = None,
+    journal_path: Path | None = None,
+    report_path: Path | None = None,
+    resume_path: Path | None = None,
+    write_report: bool = True,
+    usage_gate: HostedUsageGate | None = None,
+    preflight: HostedWorkEstimate | None = None,
+) -> BatchReport:
     if not 1 <= concurrency <= MAX_CONCURRENCY:
         raise ValidationError("concurrency must be between 1 and 100")
-    normalized = tuple(rows)
-    input_digest = _input_digest(normalized)
+    input_digest = rows.input_digest
     run_id = uuid4().hex
     started_at = datetime.now(UTC).isoformat()
     journal = journal_path or out_dir / "batch-journal.ndjson"
     report = report_path or out_dir / "batch-report.json"
-    resolved_rows = _resolve_outputs(normalized, out_dir, output_format)
     options: dict[str, object] = {
         "project_uuid": project_uuid,
         "format": output_format.value,
@@ -171,7 +259,8 @@ async def run_cloud_batch(
             resume_path,
             input_digest=input_digest,
             options=options,
-            resolved_rows=resolved_rows,
+            resolved_rows=_resolve_outputs(rows.rows(), out_dir, output_format),
+            row_count=rows.count,
             output_format=output_format,
             default_voice=default_voice,
         )
@@ -186,7 +275,9 @@ async def run_cloud_batch(
     if dry_run:
         results = tuple(
             _validation_result(row, destination, default_voice, output_format)
-            for row, destination in resolved_rows
+            for row, destination in _resolve_outputs(
+                rows.rows(), out_dir, output_format
+            )
         )
         return BatchReport(
             schema_version=1,
@@ -237,7 +328,9 @@ async def run_cloud_batch(
             )
 
         async def producer() -> None:
-            for row, destination in resolved_rows:
+            for row, destination in _resolve_outputs(
+                rows.rows(), out_dir, output_format
+            ):
                 if row.index in resumed:
                     result = resumed[row.index]
                     results[row.index] = result
@@ -306,7 +399,9 @@ async def run_cloud_batch(
             )
 
         async def finalize_interruption(reason: str) -> None:
-            for row, destination in resolved_rows:
+            for row, destination in _resolve_outputs(
+                rows.rows(), out_dir, output_format
+            ):
                 if row.index in results:
                     continue
                 result = _not_run(row, destination, output_format, reason)
@@ -320,7 +415,7 @@ async def run_cloud_batch(
                 started_at=started_at,
                 ended_at=datetime.now(UTC).isoformat(),
                 journal_path=journal.resolve(),
-                results=tuple(results[row.index] for row in normalized),
+                results=tuple(results[row.index] for row in rows.rows()),
                 aborted=True,
                 abort_reason=reason,
                 usage=usage,
@@ -364,7 +459,7 @@ async def run_cloud_batch(
                 else None,
             }
         )
-    ordered = tuple(results[row.index] for row in normalized)
+    ordered = tuple(results[row.index] for row in rows.rows())
     batch_report = BatchReport(
         schema_version=1,
         run_id=run_id,
@@ -516,10 +611,9 @@ async def _synthesize_row(
 
 
 def _resolve_outputs(
-    rows: tuple[BatchRow, ...], out_dir: Path, output_format: AudioFormat
-) -> tuple[tuple[BatchRow, Path], ...]:
+    rows: Iterable[BatchRow], out_dir: Path, output_format: AudioFormat
+) -> Iterator[tuple[BatchRow, Path]]:
     used: dict[str, int] = {}
-    resolved: list[tuple[BatchRow, Path]] = []
     for row in rows:
         requested = row.output
         if requested:
@@ -534,8 +628,7 @@ def _resolve_outputs(
         used[name.casefold()] = count
         if count > 1:
             name = f"{stem}-{count}{suffix}"
-        resolved.append((row, (out_dir / name).resolve()))
-    return tuple(resolved)
+        yield row, (out_dir / name).resolve()
 
 
 def _validation_error(row: BatchRow, voice: str | None) -> str | None:
@@ -662,16 +755,6 @@ def _request_hash(
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _input_digest(rows: tuple[BatchRow, ...]) -> str:
-    digest = hashlib.sha256()
-    for row in rows:
-        digest.update(str(row.index).encode())
-        digest.update(b"\0")
-        digest.update(row.text.encode())
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
 async def _record(writer: BatchJournalWriter, result: BatchResult) -> None:
     record = result.to_dict()
     record.update(
@@ -714,7 +797,8 @@ def _load_resume(
     *,
     input_digest: str,
     options: dict[str, object],
-    resolved_rows: tuple[tuple[BatchRow, Path], ...],
+    resolved_rows: Iterable[tuple[BatchRow, Path]],
+    row_count: int,
     output_format: AudioFormat,
     default_voice: str | None,
 ) -> tuple[Path, str, str, dict[int, BatchResult], HostedUsageSnapshot]:
@@ -739,15 +823,32 @@ def _load_resume(
     started_at = str(header.get("started_at", ""))
     if not run_id or not started_at:
         raise ResumeMismatchError("Resume journal header is incomplete")
-    current = {row.index: (row, destination) for row, destination in resolved_rows}
-    completed: dict[int, BatchResult] = {}
+    successful = {
+        index: record
+        for record in records[1:]
+        if record.get("record_type") == "row"
+        and record.get("status") == "ok"
+        and isinstance(index := record.get("index"), int)
+    }
+    attempts_by_index: dict[int, int] = {}
     for record in records[1:]:
-        if record.get("record_type") != "row" or record.get("status") != "ok":
+        if record.get("record_type") != "row" or record.get("status") == "skipped":
             continue
-        index = record.get("index")
-        if not isinstance(index, int) or index not in current:
+        index = _integer_or_none(record.get("index"))
+        if index is not None:
+            attempts_by_index[index] = attempts_by_index.get(index, 0) + (
+                _integer_or_none(record.get("attempts")) or 0
+            )
+    completed: dict[int, BatchResult] = {}
+    fallback_attempts = 0
+    fallback_characters = 0
+    for row, destination in resolved_rows:
+        count = attempts_by_index.get(row.index, 0)
+        fallback_attempts += count
+        fallback_characters += count * len(row.text)
+        record = successful.get(row.index)
+        if record is None:
             continue
-        row, destination = current[index]
         project = _string_or_none(options.get("project_uuid"))
         precision = _string_or_none(options.get("precision"))
         sample_rate = _integer_or_none(options.get("sample_rate"))
@@ -779,8 +880,8 @@ def _load_resume(
         attempts = _integer_or_none(record.get("attempts")) or 0
         request_id = _string_or_none(record.get("request_id"))
         issues = _string_tuple(record.get("issues"))
-        completed[index] = BatchResult(
-            index=index,
+        completed[row.index] = BatchResult(
+            index=row.index,
             row_id=row.row_id,
             status=BatchStatus.SKIPPED,
             path=recorded_path,
@@ -811,22 +912,10 @@ def _load_resume(
             ambiguous_attempts=_integer_or_none(usage.get("ambiguous_attempts")) or 0,
         )
         return resume_path, run_id, started_at, completed, prior_usage
-    attempts = 0
-    characters = 0
-    rows_by_index = {row.index: row for row, _ in resolved_rows}
-    for record in records[1:]:
-        if record.get("record_type") != "row" or record.get("status") == "skipped":
-            continue
-        count = _integer_or_none(record.get("attempts")) or 0
-        index = _integer_or_none(record.get("index"))
-        if index is None or index not in rows_by_index:
-            continue
-        attempts += count
-        characters += count * len(rows_by_index[index].text)
     prior_usage = HostedUsageSnapshot(
-        logical_items=len(resolved_rows),
-        provider_attempts=attempts,
-        submitted_characters=characters,
+        logical_items=row_count,
+        provider_attempts=fallback_attempts,
+        submitted_characters=fallback_characters,
         estimated_spend=None,
         currency=None,
         ambiguous_attempts=0,

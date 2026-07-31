@@ -15,10 +15,18 @@ from yakbox.errors import ValidationError
 @dataclass(frozen=True, slots=True)
 class BookMetadata:
     title: str
+    subtitle: str | None = None
     author: str | None = None
     narrator: str | None = None
     language: str = "en"
     copyright: str | None = None
+    publisher: str | None = None
+    genre: str | None = None
+    series: str | None = None
+    series_position: str | None = None
+    isbn: str | None = None
+    publication_date: str | None = None
+    cover: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +64,7 @@ class ResembleOptions:
 
 type BackendOptions = FakeOptions | ChatterboxOptions | ResembleOptions
 MAX_PROVIDER_CONCURRENCY = 100
+MAX_MEDIA_CONCURRENCY = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +86,16 @@ class BuildTarget:
     wav_sample_rate: int = 44_100
     mp3_bitrate: str = "192k"
     m4b: bool = False
+    m4b_bitrate: str = "192k"
     provider_concurrency: int = 5
+    media_concurrency: int = 2
+    from_stage: str = "synthesize"
+    through_stage: str = "inspect"
+    quality_min_lufs: float | None = None
+    quality_max_lufs: float | None = None
+    quality_max_true_peak_dbfs: float | None = None
+    quality_max_leading_silence_seconds: float | None = None
+    quality_max_trailing_silence_seconds: float | None = None
     max_submitted_characters: int | None = None
     max_provider_requests: int | None = None
     max_estimated_spend: Decimal | None = None
@@ -165,9 +183,28 @@ def load_manifest(path: Path) -> AudiobookManifest:
     root = resolved.parent
     book_raw = _table(raw, "book")
     _reject_unknown(
-        book_raw, {"title", "author", "narrator", "language", "copyright"}, "book"
+        book_raw,
+        {
+            "title",
+            "subtitle",
+            "author",
+            "narrator",
+            "language",
+            "copyright",
+            "publisher",
+            "genre",
+            "series",
+            "series_position",
+            "isbn",
+            "publication_date",
+            "cover",
+        },
+        "book",
     )
     title = _required_string(book_raw, "title", "book")
+    cover_value = book_raw.get("cover")
+    if cover_value is not None and not isinstance(cover_value, str):
+        raise ValidationError("book.cover must be a relative path string")
     sources_raw = raw.get("sources", book_raw.get("sources"))
     if sources_raw is None:
         source_table = raw.get("source")
@@ -218,12 +255,35 @@ def load_manifest(path: Path) -> AudiobookManifest:
         schema_version=1,
         book=BookMetadata(
             title=title,
+            subtitle=_optional_string(book_raw.get("subtitle"), "book.subtitle"),
             author=_optional_string(book_raw.get("author"), "book.author"),
             narrator=_optional_string(book_raw.get("narrator"), "book.narrator"),
             language=_string_or_default(
                 book_raw.get("language"), "book.language", "en"
             ),
             copyright=_optional_string(book_raw.get("copyright"), "book.copyright"),
+            publisher=_optional_string(book_raw.get("publisher"), "book.publisher"),
+            genre=_optional_string(book_raw.get("genre"), "book.genre"),
+            series=_optional_string(book_raw.get("series"), "book.series"),
+            series_position=_string_or_number_or_none(
+                book_raw.get("series_position"),
+                "book.series_position",
+            ),
+            isbn=_optional_string(book_raw.get("isbn"), "book.isbn"),
+            publication_date=_optional_string(
+                book_raw.get("publication_date"),
+                "book.publication_date",
+            ),
+            cover=(
+                _workspace_path(
+                    root,
+                    cover_value,
+                    "book.cover",
+                    must_exist=True,
+                )
+                if isinstance(cover_value, str)
+                else None
+            ),
         ),
         sources=sources,
         pronunciations=pronunciation_path,
@@ -416,10 +476,12 @@ def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
 
 
 def _parse_targets(value: object, root: Path) -> tuple[BuildTarget, ...]:
-    table = _named_tables(
-        value,
-        "targets",
-        {"default": {"profile": "default"}},
+    table = _resolve_target_inheritance(
+        _named_tables(
+            value,
+            "targets",
+            {"default": {"profile": "default"}},
+        )
     )
     result: list[BuildTarget] = []
     allowed = {
@@ -430,7 +492,16 @@ def _parse_targets(value: object, root: Path) -> tuple[BuildTarget, ...]:
         "wav_sample_rate",
         "mp3_bitrate",
         "m4b",
+        "m4b_bitrate",
         "provider_concurrency",
+        "media_concurrency",
+        "from_stage",
+        "through_stage",
+        "quality_min_lufs",
+        "quality_max_lufs",
+        "quality_max_true_peak_dbfs",
+        "quality_max_leading_silence_seconds",
+        "quality_max_trailing_silence_seconds",
         "max_submitted_characters",
         "max_provider_requests",
         "max_estimated_spend",
@@ -463,6 +534,44 @@ def _parse_targets(value: object, root: Path) -> tuple[BuildTarget, ...]:
         if concurrency > MAX_PROVIDER_CONCURRENCY:
             raise ValidationError(
                 f"targets.{name}.provider_concurrency must be at most 100"
+            )
+        media_concurrency = _positive_int(
+            item.get("media_concurrency", 2),
+            f"targets.{name}.media_concurrency",
+        )
+        if media_concurrency > MAX_MEDIA_CONCURRENCY:
+            raise ValidationError(
+                f"targets.{name}.media_concurrency must be at most "
+                f"{MAX_MEDIA_CONCURRENCY}"
+            )
+        from_stage = _build_stage(
+            item.get("from_stage", "synthesize"),
+            f"targets.{name}.from_stage",
+        )
+        through_stage = _build_stage(
+            item.get("through_stage", "inspect"),
+            f"targets.{name}.through_stage",
+        )
+        stages = ("synthesize", "master", "encode_mp3", "inspect")
+        if stages.index(from_stage) > stages.index(through_stage):
+            raise ValidationError(
+                f"targets.{name}.from_stage must not come after through_stage"
+            )
+        quality_min_lufs = _float_or_none(
+            item.get("quality_min_lufs"),
+            f"targets.{name}.quality_min_lufs",
+        )
+        quality_max_lufs = _float_or_none(
+            item.get("quality_max_lufs"),
+            f"targets.{name}.quality_max_lufs",
+        )
+        if (
+            quality_min_lufs is not None
+            and quality_max_lufs is not None
+            and quality_min_lufs > quality_max_lufs
+        ):
+            raise ValidationError(
+                f"targets.{name}.quality_min_lufs must not exceed quality_max_lufs"
             )
         maximum_spend = _decimal_or_none(
             item.get("max_estimated_spend"),
@@ -505,7 +614,28 @@ def _parse_targets(value: object, root: Path) -> tuple[BuildTarget, ...]:
                     f"targets.{name}.mp3_bitrate",
                 ),
                 m4b=_boolean(item.get("m4b", False), f"targets.{name}.m4b"),
+                m4b_bitrate=_mp3_bitrate(
+                    item.get("m4b_bitrate", "192k"),
+                    f"targets.{name}.m4b_bitrate",
+                ),
                 provider_concurrency=concurrency,
+                media_concurrency=media_concurrency,
+                from_stage=from_stage,
+                through_stage=through_stage,
+                quality_min_lufs=quality_min_lufs,
+                quality_max_lufs=quality_max_lufs,
+                quality_max_true_peak_dbfs=_float_or_none(
+                    item.get("quality_max_true_peak_dbfs"),
+                    f"targets.{name}.quality_max_true_peak_dbfs",
+                ),
+                quality_max_leading_silence_seconds=_nonnegative_float_or_none(
+                    item.get("quality_max_leading_silence_seconds"),
+                    f"targets.{name}.quality_max_leading_silence_seconds",
+                ),
+                quality_max_trailing_silence_seconds=_nonnegative_float_or_none(
+                    item.get("quality_max_trailing_silence_seconds"),
+                    f"targets.{name}.quality_max_trailing_silence_seconds",
+                ),
                 max_submitted_characters=_nonnegative_int_or_none(
                     item.get("max_submitted_characters"),
                     f"targets.{name}.max_submitted_characters",
@@ -533,6 +663,37 @@ def _parse_targets(value: object, root: Path) -> tuple[BuildTarget, ...]:
             )
         )
     return tuple(result)
+
+
+def _resolve_target_inheritance(
+    table: dict[str, object],
+) -> dict[str, object]:
+    resolved: dict[str, object] = {}
+
+    def resolve(name: str, trail: tuple[str, ...]) -> dict[str, object]:
+        existing = resolved.get(name)
+        if isinstance(existing, dict):
+            return cast(dict[str, object], existing)
+        if name in trail:
+            raise ValidationError(
+                "Target inheritance cycle: " + " -> ".join((*trail, name))
+            )
+        raw = table.get(name)
+        if not isinstance(raw, dict):
+            raise ValidationError(f"Unknown inherited target: {name}")
+        item = cast(dict[str, object], raw)
+        parent = item.get("extends")
+        if parent is not None and (not isinstance(parent, str) or not parent.strip()):
+            raise ValidationError(f"targets.{name}.extends must be a target name")
+        base = resolve(parent, (*trail, name)) if isinstance(parent, str) else {}
+        merged = {**base, **item}
+        merged.pop("extends", None)
+        resolved[name] = merged
+        return merged
+
+    for name in table:
+        resolve(name, ())
+    return resolved
 
 
 def _parse_retention(value: object) -> RetentionPolicy:
@@ -650,6 +811,17 @@ def _string_or_default(value: object, name: str, default: str) -> str:
     return result
 
 
+def _string_or_number_or_none(value: object, name: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        raise ValidationError(f"{name} must be a string or number")
+    result = str(value).strip()
+    if not result:
+        raise ValidationError(f"{name} must not be empty")
+    return result
+
+
 def _boolean(value: object, name: str) -> bool:
     if not isinstance(value, bool):
         raise ValidationError(f"{name} must be boolean")
@@ -667,6 +839,16 @@ def _mp3_bitrate(value: object, name: str) -> str:
     if not isinstance(value, str) or re.fullmatch(r"[1-9]\d*k", value) is None:
         raise ValidationError(f"{name} must look like 192k")
     return value
+
+
+def _build_stage(value: object, name: str) -> str:
+    result = _string_or_default(value, name, "synthesize")
+    allowed = {"synthesize", "master", "encode_mp3", "inspect"}
+    if result not in allowed:
+        raise ValidationError(
+            f"{name} must be synthesize, master, encode_mp3, or inspect"
+        )
+    return result
 
 
 def _nonnegative_int_or_none(value: object, name: str) -> int | None:
@@ -727,6 +909,13 @@ def _positive_float(value: object, name: str) -> float:
     result = _float_or_none(value, name)
     if result is None or result <= 0:
         raise ValidationError(f"{name} must be a positive number")
+    return result
+
+
+def _nonnegative_float_or_none(value: object, name: str) -> float | None:
+    result = _float_or_none(value, name)
+    if result is not None and result < 0:
+        raise ValidationError(f"{name} must be a non-negative number")
     return result
 
 

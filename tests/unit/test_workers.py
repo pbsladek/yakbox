@@ -23,10 +23,9 @@ class _SilentProcess:
         self.finished = asyncio.Event()
         self.terminated = False
         self.killed = False
-
-    async def communicate(self) -> tuple[bytes, bytes]:
-        await self.finished.wait()
-        return b"", b""
+        self.stdin = _Writer(self)
+        self.stdout = _Reader()
+        self.stderr = _Reader(eof=True)
 
     def terminate(self) -> None:
         self.terminated = True
@@ -45,19 +44,54 @@ class _SilentProcess:
 
 class _TerminatedProcess:
     pid = 5678
-    returncode = -9
+    returncode: int | None = None
 
-    async def communicate(self) -> tuple[bytes, bytes]:
-        return b"", b"worker was terminated"
+    def __init__(self) -> None:
+        self.stdin = _Writer(self)
+        self.stdout = _Reader(eof=True)
+        self.stderr = _Reader(b"worker was terminated", eof=True)
 
     async def wait(self) -> int:
-        return self.returncode
+        return self.returncode or 0
 
     def terminate(self) -> None:
-        pass
+        self.returncode = -15
 
     def kill(self) -> None:
-        pass
+        self.returncode = -9
+
+
+class _Reader:
+    def __init__(self, content: bytes = b"", *, eof: bool = False) -> None:
+        self.content = content
+        self.eof = eof
+        self.released = asyncio.Event()
+
+    async def readline(self) -> bytes:
+        if self.eof:
+            return b""
+        await self.released.wait()
+        return self.content
+
+    async def read(self, _size: int = -1) -> bytes:
+        content, self.content = self.content, b""
+        return content
+
+
+class _Writer:
+    def __init__(self, process: _SilentProcess | _TerminatedProcess) -> None:
+        self.process = process
+        self.payloads: list[bytes] = []
+
+    def write(self, payload: bytes) -> None:
+        self.payloads.append(payload)
+        if b'"operation":"shutdown"' in payload:
+            self.process.returncode = 0
+            if isinstance(self.process, _SilentProcess):
+                self.process.finished.set()
+
+    async def drain(self) -> None:
+        return
 
 
 @pytest.mark.asyncio
@@ -71,9 +105,10 @@ async def test_silent_worker_emits_heartbeats_and_is_terminated_at_budget(
         log_path=log,
     )
     process = _SilentProcess()
+    service._process = cast(asyncio.subprocess.Process, process)
 
     with pytest.raises(BuildError, match="exceeded"):
-        await service._communicate(
+        await service._read_response(
             cast(asyncio.subprocess.Process, process),
         )
 
@@ -126,6 +161,31 @@ def test_worker_request_validates_resources_and_typed_controls(
 
 
 @pytest.mark.asyncio
+async def test_local_worker_process_is_reused_until_service_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _SilentProcess()
+    starts = 0
+
+    async def create_process(*_args: object, **_kwargs: object) -> _SilentProcess:
+        nonlocal starts
+        starts += 1
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+    service = IsolatedLocalSpeechService(timeout_seconds=30)
+
+    first = await service._ensure_worker()
+    second = await service._ensure_worker()
+    await service.aclose()
+
+    assert first is second
+    assert starts == 1
+    assert process.returncode == 0
+    assert process.stdin.payloads[-1] == b'{"operation":"shutdown"}\n'
+
+
+@pytest.mark.asyncio
 async def test_terminated_worker_is_reported_and_protocol_files_are_cleaned(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -142,5 +202,4 @@ async def test_terminated_worker_is_reported_and_protocol_files_are_cleaned(
             tmp_path / "never.wav",
         )
 
-    assert not tuple(tmp_path.glob(".yakbox-worker-*"))
     assert not (tmp_path / "never.wav").exists()

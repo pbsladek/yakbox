@@ -29,7 +29,9 @@ class ShardManifest:
             "count": self.count,
             "node_ids": list(self.node_ids),
             "artifact_paths": [
-                str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
+                path.relative_to(root).as_posix()
+                if path.is_relative_to(root)
+                else str(path)
                 for path in self.artifact_paths
             ],
         }

@@ -6,11 +6,11 @@ import asyncio
 import json
 import os
 import sys
-import tempfile
 import time
-from contextlib import suppress
+from contextlib import redirect_stdout, suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from yakbox._files import atomic_write_json
 from yakbox.errors import BackendUnavailableError, BuildError, ValidationError
@@ -23,6 +23,7 @@ from yakbox.speech.models import (
 )
 
 WORKER_ARGUMENT_COUNT = 3
+WORKER_PROTOCOL_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +108,9 @@ class IsolatedLocalSpeechService:
         self.heartbeat_seconds = heartbeat_seconds
         self.log_path = log_path
         self._process: asyncio.subprocess.Process | None = None
+        self._request_lock = asyncio.Lock()
+        self._stderr_task: asyncio.Task[None] | None = None
+        self._stderr_tail = b""
 
     async def synthesize_to_file(
         self,
@@ -149,7 +153,7 @@ class IsolatedLocalSpeechService:
             items=items,
             overwrite=overwrite,
         )
-        results = await self._run_worker(worker_request, items[0].destination.parent)
+        results = await self._run_worker(worker_request)
         if len(results) != len(items):
             raise BuildError("Local Chatterbox worker returned the wrong result count")
         return tuple(_artifact_from_result(result) for result in results)
@@ -157,92 +161,165 @@ class IsolatedLocalSpeechService:
     async def _run_worker(
         self,
         worker_request: LocalWorkerRequest,
-        working_directory: Path,
     ) -> tuple[dict[str, object], ...]:
-        descriptor, request_name = tempfile.mkstemp(
-            prefix=".yakbox-worker-",
-            suffix=".json",
-            dir=working_directory,
-        )
-        os.close(descriptor)
-        request_path = Path(request_name)
-        result_path = request_path.with_suffix(".result.json")
-        try:
-            atomic_write_json(request_path, worker_request.to_dict())
-            environment = os.environ.copy()
-            environment.pop("RESEMBLE_API_KEY", None)
-            thread_budget = str(self.threads_per_process)
-            environment["OMP_NUM_THREADS"] = thread_budget
-            environment["MKL_NUM_THREADS"] = thread_budget
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "yakbox.speech.workers",
-                str(request_path),
-                str(result_path),
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-                env=environment,
-            )
-            self._process = process
-            self._log(
-                f"worker_started pid={process.pid} device={self.device} "
-                f"threads={self.threads_per_process}"
-            )
+        async with self._request_lock:
+            process = await self._ensure_worker()
+            if process.stdin is None or process.stdout is None:
+                await self._discard_worker(process)
+                raise BuildError("Local Chatterbox worker pipes are unavailable")
+            payload = {
+                "protocol_version": WORKER_PROTOCOL_VERSION,
+                **worker_request.to_dict(),
+            }
             try:
-                stderr = await self._communicate(process)
+                process.stdin.write(
+                    json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
+                )
+                await process.stdin.drain()
+                response = await self._read_response(process)
             except asyncio.CancelledError:
                 self._log(f"worker_cancelled pid={process.pid}")
-                await _terminate_process(process)
+                await self._discard_worker(process)
                 raise
-            finally:
-                self._process = None
-            if process.returncode:
-                detail = stderr.decode(errors="replace").strip()[-2048:]
-                self._log(
-                    f"worker_failed pid={process.pid} returncode={process.returncode} "
-                    f"detail={detail}"
-                )
+            except (BrokenPipeError, ConnectionError, OSError) as error:
+                await self._discard_worker(process)
+                detail = self._stderr_tail.decode(errors="replace").strip()[-2048:]
+                raise BuildError(
+                    f"Local Chatterbox worker connection failed: {detail or error}"
+                ) from error
+            if response.get("ok") is not True:
+                detail = str(response.get("error", "worker request failed"))[:2048]
+                self._log(f"worker_request_failed pid={process.pid} detail={detail}")
                 raise BuildError(f"Local Chatterbox worker failed: {detail}")
-            result = _read_results(result_path)
-            self._log(f"worker_completed pid={process.pid}")
-            return result
-        finally:
-            request_path.unlink(missing_ok=True)
-            result_path.unlink(missing_ok=True)
+            items = response.get("items")
+            if not isinstance(items, list) or any(
+                not isinstance(item, dict) for item in items
+            ):
+                raise BuildError("Local Chatterbox worker returned invalid results")
+            self._log(f"worker_request_completed pid={process.pid} items={len(items)}")
+            return tuple(cast(dict[str, object], item) for item in items)
 
     async def aclose(self) -> None:
+        async with self._request_lock:
+            process = self._process
+            if process is None:
+                return
+            if process.returncode is None and process.stdin is not None:
+                self._log(f"worker_shutdown pid={process.pid}")
+                try:
+                    process.stdin.write(b'{"operation":"shutdown"}\n')
+                    await process.stdin.drain()
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except (BrokenPipeError, OSError, TimeoutError):
+                    await _terminate_process(process)
+            await self._finish_stderr_task()
+            self._process = None
+
+    async def _ensure_worker(self) -> asyncio.subprocess.Process:
         process = self._process
         if process is not None and process.returncode is None:
-            self._log(f"worker_cleanup pid={process.pid}")
-            await _terminate_process(process)
-        self._process = None
+            return process
+        await self._finish_stderr_task()
+        environment = os.environ.copy()
+        environment.pop("RESEMBLE_API_KEY", None)
+        thread_budget = str(self.threads_per_process)
+        environment["OMP_NUM_THREADS"] = thread_budget
+        environment["MKL_NUM_THREADS"] = thread_budget
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "yakbox.speech.workers",
+            "--serve",
+            self.device,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=environment,
+        )
+        self._process = process
+        self._stderr_tail = b""
+        if process.stderr is not None:
+            self._stderr_task = asyncio.create_task(
+                self._capture_stderr(process.stderr)
+            )
+        self._log(
+            f"worker_started pid={process.pid} device={self.device} "
+            f"threads={self.threads_per_process}"
+        )
+        return process
 
-    async def _communicate(self, process: asyncio.subprocess.Process) -> bytes:
-        communication = asyncio.create_task(process.communicate())
+    async def _read_response(
+        self, process: asyncio.subprocess.Process
+    ) -> dict[str, object]:
+        if process.stdout is None:
+            raise BuildError("Local Chatterbox worker stdout is unavailable")
+        response = asyncio.create_task(process.stdout.readline())
         started = time.monotonic()
         while True:
             remaining = self.timeout_seconds - (time.monotonic() - started)
             if remaining <= 0:
-                communication.cancel()
-                await _terminate_process(process)
+                response.cancel()
+                await self._discard_worker(process)
                 with suppress(asyncio.CancelledError):
-                    await communication
+                    await response
                 self._log(f"worker_timed_out pid={process.pid}")
                 raise BuildError(
                     f"Local Chatterbox worker exceeded {self.timeout_seconds:g}s"
                 )
             done, _ = await asyncio.wait(
-                {communication},
+                {response},
                 timeout=min(self.heartbeat_seconds, remaining),
             )
-            if communication in done:
-                _, stderr = communication.result()
-                return stderr
+            if response in done:
+                line = response.result()
+                if not line:
+                    await self._discard_worker(process)
+                    detail = self._stderr_tail.decode(errors="replace").strip()[-2048:]
+                    raise BuildError(
+                        "Local Chatterbox worker stopped unexpectedly"
+                        + (f": {detail}" if detail else "")
+                    )
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError as error:
+                    await self._discard_worker(process)
+                    raise BuildError(
+                        "Invalid local worker protocol response"
+                    ) from error
+                if not isinstance(value, dict):
+                    raise BuildError("Invalid local worker protocol response")
+                return value
             self._log(
                 f"worker_heartbeat pid={process.pid} "
                 f"elapsed={time.monotonic() - started:.1f}s"
             )
+
+    async def _capture_stderr(self, stream: asyncio.StreamReader) -> None:
+        while chunk := await stream.read(4096):
+            self._stderr_tail = (self._stderr_tail + chunk)[-8192:]
+            detail = chunk.decode(errors="replace").strip()
+            if detail:
+                self._log(f"worker_stderr {detail[-2048:]}")
+
+    async def _discard_worker(self, process: asyncio.subprocess.Process) -> None:
+        await _terminate_process(process)
+        await self._finish_stderr_task()
+        if self._process is process:
+            self._process = None
+
+    async def _finish_stderr_task(self) -> None:
+        task = self._stderr_task
+        if task is not None:
+            if not task.done():
+                try:
+                    await asyncio.wait_for(task, timeout=1)
+                except TimeoutError:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+            else:
+                task.result()
+        self._stderr_task = None
 
     def _log(self, message: str) -> None:
         if self.log_path is None:
@@ -283,12 +360,66 @@ async def _worker_main(request_path: Path, result_path: Path) -> None:
     )
 
 
+async def _worker_server(device: str) -> None:
+    protocol_output = sys.stdout
+    with redirect_stdout(sys.stderr):
+        from yakbox.local import LocalChatterboxService
+
+        service = LocalChatterboxService(device=device)
+    while line := sys.stdin.buffer.readline():
+        try:
+            raw = json.loads(line)
+            if not isinstance(raw, dict):
+                raise ValidationError("Invalid local worker protocol request")
+            if raw.get("operation") == "shutdown":
+                return
+            if raw.get("protocol_version") != WORKER_PROTOCOL_VERSION:
+                raise ValidationError("Unsupported local worker protocol")
+            request = _request_from_raw(raw)
+            with redirect_stdout(sys.stderr):
+                artifacts = [
+                    await service.synthesize_to_file(
+                        SpeechSynthesisRequest(
+                            text=item.text,
+                            voice=item.voice,
+                            backend="chatterbox-local",
+                            output_format=AudioFormat.WAV,
+                            sample_rate=item.sample_rate,
+                            reference_audio=item.reference_audio,
+                            chatterbox=item.chatterbox,
+                        ),
+                        item.destination,
+                        overwrite=request.overwrite,
+                    )
+                    for item in request.items
+                ]
+            response: dict[str, object] = {
+                "protocol_version": WORKER_PROTOCOL_VERSION,
+                "ok": True,
+                "items": [_artifact_result(artifact) for artifact in artifacts],
+            }
+        except Exception as error:
+            response = {
+                "protocol_version": WORKER_PROTOCOL_VERSION,
+                "ok": False,
+                "error": f"{type(error).__name__}: {str(error)[:2000]}",
+            }
+        protocol_output.write(json.dumps(response, ensure_ascii=False) + "\n")
+        protocol_output.flush()
+
+
 def _read_request(path: Path) -> LocalWorkerRequest:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise ValidationError(f"Invalid local worker request: {error}") from error
-    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
+    if not isinstance(raw, dict):
+        raise ValidationError("Unsupported local worker request")
+    return _request_from_raw(raw)
+
+
+def _request_from_raw(raw: dict[str, object]) -> LocalWorkerRequest:
+    if raw.get("schema_version") != 1:
         raise ValidationError("Unsupported local worker request")
     if raw.get("operation") != "synthesize_many":
         raise ValidationError("Unsupported local worker operation")
@@ -401,9 +532,14 @@ async def _terminate_process(process: asyncio.subprocess.Process) -> None:
 
 def main() -> None:
     if len(sys.argv) != WORKER_ARGUMENT_COUNT:
-        raise SystemExit("usage: python -m yakbox.speech.workers REQUEST RESULT")
+        raise SystemExit(
+            "usage: python -m yakbox.speech.workers REQUEST RESULT | --serve DEVICE"
+        )
     try:
-        asyncio.run(_worker_main(Path(sys.argv[1]), Path(sys.argv[2])))
+        if sys.argv[1] == "--serve":
+            asyncio.run(_worker_server(sys.argv[2]))
+        else:
+            asyncio.run(_worker_main(Path(sys.argv[1]), Path(sys.argv[2])))
     except (BackendUnavailableError, BuildError, ValidationError) as error:
         raise SystemExit(str(error)) from error
 

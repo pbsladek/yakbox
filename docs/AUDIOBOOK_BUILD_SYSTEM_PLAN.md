@@ -3849,23 +3849,19 @@ tests.
 6. **Compatibility-diff CI.** Consider an approval gate that detects changes
    to public Python exports, Click commands/help, flags, exit codes, and JSON
    Schemas before release.
-7. **Internal performance regression baselines.** Consider storing
-   representative throughput, concurrency, startup, and peak-memory
-   measurements in development/scheduled CI with platform-aware thresholds.
-   This is maintainer evidence, not another user-facing workflow or command.
-8. **Remote archive and storage tiering.** Consider verified transfer to
+7. **Remote archive and storage tiering.** Consider verified transfer to
    S3-compatible or cold storage, cross-workspace content deduplication,
    retention/legal-hold integration, and restore-on-demand. Keep the core 1.0
    cleanup system local and do not pursue this without demonstrated storage
    pressure. Evaluate it only within the explicit Phase 10 storage decision.
    Do not mistake quarantine for secure deletion.
-9. **A distributed worker protocol.** Consider turning stable audiobook shards
+8. **A distributed worker protocol.** Consider turning stable audiobook shards
    into authenticated leaseable jobs for self-hosted machines, with heartbeat,
    cancellation, artifact upload, and duplicate-execution handling. Do not
    infer this merely from the manifest format or add it without a concrete
    workload that cannot be served by local workers and hosted APIs. This is the
    scale-out subphase of Phase 10, not part of the local UI.
-10. **Third-party extension governance.** If providers beyond the core
+9. **Third-party extension governance.** If providers beyond the core
     Chatterbox and Resemble paths are opened to plugins, first consider
     protocol versioning, compatibility negotiation, trust boundaries, secret
     access, failure isolation, and support policy.

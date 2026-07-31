@@ -72,6 +72,68 @@ class Pronunciation:
     notes: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class PronunciationRuleAudit:
+    written: str
+    spoken: str
+    priority: int
+    matches: int
+    applied: int
+    shadowed: int
+    locations: tuple[SourceLocation, ...]
+
+    @property
+    def unused(self) -> bool:
+        return self.matches == 0
+
+    def to_dict(self, *, root: Path | None = None) -> dict[str, object]:
+        def location_value(location: SourceLocation) -> dict[str, object]:
+            path = location.path
+            path_value = (
+                path.relative_to(root).as_posix()
+                if root is not None and path.is_relative_to(root)
+                else path.as_posix()
+            )
+            return {
+                "path": path_value,
+                "start_line": location.start_line,
+                "end_line": location.end_line,
+            }
+
+        return {
+            "written": self.written,
+            "spoken": self.spoken,
+            "priority": self.priority,
+            "matches": self.matches,
+            "applied": self.applied,
+            "shadowed": self.shadowed,
+            "unused": self.unused,
+            "locations": [location_value(item) for item in self.locations],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PronunciationAudit:
+    rules: tuple[PronunciationRuleAudit, ...]
+
+    @property
+    def unused_rules(self) -> int:
+        return sum(rule.unused for rule in self.rules)
+
+    @property
+    def shadowed_matches(self) -> int:
+        return sum(rule.shadowed for rule in self.rules)
+
+    def to_dict(self, *, root: Path | None = None) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "rule_count": len(self.rules),
+            "unused_rules": self.unused_rules,
+            "shadowed_matches": self.shadowed_matches,
+            "rules": [rule.to_dict(root=root) for rule in self.rules],
+        }
+
+
 def normalize_sources(
     paths: tuple[Path, ...],
     *,
@@ -99,6 +161,51 @@ def normalize_sources(
     return NormalizedDocument(
         chapters=tuple(chapters),
         sha256=hashlib.sha256(payload.encode()).hexdigest(),
+    )
+
+
+def audit_pronunciations(
+    paths: tuple[Path, ...],
+    pronunciations: Path | None,
+    *,
+    max_pause_ms: int = 30_000,
+) -> PronunciationAudit:
+    """Report which approved pronunciation rules affect speakable source text."""
+    rules = _load_pronunciations(pronunciations)
+    document = normalize_sources(paths, max_pause_ms=max_pause_ms)
+    matches = [0] * len(rules)
+    applied = [0] * len(rules)
+    locations: list[list[SourceLocation]] = [[] for _rule in rules]
+    for chapter in document.chapters:
+        for segment in chapter.segments:
+            if not isinstance(segment, SpeechSegment):
+                continue
+            occupied = [False] * len(segment.text)
+            for index, rule in enumerate(rules):
+                candidates = tuple(_pronunciation_pattern(rule).finditer(segment.text))
+                matches[index] += len(candidates)
+                for candidate in candidates:
+                    if any(occupied[candidate.start() : candidate.end()]):
+                        continue
+                    occupied[candidate.start() : candidate.end()] = [True] * (
+                        candidate.end() - candidate.start()
+                    )
+                    applied[index] += 1
+                    if not locations[index] or locations[index][-1] != segment.source:
+                        locations[index].append(segment.source)
+    return PronunciationAudit(
+        rules=tuple(
+            PronunciationRuleAudit(
+                written=rule.written,
+                spoken=rule.spoken,
+                priority=rule.priority,
+                matches=matches[index],
+                applied=applied[index],
+                shadowed=matches[index] - applied[index],
+                locations=tuple(locations[index]),
+            )
+            for index, rule in enumerate(rules)
+        )
     )
 
 
@@ -496,10 +603,7 @@ def _apply_pronunciations(text: str, rules: tuple[Pronunciation, ...]) -> str:
     occupied = [False] * len(text)
     replacements: list[tuple[int, int, str]] = []
     for rule in rules:
-        flags = re.IGNORECASE if rule.case == "insensitive" else 0
-        escaped = re.escape(rule.written)
-        pattern = rf"(?<!\w){escaped}(?!\w)" if rule.match == "whole_word" else escaped
-        for match in re.finditer(pattern, text, flags):
+        for match in _pronunciation_pattern(rule).finditer(text):
             if any(occupied[match.start() : match.end()]):
                 continue
             occupied[match.start() : match.end()] = [True] * (
@@ -509,6 +613,13 @@ def _apply_pronunciations(text: str, rules: tuple[Pronunciation, ...]) -> str:
     for start, end, spoken in sorted(replacements, reverse=True):
         text = f"{text[:start]}{spoken}{text[end:]}"
     return text
+
+
+def _pronunciation_pattern(rule: Pronunciation) -> re.Pattern[str]:
+    flags = re.IGNORECASE if rule.case == "insensitive" else 0
+    escaped = re.escape(rule.written)
+    pattern = rf"(?<!\w){escaped}(?!\w)" if rule.match == "whole_word" else escaped
+    return re.compile(pattern, flags)
 
 
 def _slug(value: str) -> str:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 
 from yakbox._files import sha256_file
@@ -16,6 +18,14 @@ from yakbox.speech.models import (
 from yakbox.speech.services import HostedUsageRecorder
 
 
+@dataclass(slots=True)
+class _SynthesisJob:
+    request: SpeechSynthesisRequest
+    destination: Path
+    overwrite: bool
+    future: asyncio.Future[SpeechArtifact]
+
+
 class ResembleSpeechService:
     capabilities = BackendCapabilities(
         name="resemble",
@@ -28,8 +38,16 @@ class ResembleSpeechService:
         supports_hd=True,
     )
 
-    def __init__(self, client: ResembleClient) -> None:
+    def __init__(self, client: ResembleClient, *, concurrency: int = 1) -> None:
+        if concurrency < 1:
+            raise ValueError("concurrency must be positive")
         self.client = client
+        self.concurrency = concurrency
+        self._queue: asyncio.Queue[_SynthesisJob] = asyncio.Queue(
+            maxsize=2 * concurrency
+        )
+        self._workers: tuple[asyncio.Task[None], ...] = ()
+        self._closed = False
 
     async def usage_snapshot(self) -> HostedUsageSnapshot | None:
         return await self.client.usage_snapshot()
@@ -46,6 +64,103 @@ class ResembleSpeechService:
         destination: Path,
         *,
         overwrite: bool = False,
+    ) -> SpeechArtifact:
+        return await self._synthesize_direct(
+            request,
+            destination,
+            overwrite=overwrite,
+        )
+
+    async def synthesize_many_to_files(
+        self,
+        requests: tuple[tuple[SpeechSynthesisRequest, Path], ...],
+        *,
+        overwrite: bool = False,
+    ) -> tuple[SpeechArtifact, ...]:
+        futures = [
+            await self._enqueue(request, destination, overwrite=overwrite)
+            for request, destination in requests
+        ]
+        try:
+            results = await asyncio.gather(*futures, return_exceptions=True)
+        except asyncio.CancelledError:
+            await self.aclose()
+            raise
+        error = next(
+            (item for item in results if isinstance(item, BaseException)), None
+        )
+        if error is not None:
+            raise error
+        return tuple(item for item in results if isinstance(item, SpeechArtifact))
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        for worker in self._workers:
+            worker.cancel()
+        if self._workers:
+            await asyncio.gather(*self._workers, return_exceptions=True)
+        self._workers = ()
+        while not self._queue.empty():
+            job = self._queue.get_nowait()
+            if not job.future.done():
+                job.future.cancel()
+            self._queue.task_done()
+
+    async def _enqueue(
+        self,
+        request: SpeechSynthesisRequest,
+        destination: Path,
+        *,
+        overwrite: bool,
+    ) -> asyncio.Future[SpeechArtifact]:
+        if self._closed:
+            raise RuntimeError("Resemble speech service is closed")
+        if not self._workers:
+            self._workers = tuple(
+                asyncio.create_task(self._worker()) for _ in range(self.concurrency)
+            )
+        future = asyncio.get_running_loop().create_future()
+        await self._queue.put(
+            _SynthesisJob(
+                request=request,
+                destination=destination,
+                overwrite=overwrite,
+                future=future,
+            )
+        )
+        return future
+
+    async def _worker(self) -> None:
+        while True:
+            job = await self._queue.get()
+            try:
+                if job.future.cancelled():
+                    continue
+                artifact = await self._synthesize_direct(
+                    job.request,
+                    job.destination,
+                    overwrite=job.overwrite,
+                )
+                if not job.future.done():
+                    job.future.set_result(artifact)
+            except asyncio.CancelledError:
+                if not job.future.done():
+                    job.future.cancel()
+                raise
+            except Exception as error:
+                if not job.future.done():
+                    job.future.set_exception(error)
+            finally:
+                self._queue.task_done()
+
+    async def _synthesize_direct(
+        self,
+        request: SpeechSynthesisRequest,
+        destination: Path,
+        *,
+        overwrite: bool,
     ) -> SpeechArtifact:
         provider_request = SynthesisRequest(
             text=request.text,

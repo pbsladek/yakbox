@@ -52,6 +52,14 @@ def encode_mp3(
     title: str | None = None,
     album: str | None = None,
     artist: str | None = None,
+    album_artist: str | None = None,
+    composer: str | None = None,
+    genre: str | None = None,
+    publisher: str | None = None,
+    copyright: str | None = None,
+    language: str | None = None,
+    date: str | None = None,
+    cover: Path | None = None,
     track: int | None = None,
     overwrite: bool = False,
 ) -> None:
@@ -66,15 +74,42 @@ def encode_mp3(
         "error",
         "-i",
         str(source),
-        "-c:a",
-        "libmp3lame",
-        "-b:a",
-        bitrate,
     ]
+    if cover is not None:
+        _require_source(cover)
+        command.extend(
+            [
+                "-i",
+                str(cover),
+                "-map",
+                "0:a:0",
+                "-map",
+                "1:v:0",
+                "-c:v",
+                "copy",
+                "-disposition:v:0",
+                "attached_pic",
+            ]
+        )
+    command.extend(
+        [
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            bitrate,
+        ]
+    )
     metadata = {
         "title": title,
         "album": album,
         "artist": artist,
+        "album_artist": album_artist,
+        "composer": composer,
+        "genre": genre,
+        "publisher": publisher,
+        "copyright": copyright,
+        "language": language,
+        "date": date,
         "track": str(track) if track is not None else None,
     }
     for key, value in metadata.items():

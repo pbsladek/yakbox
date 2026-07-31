@@ -29,7 +29,7 @@ class ReleaseFile:
 
     def to_dict(self, *, root: Path) -> dict[str, object]:
         return {
-            "path": str(self.path.relative_to(root)),
+            "path": self.path.relative_to(root).as_posix(),
             "sha256": self.sha256,
             "size": self.size,
         }
@@ -57,7 +57,7 @@ class ReleasePreflightReport:
                 artifact.to_dict(root=root) for artifact in self.distributions
             ],
             "sbom": self.sbom.to_dict(root=root),
-            "checksums_path": str(self.checksums_path.relative_to(root)),
+            "checksums_path": self.checksums_path.relative_to(root).as_posix(),
         }
 
 

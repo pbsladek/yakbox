@@ -17,6 +17,18 @@ def assemble_m4b(
     *,
     title: str,
     author: str | None = None,
+    narrator: str | None = None,
+    subtitle: str | None = None,
+    genre: str | None = None,
+    publisher: str | None = None,
+    copyright: str | None = None,
+    language: str | None = None,
+    date: str | None = None,
+    series: str | None = None,
+    series_position: str | None = None,
+    cover: Path | None = None,
+    chapter_titles: tuple[str, ...] | None = None,
+    bitrate: str = "192k",
     overwrite: bool = False,
 ) -> None:
     _validate_assembly_inputs(chapters, destination, overwrite=overwrite)
@@ -37,7 +49,15 @@ def assemble_m4b(
             for chapter in chapters:
                 escaped = str(chapter.resolve()).replace("'", "'\\''")
                 stream.write(f"file '{escaped}'\n")
-        _write_chapter_metadata(metadata_path, chapters, title=title, author=author)
+        if chapter_titles is not None and len(chapter_titles) != len(chapters):
+            raise ArtifactError("M4B chapter_titles must match the chapter count")
+        _write_chapter_metadata(
+            metadata_path,
+            chapters,
+            title=title,
+            author=author,
+            chapter_titles=chapter_titles,
+        )
         command = [
             "ffmpeg",
             "-nostdin",
@@ -51,21 +71,52 @@ def assemble_m4b(
             str(list_path),
             "-i",
             str(metadata_path),
-            "-map",
-            "0:a:0",
-            "-map_metadata",
-            "1",
-            "-map_chapters",
-            "1",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-metadata",
-            f"title={title}",
         ]
-        if author:
-            command.extend(["-metadata", f"artist={author}"])
+        if cover is not None:
+            if not cover.is_file():
+                raise ArtifactError(f"Missing M4B cover image: {cover}")
+            command.extend(["-i", str(cover)])
+        command.extend(
+            [
+                "-map",
+                "0:a:0",
+                "-map_metadata",
+                "1",
+                "-map_chapters",
+                "1",
+                "-c:a",
+                "aac",
+                "-b:a",
+                bitrate,
+            ]
+        )
+        if cover is not None:
+            command.extend(
+                [
+                    "-map",
+                    "2:v:0",
+                    "-c:v",
+                    "copy",
+                    "-disposition:v:0",
+                    "attached_pic",
+                ]
+            )
+        metadata = {
+            "title": title,
+            "artist": author,
+            "composer": narrator,
+            "subtitle": subtitle,
+            "genre": genre,
+            "publisher": publisher,
+            "copyright": copyright,
+            "language": language,
+            "date": date,
+            "show": series,
+            "episode_sort": series_position,
+        }
+        for key, value in metadata.items():
+            if value:
+                command.extend(["-metadata", f"{key}={value}"])
         command.append(str(output))
         _run_ffmpeg_assembly(command)
         inspection = inspect_audio(output)
@@ -118,12 +169,13 @@ def _write_chapter_metadata(
     *,
     title: str,
     author: str | None,
+    chapter_titles: tuple[str, ...] | None,
 ) -> None:
     lines = [";FFMETADATA1", f"title={_escape_metadata(title)}"]
     if author:
         lines.append(f"artist={_escape_metadata(author)}")
     start = 0
-    for chapter in chapters:
+    for index, chapter in enumerate(chapters):
         inspection = inspect_audio(chapter)
         if not inspection.valid:
             raise ArtifactError(
@@ -132,13 +184,14 @@ def _write_chapter_metadata(
             )
         duration = max(1, round(inspection.duration_seconds * 1_000))
         end = start + duration
+        chapter_title = chapter_titles[index] if chapter_titles else chapter.stem
         lines.extend(
             [
                 "[CHAPTER]",
                 "TIMEBASE=1/1000",
                 f"START={start}",
                 f"END={end}",
-                f"title={_escape_metadata(chapter.stem)}",
+                f"title={_escape_metadata(chapter_title)}",
             ]
         )
         start = end
