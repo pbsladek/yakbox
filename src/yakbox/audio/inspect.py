@@ -18,6 +18,8 @@ _SILENCE_EDGE_TOLERANCE_SECONDS = 0.05
 
 @dataclass(frozen=True, slots=True)
 class AudioInspection:
+    """Measured media properties and quality findings for one audio file."""
+
     schema_version: int
     path: Path
     format_name: str
@@ -36,6 +38,7 @@ class AudioInspection:
     trailing_silence_seconds: float | None = None
 
     def to_dict(self, *, root: Path | None = None) -> dict[str, object]:
+        """Serialize the inspection using its versioned JSON contract."""
         value = asdict(self)
         value.update(runtime_metadata("audio-inspection"))
         value["path"] = (
@@ -49,6 +52,8 @@ class AudioInspection:
 
 @dataclass(frozen=True, slots=True)
 class AudioQualityPolicy:
+    """Optional loudness, peak, and edge-silence limits for audio inspection."""
+
     minimum_loudness_lufs: float | None = None
     maximum_loudness_lufs: float | None = None
     maximum_true_peak_dbfs: float | None = None
@@ -61,6 +66,7 @@ def inspect_audio(
     *,
     quality: AudioQualityPolicy | None = None,
 ) -> AudioInspection:
+    """Inspect an audio file with FFprobe and evaluate an optional quality policy."""
     if shutil.which("ffprobe") is None:
         raise BackendUnavailableError("FFprobe is required for audio inspection")
     if not path.is_file() or path.stat().st_size == 0:
@@ -145,8 +151,8 @@ def _file_signature(path: Path) -> tuple[int, int, int, int]:
 
 def _run_ffprobe(path: Path) -> object:
     try:
-        result = subprocess.run(
-            [
+        result = subprocess.run(  # noqa: S603 - fixed ffprobe argv
+            [  # noqa: S607 - executable availability is checked before use
                 "ffprobe",
                 "-v",
                 "error",
@@ -237,8 +243,8 @@ def _run_quality_analysis(
     duration: float,
 ) -> tuple[float | None, float | None, float, float, float]:
     try:
-        result = subprocess.run(
-            [
+        result = subprocess.run(  # noqa: S603 - fixed ffmpeg argv
+            [  # noqa: S607 - executable availability is checked before use
                 "ffmpeg",
                 "-nostdin",
                 "-hide_banner",

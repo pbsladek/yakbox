@@ -56,6 +56,8 @@ _DEFINITELY_UNSENT_ERRORS = (
 
 
 class ResembleClient:
+    """Async Resemble client with bounded retries, responses, and lifecycle."""
+
     def __init__(
         self,
         api_key: str,
@@ -110,6 +112,7 @@ class ResembleClient:
         await self.aclose()
 
     async def aclose(self) -> None:
+        """Close owned HTTP resources; repeated calls are safe."""
         if self._closed:
             return
         self._closed = True
@@ -119,6 +122,7 @@ class ResembleClient:
             await http.aclose()
 
     async def synthesize(self, request: SynthesisRequest) -> SynthesisResult:
+        """Submit one bounded synthesis request and decode its audio response."""
         attempts = 0
         if self._usage_gate is not None:
             await self._usage_gate.add_logical_item()
@@ -188,6 +192,7 @@ class ResembleClient:
         *,
         overwrite: bool = False,
     ) -> FileSynthesisResult:
+        """Synthesize one request and atomically commit it to a destination."""
         result = await self.synthesize(request)
         atomic_commit_bytes(destination, result.audio, overwrite=overwrite)
         return FileSynthesisResult(
@@ -202,6 +207,7 @@ class ResembleClient:
     def stream(
         self, request: StreamRequest
     ) -> AbstractAsyncContextManager[AsyncIterator[bytes]]:
+        """Open a one-shot streaming response context for a bounded request."""
         return self._stream_once(request)
 
     @asynccontextmanager
@@ -247,6 +253,7 @@ class ResembleClient:
         *,
         overwrite: bool = False,
     ) -> FileSynthesisResult:
+        """Stream one request into an atomic destination file with retries."""
         destination = destination.resolve()
         destination.parent.mkdir(parents=True, exist_ok=True)
         attempts = 0
@@ -314,6 +321,7 @@ class ResembleClient:
         )
 
     async def list_voices(self, *, page: int = 1, page_size: int = 10) -> Page[Voice]:
+        """Return one validated page of provider voices."""
         _validate_page(page, page_size)
         response = await self._retried_json_request(
             "GET",
@@ -342,6 +350,7 @@ class ResembleClient:
         is_active: bool = True,
         fill: bool = False,
     ) -> Recording:
+        """Upload one recording through ambiguity-safe mutation handling."""
         if not audio_path.is_file():
             raise ValidationError(f"Recording audio does not exist: {audio_path}")
         if not voice_uuid.strip():
@@ -409,6 +418,7 @@ class ResembleClient:
     async def list_projects(
         self, *, page: int = 1, page_size: int = 10
     ) -> Page[Project]:
+        """Return one validated page of provider projects."""
         _validate_page(page, page_size)
         response = await self._retried_json_request(
             "GET",
@@ -426,6 +436,7 @@ class ResembleClient:
         is_collaborative: bool = False,
         is_archived: bool = False,
     ) -> Project:
+        """Create one project through ambiguity-safe mutation handling."""
         if not name.strip():
             raise ValidationError("Project name must not be empty")
         if len(name) > MAX_PROJECT_NAME_CHARACTERS:
@@ -581,15 +592,18 @@ class ResembleClient:
         return self._http
 
     async def usage_snapshot(self) -> HostedUsageSnapshot | None:
+        """Return the current hosted usage snapshot when accounting is enabled."""
         if self._usage_gate is None:
             return None
         return await self._usage_gate.snapshot()
 
     def set_usage_recorder(self, recorder: HostedUsageRecorder | None) -> None:
+        """Install or clear the durable usage reservation callback."""
         if self._usage_gate is not None:
             self._usage_gate.set_recorder(recorder)
 
     async def restore_usage(self, snapshot: HostedUsageSnapshot) -> None:
+        """Restore durable hosted usage counters before resumed work."""
         if self._usage_gate is None:
             return
         await self._usage_gate.restore_prior_usage(

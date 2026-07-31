@@ -31,6 +31,8 @@ class BuildStage(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PlanNode:
+    """Fingerprint-addressed unit of work in an audiobook build graph."""
+
     id: str
     stage: BuildStage
     chapter_id: str
@@ -43,6 +45,8 @@ class PlanNode:
 
 @dataclass(frozen=True, slots=True)
 class BuildPlan:
+    """Deterministic dependency graph for producing one audiobook target."""
+
     schema_version: int
     target: str
     profile: str
@@ -52,6 +56,8 @@ class BuildPlan:
     complete_document: bool = True
 
     def to_dict(self, *, root: Path | None = None) -> dict[str, object]:
+        """Serialize the plan using its versioned JSON contract."""
+
         def path_value(path: Path) -> str:
             if root is not None and path.is_relative_to(root):
                 return path.relative_to(root).as_posix()
@@ -102,6 +108,7 @@ def plan_audiobook(
     profile_override: str | None = None,
     chapter_selector: str | None = None,
 ) -> BuildPlan:
+    """Create a deterministic build graph without model, network, or file writes."""
     target = manifest.target(target_name)
     profile = manifest.profile(profile_override or target.profile)
     chapters = _select_chapters(document.chapters, chapter_selector)

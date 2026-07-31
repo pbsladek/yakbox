@@ -68,7 +68,7 @@ def _package_version(name: str) -> str:
 @lru_cache(maxsize=4)
 def _command_version(command: str) -> str:
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - fixed version-query argv
             [command, "-version"],
             check=False,
             capture_output=True,

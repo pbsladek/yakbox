@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from yakbox._files import commit_temporary_file
 
 
 def test_commit_reopens_completed_file_writable_for_windows_fsync(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     temporary = tmp_path / ".audio.wav.part"
     destination = tmp_path / "audio.wav"
@@ -15,10 +17,25 @@ def test_commit_reopens_completed_file_writable_for_windows_fsync(
     modes: list[str] = []
     real_open = Path.open
 
-    def recording_open(path: Path, mode: str = "r", *args, **kwargs):
+    def recording_open(
+        path: Path,
+        mode: str = "r",
+        *,
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> object:
         if path == temporary.resolve():
             modes.append(mode)
-        return real_open(path, mode, *args, **kwargs)
+        return real_open(
+            path,
+            mode,
+            buffering=buffering,
+            encoding=encoding,
+            errors=errors,
+            newline=newline,
+        )
 
     monkeypatch.setattr(Path, "open", recording_open)
 

@@ -14,6 +14,8 @@ from yakbox.errors import ArtifactError
 
 @dataclass(frozen=True, slots=True)
 class CacheEntry:
+    """One reusable synthesis cache entry and its validation state."""
+
     fingerprint: str
     audio_path: Path
     metadata_path: Path
@@ -22,6 +24,7 @@ class CacheEntry:
     valid: bool
 
     def to_dict(self, *, root: Path) -> dict[str, object]:
+        """Serialize a cache entry relative to the workspace root."""
         return {
             "fingerprint": self.fingerprint,
             "path": self.audio_path.relative_to(root).as_posix(),
@@ -33,17 +36,22 @@ class CacheEntry:
 
 @dataclass(frozen=True, slots=True)
 class CacheInventory:
+    """Snapshot of all synthesis cache entries in a workspace."""
+
     entries: tuple[CacheEntry, ...]
 
     @property
     def total_bytes(self) -> int:
+        """Return the total bytes represented by all cache entries."""
         return sum(entry.size for entry in self.entries)
 
     @property
     def invalid_entries(self) -> int:
+        """Return the number of entries that failed cache validation."""
         return sum(not entry.valid for entry in self.entries)
 
     def to_dict(self, *, root: Path) -> dict[str, object]:
+        """Serialize the complete cache inventory."""
         return {
             "schema_version": 1,
             "entry_count": len(self.entries),
@@ -55,11 +63,14 @@ class CacheInventory:
 
 @dataclass(frozen=True, slots=True)
 class CacheCleanupPlan:
+    """Deterministic set of cache entries selected for removal."""
+
     cache_root: Path
     candidates: tuple[CacheEntry, ...]
     bytes_reclaimed: int
 
     def to_dict(self, *, workspace: Path) -> dict[str, object]:
+        """Serialize a deterministic cache cleanup plan."""
         return {
             "schema_version": 1,
             "cache_root": self.cache_root.relative_to(workspace).as_posix(),
@@ -70,6 +81,7 @@ class CacheCleanupPlan:
 
 
 def inventory_synthesis_cache(workspace: Path) -> CacheInventory:
+    """Return valid and invalid reusable synthesis entries for a workspace."""
     root = _cache_root(workspace)
     if not root.exists():
         return CacheInventory(())
@@ -97,6 +109,7 @@ def plan_cache_cleanup(
     max_age_days: int | None = None,
     max_bytes: int | None = None,
 ) -> CacheCleanupPlan:
+    """Plan deterministic cache cleanup without deleting files."""
     if max_age_days is not None and max_age_days < 0:
         raise ArtifactError("Cache max age must be non-negative")
     if max_bytes is not None and max_bytes < 0:
@@ -129,6 +142,7 @@ def plan_cache_cleanup(
 
 
 def apply_cache_cleanup(plan: CacheCleanupPlan) -> int:
+    """Apply a previously computed cache plan and return removed entry count."""
     root = plan.cache_root.resolve()
     removed = 0
     for entry in plan.candidates:

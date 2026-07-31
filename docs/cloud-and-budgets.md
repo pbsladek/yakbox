@@ -12,9 +12,9 @@ The optional credentials extra enables system-keyring profiles:
 
 ```console
 uv tool install "yakbox[credentials]"
-yakbox config auth login --profile studio
-yakbox config auth status --profile studio
-yakbox cloud --profile studio voices list
+yakbox config auth login --credential-profile studio
+yakbox config auth status --credential-profile studio
+yakbox cloud --credential-profile studio voices list
 ```
 
 Credential precedence is deprecated `--api-key`, environment, selected
@@ -68,7 +68,7 @@ other rows. Journals are append-only and usage reservations are durable before
 each provider attempt:
 
 ```console
-yakbox cloud batch lines.csv --resume cloud-output/batch-journal.ndjson
+yakbox cloud batch lines.csv --resume-from cloud-output/batch-journal.ndjson
 ```
 
 Reports contain request/result hashes, ordered row status, attempts, safe

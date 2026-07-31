@@ -7,6 +7,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tomllib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -141,6 +142,7 @@ def run_release_preflight(
         ("uv", "run", "ruff", "format", "--check", "."),
         ("uv", "run", "ruff", "check", "."),
         ("uv", "run", "ty", "check"),
+        ("uv", "run", "lint-imports", "--no-cache"),
         ("uv", "run", "pytest"),
         ("uv", "audit", "--frozen"),
     )
@@ -303,7 +305,7 @@ def _sha256(path: Path) -> str:
 
 def _run_command(command: tuple[str, ...], cwd: Path) -> str:
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - internal release argv; no shell
             command,
             cwd=cwd,
             check=False,
@@ -346,9 +348,9 @@ def main(arguments: Sequence[str] | None = None) -> None:
         )
     except ReleasePreflightError as error:
         parser.exit(1, f"release preflight failed: {error}\n")
-    print(
+    sys.stdout.write(
         f"release preflight passed for {report.tag}: "
-        f"{len(report.distributions)} distributions, SBOM, and checksums"
+        f"{len(report.distributions)} distributions, SBOM, and checksums\n"
     )
 
 

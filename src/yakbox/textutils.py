@@ -14,6 +14,8 @@ from yakbox.errors import ValidationError
 
 @dataclass(frozen=True, slots=True)
 class BatchRow:
+    """Normalized local or hosted batch-input row with validation state."""
+
     index: int
     text: str
     row_id: str | None = None

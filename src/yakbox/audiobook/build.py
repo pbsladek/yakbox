@@ -14,6 +14,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
@@ -94,6 +95,8 @@ _EXECUTION_STAGES = (
 
 @dataclass(frozen=True, slots=True)
 class BuildChangeSummary:
+    """Differences between a planned build and its most recent prior run."""
+
     previous_run_id: str | None
     previous_plan_fingerprint: str | None
     added_nodes: tuple[str, ...]
@@ -103,6 +106,7 @@ class BuildChangeSummary:
     reasons: tuple[tuple[str, str], ...]
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize plan changes and their reasons."""
         return {
             "previous_run_id": self.previous_run_id,
             "previous_plan_fingerprint": self.previous_plan_fingerprint,
@@ -116,6 +120,8 @@ class BuildChangeSummary:
 
 @dataclass(frozen=True, slots=True)
 class BuildPreflight:
+    """Reuse, storage, and hosted-work estimates computed before a build."""
+
     target: str
     profile: str
     planned_nodes: int
@@ -128,11 +134,12 @@ class BuildPreflight:
     hosted_work: HostedWorkEstimate | None
     reusable_node_ids: tuple[str, ...]
     change_summary: BuildChangeSummary
-    from_stage: str = BuildStage.SYNTHESIZE.value
-    through_stage: str = BuildStage.INSPECT.value
+    from_stage: BuildStage = BuildStage.SYNTHESIZE
+    through_stage: BuildStage = BuildStage.INSPECT
 
     @property
     def storage_sufficient(self) -> bool:
+        """Return whether free space and configured storage budget are sufficient."""
         within_free_space = self.estimated_output_bytes <= self.available_bytes
         within_budget = (
             self.storage_budget_bytes is None
@@ -141,6 +148,7 @@ class BuildPreflight:
         return within_free_space and within_budget
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize the preflight estimate and reuse summary."""
         return {
             "target": self.target,
             "profile": self.profile,
@@ -157,17 +165,19 @@ class BuildPreflight:
                 self.hosted_work.to_dict() if self.hosted_work is not None else None
             ),
             "change_summary": self.change_summary.to_dict(),
-            "from_stage": self.from_stage,
-            "through_stage": self.through_stage,
+            "from_stage": self.from_stage.value,
+            "through_stage": self.through_stage.value,
         }
 
 
 @dataclass(frozen=True, slots=True)
 class BuildResult:
+    """Terminal outcome, artifacts, and usage evidence for an audiobook build."""
+
     schema_version: int
     run_id: str
     target: str
-    status: str
+    status: BuildStatus
     plan_fingerprint: str
     artifacts: tuple[ArtifactRecord, ...]
     reused_nodes: tuple[str, ...]
@@ -180,9 +190,11 @@ class BuildResult:
 
 @dataclass(frozen=True, slots=True)
 class BuildProgress:
-    event: str
+    """One stable progress event emitted while executing a build plan."""
+
+    event: BuildProgressEvent
     node_id: str
-    stage: str
+    stage: BuildStage
     completed: int
     total: int
     reused: bool = False
@@ -190,6 +202,46 @@ class BuildProgress:
 
 
 type BuildProgressCallback = Callable[[BuildProgress], None]
+
+
+class BuildStatus(StrEnum):
+    """Terminal or planned state of an audiobook build."""
+
+    PLANNED = "planned"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class BuildProgressEvent(StrEnum):
+    """Stable event names delivered to build progress callbacks."""
+
+    STARTED = "started"
+    REUSED = "reused"
+    FAILED = "failed"
+    COMPLETED = "completed"
+    NOT_RUN = "not_run"
+
+
+@dataclass(frozen=True, slots=True)
+class BuildRequest:
+    """Typed options for one audiobook build operation."""
+
+    target_name: str = "default"
+    profile_override: str | None = None
+    chapter_selector: str | None = None
+    dry_run: bool = False
+    resume: bool = True
+    api_key: str | None = None
+    max_submitted_characters: int | None = None
+    max_provider_requests: int | None = None
+    max_estimated_spend: Decimal | None = None
+    currency: str | None = None
+    pricing_source: str | None = None
+    price_per_character: Decimal | None = None
+    confirm_above_characters: int | None = None
+    confirm_above_requests: int | None = None
+    from_stage: BuildStage | str | None = None
+    through_stage: BuildStage | str | None = None
 
 
 @dataclass(slots=True)
@@ -200,7 +252,7 @@ class _BuildProgressTracker:
 
     def emit(
         self,
-        event: str,
+        event: BuildProgressEvent,
         node: PlanNode,
         *,
         terminal: bool = False,
@@ -216,19 +268,21 @@ class _BuildProgressTracker:
                 BuildProgress(
                     event=event,
                     node_id=node.id,
-                    stage=node.stage.value,
+                    stage=node.stage,
                     completed=self.completed,
                     total=self.total,
                     reused=reused,
                     error=error,
                 )
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - progress callbacks cannot fail a build
             return
 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseCheck:
+    """Release-readiness result with issues and expected delivery artifacts."""
+
     complete: bool
     issues: tuple[str, ...]
     master_wavs: tuple[Path, ...]
@@ -236,6 +290,7 @@ class ReleaseCheck:
     release_manifest: Path | None = None
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize release completeness and immutable evidence paths."""
         return {
             **runtime_metadata("audiobook-release-check"),
             "complete": self.complete,
@@ -250,6 +305,8 @@ class ReleaseCheck:
 
 @dataclass(frozen=True, slots=True)
 class ReleaseDiff:
+    """Artifact and metadata differences between two immutable releases."""
+
     left_release_id: str
     right_release_id: str
     added_artifacts: tuple[str, ...]
@@ -259,6 +316,7 @@ class ReleaseDiff:
 
     @property
     def identical(self) -> bool:
+        """Return whether the two releases have no reported differences."""
         return not (
             self.added_artifacts
             or self.removed_artifacts
@@ -267,6 +325,7 @@ class ReleaseDiff:
         )
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize added, removed, changed, and metadata differences."""
         return {
             "schema_version": 1,
             "left_release_id": self.left_release_id,
@@ -363,6 +422,10 @@ class _ExecutionOutcome:
     failed: tuple[str, ...]
 
 
+def _execution_collections() -> tuple[list[ArtifactRecord], list[str], list[str]]:
+    return [], [], []
+
+
 @dataclass(frozen=True, slots=True)
 class _ExecutionContext:
     plan: BuildPlan
@@ -396,6 +459,7 @@ async def build_audiobook(
     through_stage: BuildStage | str | None = None,
     progress: BuildProgressCallback | None = None,
 ) -> BuildResult:
+    """Execute a guarded, resumable audiobook build and return its durable result."""
     (
         document,
         plan,
@@ -461,7 +525,7 @@ async def build_audiobook(
             schema_version=1,
             run_id=run_id,
             target=target_name,
-            status="planned",
+            status=BuildStatus.PLANNED,
             plan_fingerprint=plan.fingerprint,
             artifacts=(),
             reused_nodes=(),
@@ -471,9 +535,7 @@ async def build_audiobook(
             preflight=preflight,
             resumed=False,
         )
-    artifacts: list[ArtifactRecord] = []
-    reused: list[str] = []
-    failed: list[str] = []
+    artifacts, reused, failed = _execution_collections()
     hosted_usage: HostedUsageSnapshot | None = None
     progress_tracker = _BuildProgressTracker(progress, len(execution_nodes))
     with target_lock(manifest.root / ".yakbox", target_name):
@@ -555,9 +617,9 @@ async def build_audiobook(
                 usage=_usage_dict(_latest_journaled_usage(journal.events())),
             )
             raise
-        status = "failed" if failed else "complete"
+        status = BuildStatus.FAILED if failed else BuildStatus.COMPLETE
         journal.append(
-            f"run_{status}",
+            f"run_{status.value}",
             fingerprint=plan.fingerprint,
             usage=_usage_dict(hosted_usage),
         )
@@ -581,6 +643,35 @@ async def build_audiobook(
         suffix = f": {detail}" if detail else ""
         raise BuildError(f"Build failed at {failed[0]}{suffix}; see {run_directory}")
     return result
+
+
+async def run_audiobook_build(
+    manifest: AudiobookManifest,
+    request: BuildRequest,
+    *,
+    progress: BuildProgressCallback | None = None,
+) -> BuildResult:
+    """Run a build from a typed request while preserving the legacy call surface."""
+    return await build_audiobook(
+        manifest,
+        target_name=request.target_name,
+        profile_override=request.profile_override,
+        chapter_selector=request.chapter_selector,
+        dry_run=request.dry_run,
+        resume=request.resume,
+        api_key=request.api_key,
+        max_submitted_characters=request.max_submitted_characters,
+        max_provider_requests=request.max_provider_requests,
+        max_estimated_spend=request.max_estimated_spend,
+        currency=request.currency,
+        pricing_source=request.pricing_source,
+        price_per_character=request.price_per_character,
+        confirm_above_characters=request.confirm_above_characters,
+        confirm_above_requests=request.confirm_above_requests,
+        from_stage=request.from_stage,
+        through_stage=request.through_stage,
+        progress=progress,
+    )
 
 
 def _prepare_execution(
@@ -647,7 +738,8 @@ async def _journal_hosted_usage(
         submitted_characters: int,
     ) -> None:
         usage = _usage_dict(snapshot)
-        assert usage is not None
+        if usage is None:
+            raise BuildError("Hosted usage recorder received no snapshot")
         usage["submitted_characters_this_attempt"] = submitted_characters
         journal.append("usage_reserved", usage=usage)
 
@@ -830,7 +922,7 @@ async def _hosted_worker(
                     error="build stopped after another chapter failed",
                 )
                 context.progress.emit(
-                    "not_run",
+                    BuildProgressEvent.NOT_RUN,
                     node,
                     terminal=True,
                     error="build stopped after another chapter failed",
@@ -884,10 +976,15 @@ async def _execute_node_chain(
                 artifact_path=existing.path.relative_to(manifest.root).as_posix(),
                 artifact_sha256=existing.sha256,
             )
-            progress.emit("reused", node, terminal=True, reused=True)
+            progress.emit(
+                BuildProgressEvent.REUSED,
+                node,
+                terminal=True,
+                reused=True,
+            )
             continue
         journal.append("node_started", node_id=node.id, fingerprint=node.fingerprint)
-        progress.emit("started", node)
+        progress.emit(BuildProgressEvent.STARTED, node)
         try:
             record = await _execute_node(
                 node,
@@ -898,7 +995,7 @@ async def _execute_node_chain(
                 service=service,
                 media_semaphore=media_semaphore,
             )
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - node boundary records safe failure
             journal.append(
                 "node_failed",
                 node_id=node.id,
@@ -906,7 +1003,7 @@ async def _execute_node_chain(
                 error=_safe_error(error),
             )
             progress.emit(
-                "failed",
+                BuildProgressEvent.FAILED,
                 node,
                 terminal=True,
                 error=_safe_error(error),
@@ -920,7 +1017,7 @@ async def _execute_node_chain(
             artifact_path=record.path.relative_to(manifest.root).as_posix(),
             artifact_sha256=record.sha256,
         )
-        progress.emit("completed", node, terminal=True)
+        progress.emit(BuildProgressEvent.COMPLETED, node, terminal=True)
     return _ExecutionOutcome(tuple(records), tuple(reused), ())
 
 
@@ -934,6 +1031,7 @@ async def audition_audiobook(
     api_key: str | None = None,
     matrix: tuple[str, ...] = (),
 ) -> tuple[ArtifactRecord, ...]:
+    """Render bounded comparison samples for one or more backend profiles."""
     document = normalize_sources(
         manifest.sources,
         pronunciations=manifest.pronunciations,
@@ -1301,6 +1399,7 @@ def check_release(
     target_name: str = "default",
     write_manifest: bool = False,
 ) -> ReleaseCheck:
+    """Validate release completeness and optionally publish immutable evidence."""
     document = normalize_sources(
         manifest.sources,
         pronunciations=manifest.pronunciations,
@@ -1363,6 +1462,7 @@ def check_release(
 
 
 def diff_releases(left: Path, right: Path) -> ReleaseDiff:
+    """Compare two immutable release manifests by artifact and metadata identity."""
     left_document = _load_release_document(left)
     right_document = _load_release_document(right)
     left_artifacts = _release_artifact_digests(left_document)
@@ -1711,6 +1811,7 @@ def _release_artifact_issues(
 def assemble_release(
     manifest: AudiobookManifest, *, target_name: str = "default"
 ) -> Path:
+    """Assemble the configured M4B output for a completed build target."""
     check = check_release(manifest, target_name=target_name)
     if not check.complete:
         raise BuildError(
@@ -2425,8 +2526,8 @@ def _preflight_for_plan(
         hosted_work=hosted_work,
         reusable_node_ids=tuple(sorted(reusable)),
         change_summary=_compare_to_previous_success(manifest, plan),
-        from_stage=from_stage.value,
-        through_stage=through_stage.value,
+        from_stage=from_stage,
+        through_stage=through_stage,
     )
 
 
@@ -2761,7 +2862,7 @@ def _find_resumable_run(
     return None
 
 
-def _latest_failed_node_ids(  # noqa: C901
+def _latest_failed_node_ids(
     workspace: Path,
     target: str,
 ) -> set[str]:
@@ -2780,25 +2881,29 @@ def _latest_failed_node_ids(  # noqa: C901
         plan = _load_json_object(plan_path, "prior run plan")
         if plan.get("target") != target:
             continue
-        failed: set[str] = set()
-        try:
-            lines = journal_path.read_text(encoding="utf-8").splitlines()
-        except OSError as error:
-            raise BuildError(
-                f"Cannot read run journal {journal_path}: {error}"
-            ) from error
-        for line in lines:
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                break
-            if isinstance(event, dict) and event.get("event") == "node_failed":
-                node_id = event.get("node_id")
-                if isinstance(node_id, str):
-                    failed.add(node_id)
+        failed = _failed_node_ids(journal_path)
         if failed:
             return failed
     return set()
+
+
+def _failed_node_ids(journal_path: Path) -> set[str]:
+    try:
+        lines = journal_path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise BuildError(f"Cannot read run journal {journal_path}: {error}") from error
+    failed: set[str] = set()
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            break
+        if not isinstance(event, dict) or event.get("event") != "node_failed":
+            continue
+        node_id = event.get("node_id")
+        if isinstance(node_id, str):
+            failed.add(node_id)
+    return failed
 
 
 def _load_json_object(path: Path, description: str) -> dict[str, object]:

@@ -14,7 +14,12 @@ from yakbox.cloud import (
     ResembleSpeechService,
     RetryPolicy,
 )
-from yakbox.speech import AudioFormat, HostedUsageBudget, SpeechSynthesisRequest
+from yakbox.speech import (
+    AudioFormat,
+    HostedUsageBudget,
+    Precision,
+    SpeechSynthesisRequest,
+)
 
 pytestmark = pytest.mark.live
 
@@ -53,7 +58,7 @@ async def test_one_request_three_character_resemble_canary(tmp_path: Path) -> No
                 voice=voice_uuid,
                 backend="resemble",
                 output_format=AudioFormat.WAV,
-                precision="PCM_16",
+                precision=Precision.PCM_16,
             ),
             destination,
         )

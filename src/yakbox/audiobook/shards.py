@@ -12,6 +12,8 @@ from yakbox.errors import BuildError
 
 @dataclass(frozen=True, slots=True)
 class ShardManifest:
+    """Portable assignment of build nodes and artifacts to one worker shard."""
+
     schema_version: int
     plan_fingerprint: str
     target: str
@@ -21,6 +23,7 @@ class ShardManifest:
     artifact_paths: tuple[Path, ...]
 
     def to_dict(self, *, root: Path) -> dict[str, object]:
+        """Serialize shard paths relative to the build root."""
         return {
             **runtime_metadata("audiobook-shard"),
             "plan_fingerprint": self.plan_fingerprint,
@@ -44,6 +47,7 @@ def export_shard_manifests(
     count: int,
     root: Path,
 ) -> tuple[Path, ...]:
+    """Write deterministic non-overlapping shard manifests for a build plan."""
     shards = shard_plan(plan, count)
     directory.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
@@ -66,6 +70,7 @@ def export_shard_manifests(
 def verify_shard_manifests(
     paths: tuple[Path, ...], *, root: Path
 ) -> tuple[ShardManifest, ...]:
+    """Verify shard identity, completeness, ordering, and artifact containment."""
     if not paths:
         raise BuildError("No shard manifests were supplied")
     shards = tuple(_load_shard(path, root=root) for path in paths)

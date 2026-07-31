@@ -30,6 +30,7 @@ class HostedWorkEstimate:
     maximum_estimated_spend: Decimal | None = None
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize conservative hosted usage bounds."""
         return {
             "logical_items": self.logical_items,
             "logical_characters": self.logical_characters,
@@ -58,6 +59,7 @@ def estimate_hosted_work(
     max_attempts: int = 4,
     price_per_character: Decimal | None = None,
 ) -> HostedWorkEstimate:
+    """Estimate conservative logical and retry-inclusive hosted usage bounds."""
     if max_attempts < 1:
         raise ValidationError("max_attempts must be at least 1")
     if price_per_character is not None and (
@@ -131,6 +133,7 @@ def hosted_confirmation_reasons(
     budget: HostedUsageBudget,
     estimate: HostedWorkEstimate,
 ) -> tuple[str, ...]:
+    """Return the configured thresholds that require interactive confirmation."""
     reasons: list[str] = []
     if (
         budget.confirm_above_characters is not None

@@ -14,6 +14,8 @@ from yakbox.errors import ValidationError
 
 @dataclass(frozen=True, slots=True)
 class BookMetadata:
+    """Descriptive and publishing metadata embedded in audiobook outputs."""
+
     title: str
     subtitle: str | None = None
     author: str | None = None
@@ -31,6 +33,8 @@ class BookMetadata:
 
 @dataclass(frozen=True, slots=True)
 class LogicalVoice:
+    """Manifest voice name mapped to rights and optional reference audio."""
+
     name: str
     display_name: str
     rights_basis: str = "not_applicable"
@@ -39,11 +43,15 @@ class LogicalVoice:
 
 @dataclass(frozen=True, slots=True)
 class FakeOptions:
+    """Configuration for deterministic fake-backend audio generation."""
+
     sample_rate: int = 16_000
 
 
 @dataclass(frozen=True, slots=True)
 class ChatterboxOptions:
+    """Runtime and synthesis controls for the local Chatterbox backend."""
+
     device: str = "auto"
     cfg_weight: float | None = None
     exaggeration: float | None = None
@@ -56,6 +64,8 @@ class ChatterboxOptions:
 
 @dataclass(frozen=True, slots=True)
 class ResembleOptions:
+    """Voice, project, and output controls for the Resemble backend."""
+
     voice_uuid: str
     project_uuid: str | None = None
     use_hd: bool = False
@@ -69,6 +79,8 @@ MAX_MEDIA_CONCURRENCY = 32
 
 @dataclass(frozen=True, slots=True)
 class BackendProfile:
+    """Named backend, voice, executor, and options used by build targets."""
+
     name: str
     backend: str
     voice: str
@@ -78,6 +90,8 @@ class BackendProfile:
 
 @dataclass(frozen=True, slots=True)
 class BuildTarget:
+    """Named output pipeline with stage, quality, concurrency, and budget policy."""
+
     name: str
     profile: str
     output_root: Path
@@ -109,6 +123,8 @@ class BuildTarget:
 
 @dataclass(frozen=True, slots=True)
 class RetentionPolicy:
+    """Workspace retention rules used when planning artifact cleanup."""
+
     keep_successful_runs: int = 3
     audition_days: int | None = 30
     preview_days: int | None = 7
@@ -117,6 +133,8 @@ class RetentionPolicy:
 
 @dataclass(frozen=True, slots=True)
 class AudiobookManifest:
+    """Validated, path-resolved configuration for an audiobook workspace."""
+
     path: Path
     schema_version: int
     book: BookMetadata
@@ -130,21 +148,25 @@ class AudiobookManifest:
 
     @property
     def root(self) -> Path:
+        """Return the directory containing the manifest."""
         return self.path.parent
 
     def profile(self, name: str) -> BackendProfile:
+        """Return a named backend profile or raise `ValidationError`."""
         for profile in self.profiles:
             if profile.name == name:
                 return profile
         raise ValidationError(f"Unknown profile: {name}")
 
     def target(self, name: str) -> BuildTarget:
+        """Return a named build target or raise `ValidationError`."""
         for target in self.targets:
             if target.name == name:
                 return target
         raise ValidationError(f"Unknown target: {name}")
 
     def voice(self, name: str) -> LogicalVoice:
+        """Return a named logical voice or raise `ValidationError`."""
         for voice in self.voices:
             if voice.name == name:
                 return voice
@@ -166,13 +188,42 @@ _ROOT_KEYS = {
 
 
 def load_manifest(path: Path) -> AudiobookManifest:
+    """Load, validate, and resolve an audiobook TOML manifest."""
     resolved = path.expanduser().resolve()
+    raw = _read_manifest(resolved)
+    _validate_manifest_header(raw)
+    root = resolved.parent
+    book_raw = _table(raw, "book")
+    book = _parse_book(book_raw, root)
+    sources = _parse_sources(raw, book_raw, root)
+    voices = _parse_voices(raw.get("voices"), root)
+    profiles = _parse_profiles(raw.get("profiles"))
+    targets = _parse_targets(raw.get("targets"), root)
+    _validate_manifest_references(root, sources, voices, profiles, targets)
+    return AudiobookManifest(
+        path=resolved,
+        schema_version=1,
+        book=book,
+        sources=sources,
+        pronunciations=_parse_pronunciation_path(raw, root),
+        voices=voices,
+        profiles=profiles,
+        targets=targets,
+        retention=_parse_retention(raw.get("retention")),
+        max_pause_ms=_parse_source_options(raw),
+    )
+
+
+def _read_manifest(path: Path) -> dict[str, object]:
     try:
-        raw = tomllib.loads(resolved.read_text(encoding="utf-8"))
+        return tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as error:
-        raise ValidationError(f"Manifest does not exist: {resolved}") from error
+        raise ValidationError(f"Manifest does not exist: {path}") from error
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
-        raise ValidationError(f"Cannot read manifest {resolved}: {error}") from error
+        raise ValidationError(f"Cannot read manifest {path}: {error}") from error
+
+
+def _validate_manifest_header(raw: dict[str, object]) -> None:
     _reject_unknown(raw, _ROOT_KEYS, "manifest")
     if raw.get("$schema") != schema_uri("audiobook-manifest"):
         raise ValidationError(
@@ -180,10 +231,11 @@ def load_manifest(path: Path) -> AudiobookManifest:
         )
     if raw.get("schema_version") != 1:
         raise ValidationError("yakbox.toml requires schema_version = 1")
-    root = resolved.parent
-    book_raw = _table(raw, "book")
+
+
+def _parse_book(raw: dict[str, object], root: Path) -> BookMetadata:
     _reject_unknown(
-        book_raw,
+        raw,
         {
             "title",
             "subtitle",
@@ -201,20 +253,57 @@ def load_manifest(path: Path) -> AudiobookManifest:
         },
         "book",
     )
-    title = _required_string(book_raw, "title", "book")
-    cover_value = book_raw.get("cover")
+    title = _required_string(raw, "title", "book")
+    cover_value = raw.get("cover")
     if cover_value is not None and not isinstance(cover_value, str):
         raise ValidationError("book.cover must be a relative path string")
-    sources_raw = raw.get("sources", book_raw.get("sources"))
+    return BookMetadata(
+        title=title,
+        subtitle=_optional_string(raw.get("subtitle"), "book.subtitle"),
+        author=_optional_string(raw.get("author"), "book.author"),
+        narrator=_optional_string(raw.get("narrator"), "book.narrator"),
+        language=_string_or_default(raw.get("language"), "book.language", "en"),
+        copyright=_optional_string(raw.get("copyright"), "book.copyright"),
+        publisher=_optional_string(raw.get("publisher"), "book.publisher"),
+        genre=_optional_string(raw.get("genre"), "book.genre"),
+        series=_optional_string(raw.get("series"), "book.series"),
+        series_position=_string_or_number_or_none(
+            raw.get("series_position"),
+            "book.series_position",
+        ),
+        isbn=_optional_string(raw.get("isbn"), "book.isbn"),
+        publication_date=_optional_string(
+            raw.get("publication_date"),
+            "book.publication_date",
+        ),
+        cover=(
+            _workspace_path(root, cover_value, "book.cover", must_exist=True)
+            if isinstance(cover_value, str)
+            else None
+        ),
+    )
+
+
+def _parse_sources(
+    raw: dict[str, object],
+    book: dict[str, object],
+    root: Path,
+) -> tuple[Path, ...]:
+    sources_raw = raw.get("sources", book.get("sources"))
     if sources_raw is None:
         source_table = raw.get("source")
         if isinstance(source_table, dict):
             sources_raw = source_table.get("paths")
-    sources = _paths(sources_raw, root)
-    voices = _parse_voices(raw.get("voices"), root)
-    profiles = _parse_profiles(raw.get("profiles"))
-    targets = _parse_targets(raw.get("targets"), root)
-    retention = _parse_retention(raw.get("retention"))
+    return _paths(sources_raw, root)
+
+
+def _validate_manifest_references(
+    root: Path,
+    sources: tuple[Path, ...],
+    voices: tuple[LogicalVoice, ...],
+    profiles: tuple[BackendProfile, ...],
+    targets: tuple[BuildTarget, ...],
+) -> None:
     for target in targets:
         if target.output_root == root:
             raise ValidationError("A target output_root cannot be the workspace root")
@@ -223,76 +312,42 @@ def load_manifest(path: Path) -> AudiobookManifest:
                 raise ValidationError(
                     f"Target {target.name!r} output_root contains source file {source}"
                 )
+    voice_names = {voice.name for voice in voices}
     for profile in profiles:
-        if profile.voice not in {voice.name for voice in voices}:
+        if profile.voice not in voice_names:
             raise ValidationError(
                 f"Profile {profile.name!r} references unknown voice {profile.voice!r}"
             )
+    profile_names = {profile.name for profile in profiles}
     for target in targets:
-        if target.profile not in {profile.name for profile in profiles}:
+        if target.profile not in profile_names:
             raise ValidationError(
                 f"Target {target.name!r} references unknown profile {target.profile!r}"
             )
+
+
+def _parse_pronunciation_path(raw: dict[str, object], root: Path) -> Path | None:
     pronunciation_value = raw.get("pronunciations")
     if pronunciation_value is not None and not isinstance(pronunciation_value, str):
         raise ValidationError("pronunciations must be a relative path string")
-    pronunciation_path = (
+    return (
         _workspace_path(root, pronunciation_value, "pronunciations", must_exist=True)
         if isinstance(pronunciation_value, str)
         else None
     )
+
+
+def _parse_source_options(raw: dict[str, object]) -> int:
     source_table = raw.get("source")
     if source_table is not None and not isinstance(source_table, dict):
         raise ValidationError("source must be a TOML table")
-    max_pause_ms = 30_000
     if isinstance(source_table, dict):
+        source_table = cast(dict[str, object], source_table)
         _reject_unknown(source_table, {"paths", "max_pause_ms"}, "source")
-        max_pause_ms = _positive_int(
+        return _positive_int(
             source_table.get("max_pause_ms", 30_000), "source.max_pause_ms"
         )
-    return AudiobookManifest(
-        path=resolved,
-        schema_version=1,
-        book=BookMetadata(
-            title=title,
-            subtitle=_optional_string(book_raw.get("subtitle"), "book.subtitle"),
-            author=_optional_string(book_raw.get("author"), "book.author"),
-            narrator=_optional_string(book_raw.get("narrator"), "book.narrator"),
-            language=_string_or_default(
-                book_raw.get("language"), "book.language", "en"
-            ),
-            copyright=_optional_string(book_raw.get("copyright"), "book.copyright"),
-            publisher=_optional_string(book_raw.get("publisher"), "book.publisher"),
-            genre=_optional_string(book_raw.get("genre"), "book.genre"),
-            series=_optional_string(book_raw.get("series"), "book.series"),
-            series_position=_string_or_number_or_none(
-                book_raw.get("series_position"),
-                "book.series_position",
-            ),
-            isbn=_optional_string(book_raw.get("isbn"), "book.isbn"),
-            publication_date=_optional_string(
-                book_raw.get("publication_date"),
-                "book.publication_date",
-            ),
-            cover=(
-                _workspace_path(
-                    root,
-                    cover_value,
-                    "book.cover",
-                    must_exist=True,
-                )
-                if isinstance(cover_value, str)
-                else None
-            ),
-        ),
-        sources=sources,
-        pronunciations=pronunciation_path,
-        voices=voices,
-        profiles=profiles,
-        targets=targets,
-        retention=retention,
-        max_pause_ms=max_pause_ms,
-    )
+    return 30_000
 
 
 def _parse_voices(value: object, root: Path) -> tuple[LogicalVoice, ...]:

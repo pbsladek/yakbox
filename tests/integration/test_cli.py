@@ -12,6 +12,7 @@ from tests.schema_helpers import validate_contract
 
 from yakbox.cli import main
 from yakbox.cloud import Page
+from yakbox.speech import AudioFormat, SpeechArtifact
 
 
 def test_help_does_not_import_torch() -> None:
@@ -32,7 +33,8 @@ def test_json_usage_errors_use_stable_envelope_and_exit_two() -> None:
     payload = json.loads(result.output)
     assert payload["status"] == "error"
     assert payload["exit_code"] == 2
-    assert payload["error"]["code"] == "BadParameter"
+    assert payload["error"]["code"] == "invalid_argument"
+    assert payload["command"] == "build"
     validate_contract("cli-output", payload)
 
 
@@ -252,3 +254,193 @@ def test_cloud_profile_reads_optional_keyring_without_exposing_secret(
     assert result.exit_code == 0, result.output
     assert captured == ["keyring-secret"]
     assert "keyring-secret" not in result.output
+
+
+def test_generic_hosted_tts_uses_keyring_before_legacy_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text('[cloud]\napi_key = "legacy-secret"\n', encoding="utf-8")
+    monkeypatch.delenv("RESEMBLE_API_KEY", raising=False)
+    monkeypatch.setenv("YAKBOX_CONFIG", str(config))
+    monkeypatch.setattr(
+        "yakbox.cli._keyring_password",
+        lambda profile: "keyring-secret" if profile == "default" else None,
+    )
+    captured: list[str | None] = []
+
+    async def direct_tts(
+        *_args: object, **kwargs: object
+    ) -> tuple[SpeechArtifact, None]:
+        captured.append(
+            kwargs["api_key"] if isinstance(kwargs["api_key"], str) else None
+        )
+        return (
+            SpeechArtifact(
+                path=tmp_path / "speech.wav",
+                backend="cloud",
+                voice="narrator",
+                output_format=AudioFormat.WAV,
+                bytes_written=1,
+                sha256="digest",
+            ),
+            None,
+        )
+
+    monkeypatch.setattr("yakbox.cli._direct_tts", direct_tts)
+    result = CliRunner().invoke(
+        main,
+        ["--json", "tts", "hello", "--backend", "cloud", "--yes"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == ["keyring-secret"]
+    assert "keyring-secret" not in result.output
+    assert "legacy-secret" not in result.output
+
+
+def test_local_batch_rejects_hosted_backends_before_execution(tmp_path: Path) -> None:
+    script = tmp_path / "script.txt"
+    script.write_text("A billable line.\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        ["--json", "batch", str(script), "--backend", "cloud"],
+    )
+
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "usage_error"
+    assert "local-only" in payload["error"]["message"]
+
+
+def test_conflicting_output_modes_and_empty_verify_are_usage_errors() -> None:
+    modes = CliRunner().invoke(main, ["--json", "--quiet", "--verbose", "models"])
+    verify = CliRunner().invoke(main, ["--json", "verify"])
+
+    assert modes.exit_code == 2
+    assert json.loads(modes.output)["error"]["code"] == "usage_error"
+    assert verify.exit_code == 2
+    assert json.loads(verify.output)["error"]["code"] == "missing_parameter"
+
+
+def test_purge_all_requires_an_explicit_scope() -> None:
+    missing_scope = CliRunner().invoke(
+        main,
+        ["--json", "artifacts", "trash", "purge", "--yes"],
+    )
+    conflicting_scope = CliRunner().invoke(
+        main,
+        [
+            "--json",
+            "artifacts",
+            "trash",
+            "purge",
+            "cleanup-1",
+            "--all",
+            "--yes",
+        ],
+    )
+
+    assert missing_scope.exit_code == 2
+    assert conflicting_scope.exit_code == 2
+    assert "CLEANUP_ID or --all" in json.loads(missing_scope.output)["error"]["message"]
+
+
+def test_inspect_uses_the_selected_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    selected: list[str] = []
+    manifest = SimpleNamespace(
+        target=lambda name: (
+            selected.append(name) or SimpleNamespace(output_root=Path("unused"))
+        )
+    )
+    monkeypatch.setattr("yakbox.cli.load_manifest", lambda _path: manifest)
+    monkeypatch.setattr(
+        "yakbox.cli.inventory_artifacts",
+        lambda _root: SimpleNamespace(records=()),
+    )
+
+    result = CliRunner().invoke(
+        main,
+        ["--json", "inspect", "book.toml", "--target", "release"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert selected == ["release"]
+
+
+def test_unexpected_json_failures_do_not_expose_exception_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(_name: str) -> object:
+        raise RuntimeError("sensitive implementation detail")
+
+    monkeypatch.setattr("yakbox.cli.importlib.util.find_spec", fail)
+    result = CliRunner().invoke(main, ["--json", "models"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error"] == {
+        "code": "internal_error",
+        "message": "An unexpected internal error occurred",
+    }
+    assert "sensitive" not in result.output
+
+
+def test_report_failures_publish_the_effective_exit_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unhealthy_doctor(*_args: object, **_kwargs: object) -> object:
+        return SimpleNamespace(healthy=False, to_dict=lambda: {"diagnostics": []})
+
+    monkeypatch.setattr("yakbox.cli.run_doctor", unhealthy_doctor)
+    doctor = CliRunner().invoke(main, ["--json", "doctor"])
+
+    manifest = SimpleNamespace(
+        root=tmp_path,
+        sources=(),
+        pronunciations=None,
+        max_pause_ms=30_000,
+        target=lambda _name: SimpleNamespace(output_root=tmp_path),
+    )
+    monkeypatch.setattr("yakbox.cli.load_manifest", lambda _path: manifest)
+    monkeypatch.setattr(
+        "yakbox.cli.check_release",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            complete=False,
+            issues=("missing release artifact",),
+            to_dict=lambda: {"complete": False, "issues": ["missing release artifact"]},
+        ),
+    )
+    release = CliRunner().invoke(main, ["--json", "release", "check"])
+
+    monkeypatch.setattr(
+        "yakbox.cli.audit_pronunciations",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            rules=(object(),),
+            unused_rules=1,
+            shadowed_matches=0,
+            to_dict=lambda **_kwargs: {"unused_rules": 1},
+        ),
+    )
+    pronunciations = CliRunner().invoke(
+        main,
+        ["--json", "pronunciations", "audit", "--fail-unused"],
+    )
+
+    record = SimpleNamespace(path=tmp_path / "artifact.wav")
+    monkeypatch.setattr(
+        "yakbox.cli.inventory_artifacts",
+        lambda _root: SimpleNamespace(records=(record,)),
+    )
+    monkeypatch.setattr("yakbox.cli.verify_artifact", lambda _record: (False, "bad"))
+    artifacts = CliRunner().invoke(main, ["--json", "artifacts", "verify"])
+
+    for result in (doctor, release, pronunciations, artifacts):
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.output)
+        assert payload["status"] == "partial_failure"
+        assert payload["exit_code"] == result.exit_code
+        validate_contract("cli-output", payload)

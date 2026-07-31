@@ -87,6 +87,7 @@ def mocked_chatterbox(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_short_local_tts_is_typed_cached_and_atomic(
     tmp_path: Path, mocked_chatterbox: None
 ) -> None:
+    _ = mocked_chatterbox
     service = LocalChatterboxService(device="cpu")
     reference = tmp_path / "reference.wav"
     reference.write_bytes(b"reference")
@@ -119,6 +120,7 @@ async def test_short_local_tts_is_typed_cached_and_atomic(
 async def test_short_local_voice_conversion_uses_reference(
     tmp_path: Path, mocked_chatterbox: None
 ) -> None:
+    _ = mocked_chatterbox
     source = tmp_path / "source.wav"
     reference = tmp_path / "target.wav"
     source.write_bytes(b"source")
@@ -144,6 +146,7 @@ async def test_short_local_tts_applies_typed_chatterbox_controls(
     tmp_path: Path,
     mocked_chatterbox: None,
 ) -> None:
+    _ = mocked_chatterbox
     await LocalChatterboxService(device="cpu").synthesize_to_file(
         SpeechSynthesisRequest(
             text="Hi.",
@@ -167,6 +170,7 @@ async def test_short_local_tts_applies_typed_chatterbox_controls(
 async def test_local_writer_failure_leaves_no_partial_destination(
     tmp_path: Path, mocked_chatterbox: None
 ) -> None:
+    _ = mocked_chatterbox
     destination = tmp_path / "failed.wav"
     _AudioWriter.fail = True
 

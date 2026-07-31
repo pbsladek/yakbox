@@ -3,6 +3,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class BackendCapabilities:
+    """Machine-readable operations and formats supported by a speech backend."""
+
     name: str
     synthesis: bool
     transformation: bool

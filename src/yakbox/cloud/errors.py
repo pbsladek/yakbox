@@ -8,13 +8,20 @@ from yakbox.errors import YakboxError
 class CloudError(YakboxError):
     """Base class for hosted-provider errors."""
 
+    code = "cloud_error"
+
 
 class ClientStateError(CloudError):
     """The HTTP client is not open."""
 
+    code = "client_state_error"
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderError(CloudError):
+    """A bounded provider response error safe to report to callers."""
+
+    code = "provider_error"
     status_code: int
     message: str
     request_id: str | None = None
@@ -29,9 +36,13 @@ class ProviderError(CloudError):
 class ProviderProtocolError(CloudError):
     """The provider returned a malformed or oversized response."""
 
+    code = "provider_protocol_error"
+
 
 class AmbiguousMutationError(CloudError):
     """A management mutation may have reached the provider."""
+
+    code = "ambiguous_mutation"
 
     def __init__(self, operation: str, *, cause: Exception) -> None:
         self.operation = operation
@@ -44,6 +55,8 @@ class AmbiguousMutationError(CloudError):
 
 class RetryExhaustedError(CloudError):
     """All retry attempts were consumed, retaining safe terminal evidence."""
+
+    code = "retry_exhausted"
 
     def __init__(self, *, attempts: int, last_error: Exception) -> None:
         self.attempts = attempts
@@ -64,10 +77,16 @@ class RetryExhaustedError(CloudError):
 class HostedBudgetExceeded(CloudError):
     """A hosted usage limit would be exceeded."""
 
+    code = "hosted_budget_exceeded"
+
 
 class BatchJournalError(CloudError):
     """The durable cloud batch journal is unavailable or inconsistent."""
 
+    code = "batch_journal_error"
+
 
 class ResumeMismatchError(CloudError):
     """A batch resume input or configuration differs from its journal."""
+
+    code = "resume_mismatch"

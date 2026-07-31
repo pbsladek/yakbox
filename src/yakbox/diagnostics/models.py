@@ -8,7 +8,7 @@ from yakbox.contracts import runtime_metadata
 
 
 class DiagnosticStatus(StrEnum):
-    PASS = "pass"
+    PASS = "pass"  # noqa: S105 - diagnostic status, not a credential
     WARN = "warn"
     FAIL = "fail"
     SKIP = "skip"
@@ -22,6 +22,8 @@ class DiagnosticSeverity(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Diagnostic:
+    """One health check result with severity, remediation, timing, and evidence."""
+
     id: str
     status: DiagnosticStatus
     severity: DiagnosticSeverity
@@ -35,16 +37,20 @@ class Diagnostic:
 
 @dataclass(frozen=True, slots=True)
 class DoctorReport:
+    """Versioned collection of environment and backend health diagnostics."""
+
     schema_version: int
     diagnostics: tuple[Diagnostic, ...]
 
     @property
     def healthy(self) -> bool:
+        """Return whether no diagnostic has an error-severity failure."""
         return not any(
             item.status is DiagnosticStatus.FAIL for item in self.diagnostics
         )
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize diagnostics using the versioned doctor-report contract."""
         return {
             **runtime_metadata("doctor-report"),
             "healthy": self.healthy,

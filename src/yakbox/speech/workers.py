@@ -331,7 +331,9 @@ class IsolatedLocalSpeechService:
 
 
 async def _worker_main(request_path: Path, result_path: Path) -> None:
-    from yakbox.local import LocalChatterboxService
+    from yakbox.local import (  # noqa: PLC0415 - loaded only in child process
+        LocalChatterboxService,
+    )
 
     request = _read_request(request_path)
     service = LocalChatterboxService(device=request.device)
@@ -363,7 +365,9 @@ async def _worker_main(request_path: Path, result_path: Path) -> None:
 async def _worker_server(device: str) -> None:
     protocol_output = sys.stdout
     with redirect_stdout(sys.stderr):
-        from yakbox.local import LocalChatterboxService
+        from yakbox.local import (  # noqa: PLC0415 - loaded only in child process
+            LocalChatterboxService,
+        )
 
         service = LocalChatterboxService(device=device)
     while line := sys.stdin.buffer.readline():
@@ -398,7 +402,7 @@ async def _worker_server(device: str) -> None:
                 "ok": True,
                 "items": [_artifact_result(artifact) for artifact in artifacts],
             }
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - worker protocol returns safe errors
             response = {
                 "protocol_version": WORKER_PROTOCOL_VERSION,
                 "ok": False,

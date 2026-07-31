@@ -36,10 +36,12 @@ class HostedUsageGate:
         self._recorder = recorder
 
     async def add_logical_item(self) -> None:
+        """Record one logical requested item before provider attempts."""
         async with self._lock:
             self._logical_items += 1
 
     async def reserve_attempt(self, characters: int) -> None:
+        """Reserve one provider attempt and its submitted characters durably."""
         async with self._lock:
             next_attempts = self._attempts + 1
             next_characters = self._characters + characters
@@ -85,6 +87,7 @@ class HostedUsageGate:
             self._characters = next_characters
 
     async def mark_ambiguous(self) -> None:
+        """Mark the latest attempt as potentially accepted or billed."""
         async with self._lock:
             self._ambiguous += 1
 
@@ -139,6 +142,7 @@ class HostedUsageGate:
             self._ambiguous = ambiguous_attempts
 
     async def snapshot(self) -> HostedUsageSnapshot:
+        """Return an immutable snapshot of current usage counters."""
         async with self._lock:
             return HostedUsageSnapshot(
                 logical_items=self._logical_items,

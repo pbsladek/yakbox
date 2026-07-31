@@ -5,6 +5,8 @@ conversion, local batch synthesis, and provider management use the same typed
 speech services as audiobook builds.
 
 - [Architecture and phased build-system plan](AUDIOBOOK_BUILD_SYSTEM_PLAN.md)
+- [Code quality standard](code-quality.md)
+- [Code quality review](code-quality-review.md)
 - [Installing and releasing yakbox](installing-and-releasing.md)
 - [Live backend canaries](live-canaries.md)
 - [Getting started](getting-started.md)

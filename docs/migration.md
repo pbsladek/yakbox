@@ -54,6 +54,11 @@ Deprecated `--api-key` remains accepted but warns; migrate to environment or
 keyring profiles. `is_public` is not a Resemble project-create field and is
 never sent.
 
+Credential profiles use `config auth ... --credential-profile NAME` and
+`cloud --credential-profile NAME`; `--profile` remains a compatibility alias.
+Cloud batch resume journals use `--resume-from PATH`; `--resume` remains a
+compatibility alias.
+
 ## Versioned contracts
 
 Manifests and JSON outputs carry schema version 1 and a schema URI. Automation

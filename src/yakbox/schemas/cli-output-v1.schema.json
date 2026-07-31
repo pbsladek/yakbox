@@ -3,16 +3,68 @@
   "$id": "https://yakbox.dev/schemas/cli-output-v1.schema.json",
   "title": "yakbox CLI envelope",
   "type": "object",
-  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "status"],
+  "required": [
+    "$schema",
+    "schema_version",
+    "yakbox_version",
+    "timestamp",
+    "command",
+    "status",
+    "exit_code"
+  ],
   "properties": {
-    "$schema": {"type": "string"},
+    "$schema": {
+      "const": "https://yakbox.dev/schemas/cli-output-v1.schema.json"
+    },
     "schema_version": {"const": 1},
-    "yakbox_version": {"type": "string"},
+    "yakbox_version": {"type": "string", "minLength": 1},
     "timestamp": {"type": "string", "format": "date-time"},
+    "command": {"type": "string", "minLength": 1},
     "status": {"enum": ["ok", "partial_failure", "aborted", "error"]},
     "data": {"type": "object"},
     "exit_code": {"type": "integer"},
-    "error": {"type": "object"}
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "message": {"type": "string", "maxLength": 2048}
+      },
+      "additionalProperties": false
+    }
   },
-  "additionalProperties": true
+  "oneOf": [
+    {
+      "properties": {"status": {"const": "ok"}, "exit_code": {"const": 0}},
+      "required": ["data"],
+      "not": {"required": ["error"]}
+    },
+    {
+      "properties": {
+        "status": {"const": "partial_failure"},
+        "exit_code": {"enum": [0, 1]}
+      },
+      "required": ["data"],
+      "not": {"required": ["error"]}
+    },
+    {
+      "properties": {
+        "status": {"const": "aborted"},
+        "exit_code": {"enum": [1, 130]}
+      },
+      "oneOf": [
+        {"required": ["data"], "not": {"required": ["error"]}},
+        {"required": ["error"], "not": {"required": ["data"]}}
+      ]
+    },
+    {
+      "properties": {
+        "status": {"const": "error"},
+        "exit_code": {"enum": [1, 2]}
+      },
+      "required": ["error"],
+      "not": {"required": ["data"]}
+    }
+  ],
+  "additionalProperties": false
 }

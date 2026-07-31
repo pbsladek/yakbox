@@ -18,6 +18,7 @@ from yakbox.speech.models import (
     HostedUsageBudget,
     HostedUsageSnapshot,
     SpeechArtifact,
+    SpeechBackendOptions,
     SpeechSynthesisRequest,
     SpeechTransformationRequest,
 )
@@ -26,7 +27,9 @@ from yakbox.speech.models import (
 @runtime_checkable
 class TextToSpeechService(Protocol):
     @property
-    def capabilities(self) -> BackendCapabilities: ...
+    def capabilities(self) -> BackendCapabilities:
+        """Describe synthesis, streaming, format, and hosted capabilities."""
+        ...
 
     async def synthesize_to_file(
         self,
@@ -34,7 +37,9 @@ class TextToSpeechService(Protocol):
         destination: Path,
         *,
         overwrite: bool = False,
-    ) -> SpeechArtifact: ...
+    ) -> SpeechArtifact:
+        """Synthesize one request and atomically commit its destination."""
+        ...
 
 
 @runtime_checkable
@@ -44,13 +49,17 @@ class BatchTextToSpeechService(Protocol):
         requests: tuple[tuple[SpeechSynthesisRequest, Path], ...],
         *,
         overwrite: bool = False,
-    ) -> tuple[SpeechArtifact, ...]: ...
+    ) -> tuple[SpeechArtifact, ...]:
+        """Synthesize ordered request/destination pairs as one batch."""
+        ...
 
 
 @runtime_checkable
 class SpeechTransformationService(Protocol):
     @property
-    def capabilities(self) -> BackendCapabilities: ...
+    def capabilities(self) -> BackendCapabilities:
+        """Describe the backend's transformation capabilities."""
+        ...
 
     async def transform_to_file(
         self,
@@ -58,12 +67,16 @@ class SpeechTransformationService(Protocol):
         destination: Path,
         *,
         overwrite: bool = False,
-    ) -> SpeechArtifact: ...
+    ) -> SpeechArtifact:
+        """Transform one input and atomically commit its destination."""
+        ...
 
 
 @runtime_checkable
 class HostedUsageReportingService(Protocol):
-    async def usage_snapshot(self) -> HostedUsageSnapshot | None: ...
+    async def usage_snapshot(self) -> HostedUsageSnapshot | None:
+        """Return current hosted usage when the service tracks it."""
+        ...
 
 
 type HostedUsageRecorder = Callable[
@@ -74,9 +87,13 @@ type HostedUsageRecorder = Callable[
 
 @runtime_checkable
 class HostedUsageJournalingService(Protocol):
-    def set_usage_recorder(self, recorder: HostedUsageRecorder | None) -> None: ...
+    def set_usage_recorder(self, recorder: HostedUsageRecorder | None) -> None:
+        """Install a durable callback invoked before provider sends."""
+        ...
 
-    async def restore_usage(self, snapshot: HostedUsageSnapshot) -> None: ...
+    async def restore_usage(self, snapshot: HostedUsageSnapshot) -> None:
+        """Restore durable counters before resumed provider work."""
+        ...
 
 
 class FakeSpeechService:
@@ -99,6 +116,7 @@ class FakeSpeechService:
         *,
         overwrite: bool = False,
     ) -> SpeechArtifact:
+        """Generate deterministic WAV audio for an accepted request."""
         if request.output_format is not AudioFormat.WAV:
             raise BackendUnavailableError("The fake backend produces WAV only")
         rate = request.sample_rate or 16_000
@@ -123,6 +141,7 @@ class FakeSpeechService:
         *,
         overwrite: bool = False,
     ) -> SpeechArtifact:
+        """Copy an input deterministically as a fake transformation."""
         audio = request.input_path.read_bytes()
         atomic_write_bytes(destination, audio, overwrite=overwrite)
         return SpeechArtifact(
@@ -165,13 +184,16 @@ async def open_speech_backend(
     local_threads_per_process: int = 1,
     local_worker_log_path: Path | None = None,
 ) -> AsyncIterator[TextToSpeechService]:
+    """Open one backend service and close resources when the context exits."""
     normalized = name.casefold()
     if normalized == "fake":
         yield FakeSpeechService()
         return
     if normalized in {"local", "chatterbox", "chatterbox-local"}:
         if isolated_local:
-            from yakbox.speech.workers import IsolatedLocalSpeechService
+            from yakbox.speech.workers import (  # noqa: PLC0415 - optional backend
+                IsolatedLocalSpeechService,
+            )
 
             service = IsolatedLocalSpeechService(
                 device=device or "auto",
@@ -184,7 +206,9 @@ async def open_speech_backend(
             finally:
                 await service.aclose()
         else:
-            from yakbox.local import LocalChatterboxService
+            from yakbox.local import (  # noqa: PLC0415 - optional heavy dependency
+                LocalChatterboxService,
+            )
 
             yield LocalChatterboxService(device=device or "auto")
         return
@@ -193,7 +217,7 @@ async def open_speech_backend(
             raise BackendUnavailableError(
                 "Resemble API key is required; set RESEMBLE_API_KEY"
             )
-        from yakbox.cloud import (
+        from yakbox.cloud import (  # noqa: PLC0415 - optional hosted backend
             ClientOptions,
             HostedUsageGate,
             ResembleClient,
@@ -234,15 +258,39 @@ async def open_speech_backend(
 async def open_transformation_backend(
     name: str,
 ) -> AsyncIterator[SpeechTransformationService]:
+    """Open a transformation backend for the lifetime of the async context."""
     normalized = name.casefold()
     if normalized == "fake":
         yield FakeSpeechService()
         return
     if normalized in {"local", "chatterbox", "chatterbox-local"}:
-        from yakbox.local import LocalChatterboxService
+        from yakbox.local import (  # noqa: PLC0415 - optional heavy dependency
+            LocalChatterboxService,
+        )
 
         yield LocalChatterboxService()
         return
     raise BackendUnavailableError(
         f"Backend {name!r} does not support speech transformation"
     )
+
+
+@asynccontextmanager
+async def open_configured_speech_backend(
+    name: str,
+    options: SpeechBackendOptions,
+) -> AsyncIterator[TextToSpeechService]:
+    """Open a speech backend from one evolvable typed options object."""
+    async with open_speech_backend(
+        name,
+        api_key=options.api_key,
+        isolated_local=options.isolated_local,
+        hosted_budget=options.hosted_budget,
+        price_per_character=options.price_per_character,
+        max_connections=options.max_connections,
+        device=options.device,
+        local_worker_timeout_seconds=options.local_worker_timeout_seconds,
+        local_threads_per_process=options.local_threads_per_process,
+        local_worker_log_path=options.local_worker_log_path,
+    ) as service:
+        yield service

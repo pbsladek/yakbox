@@ -25,6 +25,8 @@ class ArtifactKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ArtifactRecord:
+    """Immutable identity, provenance, and integrity metadata for one artifact."""
+
     schema_version: int
     id: str
     kind: ArtifactKind
@@ -43,6 +45,7 @@ class ArtifactRecord:
     watermark_disclosure: str | None = None
 
     def to_dict(self, *, root: Path) -> dict[str, object]:
+        """Serialize artifact identity relative to its managed root."""
         value = asdict(self)
         value.update(runtime_metadata("audiobook-artifact"))
         value["kind"] = self.kind.value
@@ -53,6 +56,8 @@ class ArtifactRecord:
 
 @dataclass(frozen=True, slots=True)
 class InventoryReport:
+    """Managed and unknown files discovered beneath an artifact root."""
+
     root: Path
     records: tuple[ArtifactRecord, ...]
     unknown_files: tuple[Path, ...]
@@ -60,6 +65,7 @@ class InventoryReport:
     managed_bytes: int
 
     def to_dict(self, *, workspace: Path) -> dict[str, object]:
+        """Serialize inventory totals and records relative to a workspace."""
         return {
             **runtime_metadata("audiobook-inventory"),
             "root": str(self.root),
@@ -157,6 +163,7 @@ def repair_artifact_metadata(
 
 
 def inventory_artifacts(root: Path) -> InventoryReport:
+    """Inventory managed artifact sidecars and unknown files beneath a root."""
     root = root.resolve()
     records: list[ArtifactRecord] = []
     artifact_ids: set[str] = set()

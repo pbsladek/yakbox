@@ -58,6 +58,10 @@ artifact models, hosted-budget checks, and errors. Direct commands are useful
 for testing and automation, but the audiobook lifecycle is the primary
 interface for chapter-scale work.
 
+`yakbox batch` is local-only. It rejects `cloud` and `resemble` backend aliases
+so hosted work cannot bypass confirmation, budget, journal, and resume rules.
+Use `yakbox cloud batch` for provider batches.
+
 ## Audition matrices
 
 ```console

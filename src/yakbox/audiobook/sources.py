@@ -25,6 +25,8 @@ _DIRECTIVE_GAP = "\ue000"
 
 @dataclass(frozen=True, slots=True)
 class SourceLocation:
+    """Inclusive line range identifying content in one source file."""
+
     path: Path
     start_line: int
     end_line: int
@@ -32,6 +34,8 @@ class SourceLocation:
 
 @dataclass(frozen=True, slots=True)
 class SpeechSegment:
+    """Normalized spoken text with stable identity and source provenance."""
+
     id: str
     chapter_id: str
     text: str
@@ -41,6 +45,8 @@ class SpeechSegment:
 
 @dataclass(frozen=True, slots=True)
 class Pause:
+    """Explicit silence event attached to a source location and chapter."""
+
     chapter_id: str
     milliseconds: int
     source: SourceLocation
@@ -48,6 +54,8 @@ class Pause:
 
 @dataclass(frozen=True, slots=True)
 class Chapter:
+    """Ordered chapter containing normalized speech and pause events."""
+
     id: str
     title: str
     order: int
@@ -57,6 +65,8 @@ class Chapter:
 
 @dataclass(frozen=True, slots=True)
 class NormalizedDocument:
+    """Deterministic chapter sequence and digest derived from source files."""
+
     chapters: tuple[Chapter, ...]
     sha256: str
 
@@ -74,6 +84,8 @@ class Pronunciation:
 
 @dataclass(frozen=True, slots=True)
 class PronunciationRuleAudit:
+    """Match, application, and shadowing evidence for one pronunciation rule."""
+
     written: str
     spoken: str
     priority: int
@@ -84,9 +96,12 @@ class PronunciationRuleAudit:
 
     @property
     def unused(self) -> bool:
+        """Return whether the rule had no source matches."""
         return self.matches == 0
 
     def to_dict(self, *, root: Path | None = None) -> dict[str, object]:
+        """Serialize one pronunciation-rule audit."""
+
         def location_value(location: SourceLocation) -> dict[str, object]:
             path = location.path
             path_value = (
@@ -114,17 +129,22 @@ class PronunciationRuleAudit:
 
 @dataclass(frozen=True, slots=True)
 class PronunciationAudit:
+    """Aggregate usage findings for all configured pronunciation rules."""
+
     rules: tuple[PronunciationRuleAudit, ...]
 
     @property
     def unused_rules(self) -> int:
+        """Return the number of rules with no source matches."""
         return sum(rule.unused for rule in self.rules)
 
     @property
     def shadowed_matches(self) -> int:
+        """Return the number of matches hidden by higher-priority rules."""
         return sum(rule.shadowed for rule in self.rules)
 
     def to_dict(self, *, root: Path | None = None) -> dict[str, object]:
+        """Serialize the complete pronunciation audit."""
         return {
             "schema_version": 1,
             "rule_count": len(self.rules),
@@ -140,6 +160,7 @@ def normalize_sources(
     pronunciations: Path | None = None,
     max_pause_ms: int = 30_000,
 ) -> NormalizedDocument:
+    """Parse source files into deterministic chapters, speech, and pause events."""
     rules = _load_pronunciations(pronunciations)
     chapters: list[Chapter] = []
     for path in paths:
@@ -246,92 +267,132 @@ def _normalize_one(
     rules: tuple[Pronunciation, ...],
     max_pause_ms: int,
 ) -> list[Chapter]:
+    source = _read_source(path)
+    prepared = _apply_directives(source, path=path, max_pause_ms=max_pause_ms)
+    tokens = MarkdownIt("commonmark", {"html": True}).parse(prepared)
+    chapters: list[Chapter] = []
+    order = start_order
+    for title, blocks in _chapter_blocks(tokens, _default_chapter_title(path)):
+        chapter = _build_chapter(path, title, order, blocks, rules)
+        if chapter is not None:
+            chapters.append(chapter)
+            order += 1
+    return chapters
+
+
+def _read_source(path: Path) -> str:
     try:
-        source = path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as error:
         raise ValidationError(
             f"Cannot read audiobook source {path}: {error}"
         ) from error
-    prepared = _apply_directives(source, path=path, max_pause_ms=max_pause_ms)
-    markdown = MarkdownIt("commonmark", {"html": True})
-    tokens = markdown.parse(prepared)
-    chapters: list[Chapter] = []
-    current_title = path.stem.replace("-", " ").replace("_", " ").title()
+
+
+def _default_chapter_title(path: Path) -> str:
+    return path.stem.replace("-", " ").replace("_", " ").title()
+
+
+def _chapter_blocks(
+    tokens: list[Token],
+    default_title: str,
+) -> list[tuple[str, tuple[tuple[str, int, int], ...]]]:
+    chapters: list[tuple[str, tuple[tuple[str, int, int], ...]]] = []
+    current_title = default_title
     current: list[tuple[str, int, int]] = []
-    order = start_order
+    for kind, text, start, end in _source_events(tokens):
+        if kind == "heading":
+            if current:
+                chapters.append((current_title, tuple(current)))
+                current = []
+            if text:
+                current_title = text
+            continue
+        current.append((text, start, end))
+    if current:
+        chapters.append((current_title, tuple(current)))
+    return chapters
 
-    def finish() -> None:
-        nonlocal order, current
-        if not current:
-            return
-        chapter_id = f"{order:04d}-{_slug(current_title)}"
-        items: list[SpeechSegment | Pause] = []
-        for item_index, (text, start, end) in enumerate(current, 1):
-            pauses = _PAUSE_PATTERN.fullmatch(text)
-            location = SourceLocation(path=path, start_line=start, end_line=end)
-            if pauses:
-                items.append(
-                    Pause(
-                        chapter_id=chapter_id,
-                        milliseconds=int(pauses.group(1)),
-                        source=location,
-                    )
-                )
-                continue
-            spoken = _apply_pronunciations(text, rules).strip()
-            if not spoken:
-                continue
-            digest = hashlib.sha256(spoken.encode()).hexdigest()
-            items.append(
-                SpeechSegment(
-                    id=f"{chapter_id}-{item_index:04d}-{digest[:10]}",
-                    chapter_id=chapter_id,
-                    text=spoken,
-                    source=location,
-                    sha256=digest,
-                )
-            )
-        if items:
-            chapters.append(
-                Chapter(
-                    id=chapter_id,
-                    title=current_title,
-                    order=order,
-                    source_path=path,
-                    segments=tuple(items),
-                )
-            )
-            order += 1
-        current = []
 
+def _source_events(tokens: list[Token]) -> list[tuple[str, str, int, int]]:
+    events: list[tuple[str, str, int, int]] = []
     index = 0
     while index < len(tokens):
         token = tokens[index]
         if token.type == "heading_open" and token.tag in {"h1", "h2"}:
             inline = tokens[index + 1] if index + 1 < len(tokens) else None
             heading = _inline_text(inline.children or []) if inline else ""
-            if current:
-                finish()
-            if heading:
-                current_title = heading
+            events.append(("heading", heading, 0, 0))
             index += 3
             continue
         if token.type == "paragraph_open":
             inline = _next_inline(tokens, index)
             if inline is not None:
-                text = _inline_text(inline.children or [])
-                if text.strip():
+                text = _inline_text(inline.children or []).strip()
+                if text:
                     start, end = _token_lines(token, inline)
-                    current.append((text.strip(), start, end))
+                    events.append(("block", text, start, end))
         if token.type == "html_block":
             value = token.content.strip()
-            pause = _PAUSE_PATTERN.fullmatch(value)
-            if pause:
+            if _PAUSE_PATTERN.fullmatch(value):
                 start, end = _token_lines(token, token)
-                current.append((value, start, end))
+                events.append(("block", value, start, end))
         index += 1
-    finish()
-    return chapters
+    return events
+
+
+def _build_chapter(
+    path: Path,
+    title: str,
+    order: int,
+    blocks: tuple[tuple[str, int, int], ...],
+    rules: tuple[Pronunciation, ...],
+) -> Chapter | None:
+    chapter_id = f"{order:04d}-{_slug(title)}"
+    items = tuple(
+        item
+        for item_index, block in enumerate(blocks, 1)
+        if (item := _build_chapter_item(path, chapter_id, item_index, block, rules))
+        is not None
+    )
+    if not items:
+        return None
+    return Chapter(
+        id=chapter_id,
+        title=title,
+        order=order,
+        source_path=path,
+        segments=items,
+    )
+
+
+def _build_chapter_item(
+    path: Path,
+    chapter_id: str,
+    item_index: int,
+    block: tuple[str, int, int],
+    rules: tuple[Pronunciation, ...],
+) -> SpeechSegment | Pause | None:
+    text, start, end = block
+    location = SourceLocation(path=path, start_line=start, end_line=end)
+    pause = _PAUSE_PATTERN.fullmatch(text)
+    if pause:
+        return Pause(
+            chapter_id=chapter_id,
+            milliseconds=int(pause.group(1)),
+            source=location,
+        )
+    spoken = _apply_pronunciations(text, rules).strip()
+    if not spoken:
+        return None
+    digest = hashlib.sha256(spoken.encode()).hexdigest()
+    return SpeechSegment(
+        id=f"{chapter_id}-{item_index:04d}-{digest[:10]}",
+        chapter_id=chapter_id,
+        text=spoken,
+        source=location,
+        sha256=digest,
+    )
 
 
 def _apply_directives(source: str, *, path: Path, max_pause_ms: int) -> str:
@@ -523,10 +584,33 @@ def _load_pronunciations(path: Path | None) -> tuple[Pronunciation, ...]:
 
 
 def _parse_pronunciation(value: object, index: int) -> Pronunciation | None:
+    table = _pronunciation_table(value, index)
+    if not _pronunciation_is_approved(table, index):
+        return None
+    written = _required_pronunciation_text(table, "written", index)
+    spoken = _required_pronunciation_text(table, "spoken", index)
+    language = _optional_pronunciation_text(table, "language", index)
+    notes = _optional_pronunciation_text(table, "notes", index, strip=False)
+    priority = _pronunciation_priority(table, index)
+    match_mode = table.get("match", "whole_word")
+    case_mode = table.get("case", "sensitive")
+    _validate_pronunciation_modes(match_mode, case_mode, index)
+    return Pronunciation(
+        written=unicodedata.normalize("NFC", written),
+        spoken=unicodedata.normalize("NFC", spoken),
+        match=str(match_mode),
+        case=str(case_mode),
+        priority=priority,
+        language=unicodedata.normalize("NFC", language) if language else None,
+        notes=unicodedata.normalize("NFC", notes) if notes is not None else None,
+    )
+
+
+def _pronunciation_table(value: object, index: int) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValidationError(f"Pronunciation term {index} must be a table")
-    value = cast(dict[str, object], value)
-    unknown = set(value) - {
+    table = cast(dict[str, object], value)
+    unknown = set(table) - {
         "written",
         "spoken",
         "language",
@@ -541,47 +625,47 @@ def _parse_pronunciation(value: object, index: int) -> Pronunciation | None:
         raise ValidationError(
             f"Unknown pronunciation term {index} keys: {', '.join(sorted(unknown))}"
         )
+    return table
+
+
+def _pronunciation_is_approved(value: dict[str, object], index: int) -> bool:
     enabled = value.get("enabled", True)
     status = value.get("status")
     if not isinstance(enabled, bool):
         raise ValidationError(f"Pronunciation term {index} enabled must be boolean")
     if status not in {"approved", "draft", "rejected"}:
         raise ValidationError(f"Pronunciation term {index} has invalid status")
-    if not enabled or status != "approved":
+    return enabled and status == "approved"
+
+
+def _required_pronunciation_text(value: dict[str, object], key: str, index: int) -> str:
+    text = value.get(key)
+    if not isinstance(text, str) or not text.strip():
+        raise ValidationError(f"Pronunciation term {index} needs {key}")
+    return text.strip()
+
+
+def _optional_pronunciation_text(
+    value: dict[str, object],
+    key: str,
+    index: int,
+    *,
+    strip: bool = True,
+) -> str | None:
+    text = value.get(key)
+    if text is None:
         return None
-    written = value.get("written")
-    spoken = value.get("spoken")
-    if not isinstance(written, str) or not written.strip():
-        raise ValidationError(f"Pronunciation term {index} needs written")
-    if not isinstance(spoken, str) or not spoken.strip():
-        raise ValidationError(f"Pronunciation term {index} needs spoken")
-    language = value.get("language")
-    if language is not None and (not isinstance(language, str) or not language.strip()):
-        raise ValidationError(
-            f"Pronunciation term {index} language must be a non-empty string"
-        )
-    notes = value.get("notes")
-    if notes is not None and not isinstance(notes, str):
-        raise ValidationError(f"Pronunciation term {index} notes must be a string")
+    if not isinstance(text, str) or (key == "language" and not text.strip()):
+        qualifier = "a non-empty string" if key == "language" else "a string"
+        raise ValidationError(f"Pronunciation term {index} {key} must be {qualifier}")
+    return text.strip() if strip else text
+
+
+def _pronunciation_priority(value: dict[str, object], index: int) -> int:
     priority = value.get("priority", 0)
     if not isinstance(priority, int) or isinstance(priority, bool):
         raise ValidationError(f"Pronunciation term {index} priority must be integer")
-    match_mode = value.get("match", "whole_word")
-    case_mode = value.get("case", "sensitive")
-    _validate_pronunciation_modes(match_mode, case_mode, index)
-    return Pronunciation(
-        written=unicodedata.normalize("NFC", written.strip()),
-        spoken=unicodedata.normalize("NFC", spoken.strip()),
-        match=str(match_mode),
-        case=str(case_mode),
-        priority=priority,
-        language=(
-            unicodedata.normalize("NFC", language.strip())
-            if isinstance(language, str)
-            else None
-        ),
-        notes=unicodedata.normalize("NFC", notes) if isinstance(notes, str) else None,
-    )
+    return priority
 
 
 def _validate_pronunciation_modes(

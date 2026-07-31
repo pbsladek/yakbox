@@ -38,7 +38,7 @@ async def test_doctor_network_uses_only_read_only_voice_list_and_redacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    secret = "doctor-secret"
+    secret = "doctor-secret"  # noqa: S105 - synthetic redaction fixture
     monkeypatch.setenv("YAKBOX_CONFIG", str(tmp_path / "missing.toml"))
     monkeypatch.setenv("RESEMBLE_API_KEY", secret)
     with respx.mock(assert_all_called=True) as router:

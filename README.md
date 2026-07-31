@@ -9,7 +9,7 @@ backends also power direct text-to-speech commands.
 
 ## Install
 
-Yakbox requires Python 3.12 or newer. Install the CLI with
+Yakbox requires Python 3.13 or newer. Install the CLI with
 [uv](https://docs.astral.sh/uv/):
 
 ```console

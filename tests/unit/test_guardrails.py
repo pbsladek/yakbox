@@ -85,3 +85,19 @@ def test_confirmation_thresholds_are_explicit_and_strictly_above() -> None:
 def test_non_finite_or_negative_rates_are_rejected(value: Decimal) -> None:
     with pytest.raises(ValidationError):
         estimate_hosted_work(("text",), price_per_character=value)
+
+
+def test_hosted_pricing_identifiers_normalize_at_the_boundary() -> None:
+    assert CurrencyCode(" usd ") == "USD"
+    assert PricingSourceId(" provider-price-list ") == "provider-price-list"
+
+
+@pytest.mark.parametrize("value", ["", "US", "EURO", "U2D", "€UR"])
+def test_invalid_currency_codes_are_rejected(value: str) -> None:
+    with pytest.raises(ValidationError, match="three ASCII letters"):
+        CurrencyCode(value)
+
+
+def test_empty_pricing_source_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="must not be empty"):
+        PricingSourceId("  ")

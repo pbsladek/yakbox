@@ -6,8 +6,9 @@ import importlib.util
 import json
 import os
 import sys
-from collections.abc import Iterable, Sequence
-from dataclasses import asdict
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, NoReturn, Protocol, cast
@@ -23,6 +24,8 @@ from yakbox.audio import inspect_audio
 from yakbox.audiobook import (
     ArtifactKind,
     BuildProgress,
+    BuildProgressCallback,
+    BuildResult,
     apply_cache_cleanup,
     apply_cleanup,
     assemble_release,
@@ -49,6 +52,14 @@ from yakbox.audiobook import (
 )
 from yakbox.audiobook.artifacts import verify_artifact
 from yakbox.audiobook.manifest import AudiobookManifest, BuildTarget
+from yakbox.cli_help import configure_cli_help
+from yakbox.cli_options import (
+    audio_output_options,
+    deprecated_api_key_option,
+    explicit_text_options,
+    hosted_budget_options,
+    text_file_option,
+)
 from yakbox.cloud import (
     AudioFormat as CloudAudioFormat,
 )
@@ -76,8 +87,15 @@ from yakbox.cloud.batch import (
 )
 from yakbox.config import YakboxConfig, load_config
 from yakbox.contracts import runtime_metadata
+from yakbox.credentials import CredentialSource, resolve_resemble_credential
 from yakbox.diagnostics import run_doctor
-from yakbox.errors import ValidationError, YakboxError
+from yakbox.errors import (
+    BackendUnavailableError,
+    ConfigurationError,
+    ValidationError,
+    YakboxError,
+    stable_error_code,
+)
 from yakbox.speech import (
     AudioFormat,
     BackendCapabilities,
@@ -107,7 +125,7 @@ class Context:
         self.json_output = json_output
         self.quiet = quiet
         self.verbose = verbose
-        self.cloud_profile = "default"
+        self.credential_profile = "default"
 
 
 class KeyringApi(Protocol):
@@ -128,8 +146,8 @@ class YakboxGroup(click.Group):
         complete_var: str | None = None,
         standalone_mode: bool = True,
         windows_expand_args: bool = True,
-        **extra: Any,
-    ) -> Any:
+        **extra: Any,  # noqa: ANN401 - matches Click's dynamic override
+    ) -> Any:  # noqa: ANN401 - Click's main() return type is dynamic
         arguments = list(args) if args is not None else sys.argv[1:]
         if not standalone_mode:
             return super().main(
@@ -153,28 +171,31 @@ class YakboxGroup(click.Group):
         except click.ClickException as error:
             if json_requested:
                 _emit_bootstrap_error(
-                    code=type(error).__name__,
+                    code=_click_error_code(error),
                     message=error.format_message(),
                     exit_code=error.exit_code,
+                    command=_command_hint(arguments),
                 )
             error.show()
             raise SystemExit(error.exit_code) from error
         except click.Abort:
             if json_requested:
                 _emit_bootstrap_error(
-                    code="Interrupted",
+                    code="interrupted",
                     message="Operation interrupted",
                     exit_code=130,
                     status="aborted",
+                    command=_command_hint(arguments),
                 )
             click.echo("Aborted!", err=True)
             raise SystemExit(130) from None
-        except Exception as error:
+        except Exception:
             if json_requested:
                 _emit_bootstrap_error(
-                    code=type(error).__name__,
-                    message=str(error),
+                    code="internal_error",
+                    message="An unexpected internal error occurred",
                     exit_code=1,
+                    command=_command_hint(arguments),
                 )
             raise
         raise SystemExit(result if isinstance(result, int) else 0)
@@ -206,6 +227,8 @@ def main(
     verbose: bool,
 ) -> None:
     """Build reproducible audiobooks and use speech backends directly."""
+    if quiet and verbose:
+        raise click.UsageError("--quiet and --verbose are mutually exclusive")
     if no_color or os.environ.get("NO_COLOR"):
         console.no_color = True
         error_console.no_color = True
@@ -389,7 +412,7 @@ def pronunciations_audit_command(manifest: Path, fail_unused: bool) -> None:
         audit.to_dict(root=loaded.root),
         f"{len(audit.rules)} rule(s): {audit.unused_rules} unused, "
         f"{audit.shadowed_matches} shadowed match(es)",
-        status="error" if failed else "ok",
+        status="partial_failure" if failed else "ok",
         exit_code=1 if failed else 0,
     )
     if failed:
@@ -441,20 +464,12 @@ def pronunciations_audit_command(manifest: Path, fail_unused: bool) -> None:
     type=click.Choice(["synthesize", "master", "encode_mp3", "inspect"]),
     help="Run exactly one stage; cannot be combined with --from/--through.",
 )
-@click.option("--max-submitted-characters", type=click.IntRange(min=0))
-@click.option("--max-provider-requests", type=click.IntRange(min=0))
-@click.option("--max-estimated-spend", type=Decimal)
-@click.option("--currency")
-@click.option("--pricing-source")
-@click.option("--price-per-character", type=Decimal)
-@click.option("--confirm-above-characters", type=click.IntRange(min=0))
-@click.option("--confirm-above-requests", type=click.IntRange(min=0))
-@click.option("--yes", is_flag=True)
+@hosted_budget_options
 @click.option(
     "--no-progress", is_flag=True, help="Disable the interactive progress bar."
 )
-@click.option("--api-key", hidden=True)
-def build_command(  # noqa: C901, PLR0915
+@deprecated_api_key_option
+def build_command(  # noqa: PLR0913,PLR0917 - Click injects CLI parameters.
     manifest: Path,
     target: str,
     mode: str | None,
@@ -482,157 +497,266 @@ def build_command(  # noqa: C901, PLR0915
     api_key: str | None,
 ) -> None:
     """Build raw, mastered WAV, MP3, and inspection artifacts."""
-    if mode is not None and target != "default":
+    options = _BuildCommandOptions(
+        manifest=manifest,
+        target=target,
+        mode=mode,
+        chapter=chapter,
+        changed=changed,
+        failed=failed,
+        missing=missing,
+        since=since,
+        profile=profile,
+        resume=resume,
+        dry_run=dry_run,
+        from_stage=from_stage,
+        through_stage=through_stage,
+        stage=stage,
+        max_submitted_characters=max_submitted_characters,
+        max_provider_requests=max_provider_requests,
+        max_estimated_spend=max_estimated_spend,
+        currency=currency,
+        pricing_source=pricing_source,
+        price_per_character=price_per_character,
+        confirm_above_characters=confirm_above_characters,
+        confirm_above_requests=confirm_above_requests,
+        yes=yes,
+        no_progress=no_progress,
+        api_key=api_key,
+    )
+    try:
+        result = _run_build_command(options)
+    except (YakboxError, OSError) as error:
+        _fail(error)
+    if result is None:
+        return
+    _emit_build_result(result)
+
+
+@dataclass(frozen=True, slots=True)
+class _BuildCommandOptions:
+    manifest: Path
+    target: str
+    mode: str | None
+    chapter: str | None
+    changed: bool
+    failed: bool
+    missing: bool
+    since: str | None
+    profile: str | None
+    resume: bool
+    dry_run: bool
+    from_stage: str | None
+    through_stage: str | None
+    stage: str | None
+    max_submitted_characters: int | None
+    max_provider_requests: int | None
+    max_estimated_spend: Decimal | None
+    currency: str | None
+    pricing_source: str | None
+    price_per_character: Decimal | None
+    confirm_above_characters: int | None
+    confirm_above_requests: int | None
+    yes: bool
+    no_progress: bool
+    api_key: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedBuildRequest:
+    target: str
+    selection: str | None
+    from_stage: str | None
+    through_stage: str | None
+
+
+def _run_build_command(options: _BuildCommandOptions) -> BuildResult | None:
+    request = _resolve_build_request(options)
+    config = _load_config()
+    manifest = load_manifest(options.manifest)
+    target = manifest.target(request.target)
+    chapter = _selected_chapter_filter(options, request, manifest, target)
+    if request.selection is not None and chapter is None:
+        _emit_up_to_date(request)
+        return None
+    budget = _build_budget(options, target)
+    preflight = preflight_audiobook_build(
+        manifest,
+        target_name=request.target,
+        profile_override=options.profile,
+        chapter_selector=chapter,
+        price_per_character=options.price_per_character,
+        from_stage=request.from_stage,
+        through_stage=request.through_stage,
+    )
+    _validate_build_preflight(options, preflight.hosted_work, budget)
+    with _build_progress(options, preflight.planned_nodes) as progress:
+        return asyncio.run(
+            build_audiobook(
+                manifest,
+                target_name=request.target,
+                profile_override=options.profile,
+                chapter_selector=chapter,
+                dry_run=options.dry_run,
+                resume=options.resume,
+                api_key=_optional_api_key(options.api_key, config),
+                max_submitted_characters=options.max_submitted_characters,
+                max_provider_requests=options.max_provider_requests,
+                max_estimated_spend=options.max_estimated_spend,
+                currency=options.currency,
+                pricing_source=options.pricing_source,
+                price_per_character=options.price_per_character,
+                confirm_above_characters=options.confirm_above_characters,
+                confirm_above_requests=options.confirm_above_requests,
+                from_stage=request.from_stage,
+                through_stage=request.through_stage,
+                progress=progress,
+            )
+        )
+
+
+def _resolve_build_request(options: _BuildCommandOptions) -> _ResolvedBuildRequest:
+    if options.mode is not None and options.target != "default":
         raise click.UsageError("--mode cannot be combined with a non-default --target")
-    selected_target = mode or target
-    if stage is not None and (from_stage is not None or through_stage is not None):
+    if options.stage is not None and (
+        options.from_stage is not None or options.through_stage is not None
+    ):
         raise click.UsageError("--stage cannot be combined with --from or --through")
-    if stage is not None:
-        from_stage = through_stage = stage
-    selectors = sum((changed, failed, missing))
-    if selectors > 1:
+    if sum((options.changed, options.failed, options.missing)) > 1:
         raise click.UsageError(
             "--changed, --failed, and --missing are mutually exclusive"
         )
-    if since is not None and not changed:
+    if options.since is not None and not options.changed:
         raise click.UsageError("--since requires --changed")
-    config = _load_config()
+    selection = next(
+        (
+            name
+            for name, selected in (
+                ("changed", options.changed),
+                ("failed", options.failed),
+                ("missing", options.missing),
+            )
+            if selected
+        ),
+        None,
+    )
+    return _ResolvedBuildRequest(
+        target=options.mode or options.target,
+        selection=selection,
+        from_stage=options.stage or options.from_stage,
+        through_stage=options.stage or options.through_stage,
+    )
+
+
+def _selected_chapter_filter(
+    options: _BuildCommandOptions,
+    request: _ResolvedBuildRequest,
+    manifest: AudiobookManifest,
+    target: BuildTarget,
+) -> str | None:
+    if request.selection is None:
+        return options.chapter
+    since_manifest = (
+        _release_manifest_path(options.since, target.output_root / "release")
+        if options.since is not None
+        else None
+    )
+    selected = select_build_chapters(
+        manifest,
+        selection=request.selection,
+        target_name=request.target,
+        profile_override=options.profile,
+        chapter_selector=options.chapter,
+        since_release=since_manifest,
+        from_stage=request.from_stage,
+        through_stage=request.through_stage,
+    )
+    return ",".join(selected) if selected else None
+
+
+def _build_budget(
+    options: _BuildCommandOptions,
+    target: BuildTarget,
+) -> HostedUsageBudget:
+    return _resolved_hosted_budget(
+        max_submitted_characters=options.max_submitted_characters,
+        max_provider_requests=options.max_provider_requests,
+        max_estimated_spend=options.max_estimated_spend,
+        currency=options.currency,
+        pricing_source=options.pricing_source,
+        confirm_above_characters=options.confirm_above_characters,
+        confirm_above_requests=options.confirm_above_requests,
+        target=target,
+    )
+
+
+def _validate_build_preflight(
+    options: _BuildCommandOptions,
+    hosted_work: HostedWorkEstimate | None,
+    budget: HostedUsageBudget,
+) -> None:
+    if hosted_work is None:
+        return
+    validate_hosted_preflight(budget, hosted_work)
+    _confirm_hosted_work(
+        hosted_work,
+        budget,
+        yes=options.yes,
+        dry_run=options.dry_run,
+        operation="audiobook build",
+    )
+
+
+@contextmanager
+def _build_progress(
+    options: _BuildCommandOptions,
+    total: int,
+) -> Iterator[BuildProgressCallback | None]:
+    enabled = (
+        not options.no_progress
+        and not options.dry_run
+        and not _context().json_output
+        and not _context().quiet
+        and sys.stderr.isatty()
+    )
+    if not enabled:
+        yield None
+        return
+    display = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=error_console,
+    )
+    display.start()
+    task = display.add_task("Building audiobook", total=total)
+
+    def update(event: BuildProgress) -> None:
+        if event.event == "started":
+            display.update(task, description=f"{event.stage}: {event.node_id}")
+        else:
+            display.update(task, completed=event.completed)
+
     try:
-        loaded = load_manifest(manifest)
-        target_config = loaded.target(selected_target)
-        selection = (
-            "changed"
-            if changed
-            else "failed"
-            if failed
-            else "missing"
-            if missing
-            else None
-        )
-        if selection is not None:
-            since_manifest = (
-                _release_manifest_path(
-                    since,
-                    target_config.output_root / "release",
-                )
-                if since is not None
-                else None
-            )
-            selected_chapters = select_build_chapters(
-                loaded,
-                selection=selection,
-                target_name=selected_target,
-                profile_override=profile,
-                chapter_selector=chapter,
-                since_release=since_manifest,
-                from_stage=from_stage,
-                through_stage=through_stage,
-            )
-            if not selected_chapters:
-                _emit(
-                    {
-                        "schema_version": 1,
-                        "status": "up_to_date",
-                        "target": selected_target,
-                        "selection": selection,
-                        "chapters": [],
-                    },
-                    f"No {selection} chapters to build",
-                )
-                return
-            chapter = ",".join(selected_chapters)
-        budget = _resolved_hosted_budget(
-            max_submitted_characters=max_submitted_characters,
-            max_provider_requests=max_provider_requests,
-            max_estimated_spend=max_estimated_spend,
-            currency=currency,
-            pricing_source=pricing_source,
-            confirm_above_characters=confirm_above_characters,
-            confirm_above_requests=confirm_above_requests,
-            target=target_config,
-        )
-        preflight = preflight_audiobook_build(
-            loaded,
-            target_name=selected_target,
-            profile_override=profile,
-            chapter_selector=chapter,
-            price_per_character=price_per_character,
-            from_stage=from_stage,
-            through_stage=through_stage,
-        )
-        if preflight.hosted_work is not None:
-            validate_hosted_preflight(budget, preflight.hosted_work)
-            _confirm_hosted_work(
-                preflight.hosted_work,
-                budget,
-                yes=yes,
-                dry_run=dry_run,
-                operation="audiobook build",
-            )
-        progress_enabled = (
-            not no_progress
-            and not dry_run
-            and not _context().json_output
-            and not _context().quiet
-            and sys.stderr.isatty()
-        )
-        progress_display: Progress | None = None
-        progress_task: int | None = None
-        if progress_enabled:
-            progress_display = Progress(
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                console=error_console,
-            )
-            progress_display.start()
-            progress_task = progress_display.add_task(
-                "Building audiobook",
-                total=preflight.planned_nodes,
-            )
+        yield update
+    finally:
+        display.stop()
 
-        def update_progress(event: BuildProgress) -> None:
-            if progress_display is None or progress_task is None:
-                return
-            if event.event == "started":
-                progress_display.update(
-                    progress_task,
-                    description=f"{event.stage}: {event.node_id}",
-                )
-            else:
-                progress_display.update(
-                    progress_task,
-                    completed=event.completed,
-                )
 
-        try:
-            result = asyncio.run(
-                build_audiobook(
-                    loaded,
-                    target_name=selected_target,
-                    profile_override=profile,
-                    chapter_selector=chapter,
-                    dry_run=dry_run,
-                    resume=resume,
-                    api_key=api_key or config.resemble_api_key,
-                    max_submitted_characters=max_submitted_characters,
-                    max_provider_requests=max_provider_requests,
-                    max_estimated_spend=max_estimated_spend,
-                    currency=currency,
-                    pricing_source=pricing_source,
-                    price_per_character=price_per_character,
-                    confirm_above_characters=confirm_above_characters,
-                    confirm_above_requests=confirm_above_requests,
-                    from_stage=from_stage,
-                    through_stage=through_stage,
-                    progress=update_progress if progress_enabled else None,
-                )
-            )
-        finally:
-            if progress_display is not None:
-                progress_display.stop()
-    except (YakboxError, OSError) as error:
-        _fail(error)
+def _emit_up_to_date(request: _ResolvedBuildRequest) -> None:
+    _emit(
+        {
+            "schema_version": 1,
+            "status": "up_to_date",
+            "target": request.target,
+            "selection": request.selection,
+            "chapters": [],
+        },
+        f"No {request.selection} chapters to build",
+    )
+
+
+def _emit_build_result(result: BuildResult) -> None:
     _emit(
         {
             "schema_version": 1,
@@ -657,16 +781,15 @@ def build_command(  # noqa: C901, PLR0915
 @click.option("--target", default="default", show_default=True)
 @click.option("--profile", "--profiles", "profiles", multiple=True, required=True)
 @click.option("--chapter", "--chapters")
-@click.option("--text")
-@click.option("--text-file", type=click.Path(path_type=Path))
+@explicit_text_options
 @click.option(
     "--matrix",
     multiple=True,
     metavar="KEY=VALUE[,VALUE...]",
     help="Render the deterministic Cartesian product of profile settings.",
 )
-@click.option("--api-key", hidden=True)
-def audition_command(
+@deprecated_api_key_option
+def audition_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
     manifest: Path,
     target: str,
     profiles: tuple[str, ...],
@@ -691,7 +814,7 @@ def audition_command(
                 target_name=target,
                 text=sample,
                 chapter_selector=chapter,
-                api_key=api_key or config.resemble_api_key,
+                api_key=_optional_api_key(api_key, config),
                 matrix=matrix,
             )
         )
@@ -712,10 +835,9 @@ def audition_command(
 @click.option("--target", default="default", show_default=True)
 @click.option("--profile")
 @click.option("--chapter", "--chapters")
-@click.option("--text")
-@click.option("--text-file", type=click.Path(path_type=Path))
-@click.option("--api-key", hidden=True)
-def preview_command(
+@explicit_text_options
+@deprecated_api_key_option
+def preview_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
     manifest: Path,
     target: str,
     profile: str | None,
@@ -740,7 +862,7 @@ def preview_command(
                 profile_override=profile,
                 text=sample,
                 chapter_selector=chapter,
-                api_key=api_key or config.resemble_api_key,
+                api_key=_optional_api_key(api_key, config),
             )
         )
     except (YakboxError, OSError) as error:
@@ -754,15 +876,14 @@ def preview_command(
 @main.command("inspect")
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.argument("paths", nargs=-1, type=click.Path(path_type=Path))
-def inspect_command(manifest: Path, paths: tuple[Path, ...]) -> None:
+@click.option("--target", default="default", show_default=True)
+def inspect_command(manifest: Path, paths: tuple[Path, ...], target: str) -> None:
     """Inspect generated audio with FFprobe."""
     try:
         loaded = load_manifest(manifest)
         selected = paths or tuple(
             record.path
-            for record in inventory_artifacts(
-                loaded.target("default").output_root
-            ).records
+            for record in inventory_artifacts(loaded.target(target).output_root).records
             if record.media_type and record.media_type.startswith("audio/")
         )
         inspections = [inspect_audio(path).to_dict() for path in selected]
@@ -791,8 +912,16 @@ def release_group() -> None:
 @release_group.command("check")
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--target", default="default", show_default=True)
-@click.option("--write-manifest", is_flag=True)
+@click.option(
+    "--write-manifest",
+    is_flag=True,
+    help=(
+        "Publish a new immutable release directory and release manifest after "
+        "validation."
+    ),
+)
 def release_check_command(manifest: Path, target: str, write_manifest: bool) -> None:
+    """Validate release readiness; optionally publish immutable evidence."""
     try:
         result = check_release(
             load_manifest(manifest),
@@ -804,6 +933,8 @@ def release_check_command(manifest: Path, target: str, write_manifest: bool) -> 
     _emit(
         result.to_dict(),
         "Release complete" if result.complete else "\n".join(result.issues),
+        status="ok" if result.complete else "partial_failure",
+        exit_code=0 if result.complete else 1,
     )
     if not result.complete:
         raise click.exceptions.Exit(1)
@@ -954,6 +1085,7 @@ def doctor_command(
     deep: bool,
 ) -> None:
     """Run read-only installation and workspace diagnostics."""
+    config = _load_config()
     try:
         report = asyncio.run(
             run_doctor(
@@ -962,12 +1094,18 @@ def doctor_command(
                 backend=backend,
                 network=network,
                 deep=deep,
+                api_key=_optional_api_key(None, config),
             )
         )
-    except Exception as error:
+    except (YakboxError, OSError) as error:
         _fail(error)
     if _context().json_output:
-        _emit(report.to_dict(), "")
+        _emit(
+            report.to_dict(),
+            "",
+            status="ok" if report.healthy else "partial_failure",
+            exit_code=0 if report.healthy else 1,
+        )
     elif not _context().quiet:
         table = Table("Check", "Status", "Summary", "Action")
         for item in report.diagnostics:
@@ -1114,6 +1252,8 @@ def artifacts_verify_command(
         "All managed artifacts verified"
         if not failures
         else "\n".join(f"{item['path']}: {item['error']}" for item in failures),
+        status="partial_failure" if failures else "ok",
+        exit_code=1 if failures else 0,
     )
     if failures:
         raise click.exceptions.Exit(1)
@@ -1126,7 +1266,7 @@ def artifacts_verify_command(
 @click.option("--older-than", type=click.IntRange(min=0))
 @click.option("--keep-runs", type=click.IntRange(min=0))
 @click.option("--apply", "apply_plan", is_flag=True)
-def artifacts_clean_command(
+def artifacts_clean_command(  # noqa: PLR0917 - Click injects CLI parameters.
     manifest: Path,
     target: str,
     kind: str | None,
@@ -1233,11 +1373,24 @@ def artifacts_trash_restore_command(
 @artifacts_trash_group.command("purge")
 @click.argument("cleanup_id", required=False)
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
-@click.option("--yes", is_flag=True, required=True)
+@click.option(
+    "--all",
+    "purge_all",
+    is_flag=True,
+    help="Permanently remove every quarantined cleanup entry.",
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    required=True,
+    help="Confirm that permanent deletion is intentional.",
+)
 def artifacts_trash_purge_command(
-    cleanup_id: str | None, manifest: Path, yes: bool
+    cleanup_id: str | None, manifest: Path, purge_all: bool, yes: bool
 ) -> None:
     del yes
+    if (cleanup_id is None) == (not purge_all):
+        raise click.UsageError("Provide CLEANUP_ID or --all, but not both")
     loaded = _manifest(manifest)
     try:
         count = purge_trash(loaded.root, cleanup_id)
@@ -1248,25 +1401,13 @@ def artifacts_trash_purge_command(
 
 @main.command("tts")
 @click.argument("text", required=False)
-@click.option("--text-file", type=click.Path(path_type=Path))
+@text_file_option
 @click.option("--backend")
 @click.option("--voice", default="narrator", show_default=True)
 @click.option("--profile")
-@click.option("--out", type=click.Path(path_type=Path), default="speech.wav")
-@click.option(
-    "--format", "output_format", type=click.Choice(["wav", "mp3"]), default="wav"
-)
-@click.option("--overwrite", is_flag=True)
-@click.option("--max-submitted-characters", type=click.IntRange(min=0))
-@click.option("--max-provider-requests", type=click.IntRange(min=0))
-@click.option("--max-estimated-spend", type=Decimal)
-@click.option("--currency")
-@click.option("--pricing-source")
-@click.option("--price-per-character", type=Decimal)
-@click.option("--confirm-above-characters", type=click.IntRange(min=0))
-@click.option("--confirm-above-requests", type=click.IntRange(min=0))
-@click.option("--yes", is_flag=True)
-def tts_command(
+@audio_output_options("speech.wav")
+@hosted_budget_options
+def tts_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
     text: str | None,
     text_file: Path | None,
     backend: str | None,
@@ -1299,7 +1440,8 @@ def tts_command(
             confirm_above_characters=confirm_above_characters,
             confirm_above_requests=confirm_above_requests,
         )
-        if selected.casefold() in {"resemble", "cloud"}:
+        hosted = selected.casefold() in {"resemble", "cloud"}
+        if hosted:
             estimate = estimate_hosted_work(
                 (content,),
                 price_per_character=price_per_character,
@@ -1321,7 +1463,7 @@ def tts_command(
                 out=out,
                 output_format=AudioFormat(output_format),
                 overwrite=overwrite,
-                api_key=config.resemble_api_key,
+                api_key=_api_key(None, config) if hosted else None,
                 budget=budget,
                 price_per_character=price_per_character,
             )
@@ -1340,9 +1482,8 @@ def tts_command(
 @click.option("--voice", default="narrator", show_default=True)
 @click.option("--profile")
 @click.option("--reference-audio", type=click.Path(exists=True, path_type=Path))
-@click.option("--out", type=click.Path(path_type=Path), default="converted.wav")
-@click.option("--overwrite", is_flag=True)
-def vc_command(
+@audio_output_options("converted.wav", include_format=False)
+def vc_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
     input_audio: Path,
     backend: str,
     voice: str,
@@ -1380,11 +1521,19 @@ def local_batch_command(
     """Run a sequential local batch using the shared input format."""
     config = _load_config()
     selected = backend or config.default_backend
+    if selected.casefold() in {"resemble", "cloud"}:
+        raise click.UsageError(
+            "The batch command is local-only; use 'yakbox cloud batch' for "
+            "hosted synthesis, budgets, durable journals, and resume support"
+        )
+    if selected.casefold() not in {"fake", "local", "chatterbox", "chatterbox-local"}:
+        raise click.UsageError(
+            f"The batch command does not support configured backend {selected!r}; "
+            "choose a local backend or use 'yakbox cloud batch'"
+        )
     rows = read_batch_rows(script_file)
     try:
-        artifacts = asyncio.run(
-            _direct_batch(rows, selected, voice, out_dir, config.resemble_api_key)
-        )
+        artifacts = asyncio.run(_direct_batch(rows, selected, voice, out_dir, None))
     except (YakboxError, OSError) as error:
         _fail(error)
     _emit(
@@ -1394,7 +1543,9 @@ def local_batch_command(
 
 
 @main.command("verify")
-@click.argument("audio", nargs=-1, type=click.Path(exists=True, path_type=Path))
+@click.argument(
+    "audio", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path)
+)
 def verify_command(audio: tuple[Path, ...]) -> None:
     """Inspect local audio files."""
     try:
@@ -1407,8 +1558,6 @@ def verify_command(audio: tuple[Path, ...]) -> None:
 @main.command("models")
 def models_command() -> None:
     """Report local model-package availability without loading models."""
-    import importlib.util
-
     available = importlib.util.find_spec("chatterbox") is not None
     _emit(
         {"chatterbox_installed": available},
@@ -1423,6 +1572,8 @@ def backends_group() -> None:
 
 @backends_group.command("list")
 def backends_list_command() -> None:
+    config = _load_config()
+    credential = _optional_api_key(None, config)
     _emit(
         {
             "backends": [
@@ -1430,7 +1581,7 @@ def backends_list_command() -> None:
                 {"name": "chatterbox-local", "available": _module("chatterbox")},
                 {
                     "name": "resemble",
-                    "available": bool(_load_config().resemble_api_key),
+                    "available": credential is not None,
                 },
                 {
                     "name": "chatterbox-remote",
@@ -1446,10 +1597,13 @@ def backends_list_command() -> None:
 @backends_group.command("capabilities")
 @click.argument("name")
 def backends_capabilities_command(name: str) -> None:
+    config = _load_config()
+
     async def load() -> BackendCapabilities:
-        async with open_speech_backend(
-            name, api_key=_load_config().resemble_api_key
-        ) as service:
+        credential = (
+            _api_key(None, config) if name.casefold() in {"resemble", "cloud"} else None
+        )
+        async with open_speech_backend(name, api_key=credential) as service:
             return service.capabilities
 
     try:
@@ -1518,21 +1672,27 @@ def shards_verify_command(manifest: Path, shard_files: tuple[Path, ...]) -> None
 
 
 @main.group("cloud")
-@click.option("--profile", default="default", show_default=True)
-def cloud_group(profile: str) -> None:
+@click.option(
+    "--credential-profile",
+    "--profile",
+    "credential_profile",
+    default="default",
+    show_default=True,
+    help=(
+        "Select the OS-keyring credential profile; --profile is a compatibility alias."
+    ),
+)
+def cloud_group(credential_profile: str) -> None:
     """Use Resemble.ai synthesis and provider management."""
-    _context().cloud_profile = profile
+    _context().credential_profile = credential_profile
 
 
 @cloud_group.command("tts")
 @click.argument("text", required=False)
-@click.option("--text-file", type=click.Path(path_type=Path))
+@text_file_option
 @click.option("--voice-uuid")
 @click.option("--project-uuid")
-@click.option("--out", type=click.Path(path_type=Path), default="cloud.wav")
-@click.option(
-    "--format", "output_format", type=click.Choice(["wav", "mp3"]), default="wav"
-)
+@audio_output_options("cloud.wav")
 @click.option(
     "--precision",
     type=click.Choice([item.value for item in Precision]),
@@ -1542,18 +1702,9 @@ def cloud_group(profile: str) -> None:
 @click.option("--title")
 @click.option("--hd", is_flag=True)
 @click.option("--custom-pronunciations", is_flag=True)
-@click.option("--overwrite", is_flag=True)
-@click.option("--max-submitted-characters", type=click.IntRange(min=0))
-@click.option("--max-provider-requests", type=click.IntRange(min=0))
-@click.option("--max-estimated-spend", type=Decimal)
-@click.option("--currency")
-@click.option("--pricing-source")
-@click.option("--price-per-character", type=Decimal)
-@click.option("--confirm-above-characters", type=click.IntRange(min=0))
-@click.option("--confirm-above-requests", type=click.IntRange(min=0))
-@click.option("--yes", is_flag=True)
-@click.option("--api-key", hidden=True)
-def cloud_tts_command(
+@hosted_budget_options
+@deprecated_api_key_option
+def cloud_tts_command(  # noqa: PLR0913,PLR0917 - Click injects CLI parameters.
     text: str | None,
     text_file: Path | None,
     voice_uuid: str | None,
@@ -1618,10 +1769,10 @@ def cloud_tts_command(
                     use_hd=hd,
                     apply_custom_pronunciations=custom_pronunciations,
                 ),
-                out,
-                overwrite,
-                budget,
-                price_per_character,
+                out=out,
+                overwrite=overwrite,
+                budget=budget,
+                price_per_character=price_per_character,
             )
         )
     except (YakboxError, OSError) as error:
@@ -1640,10 +1791,10 @@ def cloud_tts_command(
 
 @cloud_group.command("stream")
 @click.argument("text", required=False)
-@click.option("--text-file", type=click.Path(path_type=Path))
+@text_file_option
 @click.option("--voice-uuid")
 @click.option("--project-uuid")
-@click.option("--out", type=click.Path(path_type=Path), default="stream.wav")
+@audio_output_options("stream.wav", include_format=False)
 @click.option(
     "--precision",
     type=click.Choice([item.value for item in Precision]),
@@ -1652,18 +1803,9 @@ def cloud_tts_command(
 @click.option("--sample-rate", type=click.IntRange(min=1))
 @click.option("--hd", is_flag=True)
 @click.option("--custom-pronunciations", is_flag=True)
-@click.option("--overwrite", is_flag=True)
-@click.option("--max-submitted-characters", type=click.IntRange(min=0))
-@click.option("--max-provider-requests", type=click.IntRange(min=0))
-@click.option("--max-estimated-spend", type=Decimal)
-@click.option("--currency")
-@click.option("--pricing-source")
-@click.option("--price-per-character", type=Decimal)
-@click.option("--confirm-above-characters", type=click.IntRange(min=0))
-@click.option("--confirm-above-requests", type=click.IntRange(min=0))
-@click.option("--yes", is_flag=True)
-@click.option("--api-key", hidden=True)
-def cloud_stream_command(
+@hosted_budget_options
+@deprecated_api_key_option
+def cloud_stream_command(  # noqa: PLR0917 - Click injects CLI parameters.
     text: str | None,
     text_file: Path | None,
     voice_uuid: str | None,
@@ -1724,10 +1866,10 @@ def cloud_stream_command(
                     use_hd=hd,
                     apply_custom_pronunciations=custom_pronunciations,
                 ),
-                out,
-                overwrite,
-                budget,
-                price_per_character,
+                out=out,
+                overwrite=overwrite,
+                budget=budget,
+                price_per_character=price_per_character,
             )
         )
     except (YakboxError, OSError) as error:
@@ -1750,14 +1892,7 @@ def cloud_stream_command(
     "--out-dir", type=click.Path(path_type=Path), default="cloud_batch_output"
 )
 @click.option("--concurrency", type=click.IntRange(1, 100))
-@click.option("--max-submitted-characters", type=click.IntRange(min=0))
-@click.option("--max-provider-requests", type=click.IntRange(min=0))
-@click.option("--max-estimated-spend", type=Decimal)
-@click.option("--currency")
-@click.option("--pricing-source")
-@click.option("--price-per-character", type=Decimal)
-@click.option("--confirm-above-characters", type=click.IntRange(min=0))
-@click.option("--confirm-above-requests", type=click.IntRange(min=0))
+@hosted_budget_options
 @click.option(
     "--format", "output_format", type=click.Choice(["wav", "mp3"]), default="wav"
 )
@@ -1772,14 +1907,19 @@ def cloud_stream_command(
 @click.option("--overwrite", is_flag=True)
 @click.option("--dry-run", is_flag=True)
 @click.option("--journal", type=click.Path(path_type=Path))
-@click.option("--resume", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--resume-from",
+    "--resume",
+    "resume",
+    type=click.Path(exists=True, path_type=Path),
+    help="Resume from a compatible cloud batch journal; --resume is an alias.",
+)
 @click.option("--report", type=click.Path(path_type=Path))
 @click.option("--no-report", is_flag=True)
 @click.option("--ignore-errors", is_flag=True)
 @click.option("--no-progress", is_flag=True)
-@click.option("--yes", is_flag=True)
-@click.option("--api-key", hidden=True)
-def cloud_batch_command(
+@deprecated_api_key_option
+def cloud_batch_command(  # noqa: PLR0913,PLR0917 - Click injects CLI parameters.
     script_file: Path,
     voice_uuid: str | None,
     project_uuid: str | None,
@@ -1868,34 +2008,34 @@ def cloud_batch_command(
 
     try:
         try:
-            resolved_key = api_key or config.resemble_api_key
-            if not resolved_key and dry_run:
-                resolved_key = "dry-run"
-            if not resolved_key:
-                resolved_key = _api_key(api_key, config)
+            resolved_key = _optional_api_key(api_key, config)
+            if resolved_key is None:
+                resolved_key = "dry-run" if dry_run else _api_key(api_key, config)
             batch_report = asyncio.run(
                 _cloud_batch(
                     resolved_key,
                     iter_batch_rows(script_file),
-                    budget,
-                    price_per_character,
-                    voice_uuid or config.resemble_voice_uuid,
-                    project_uuid or config.resemble_project_uuid,
-                    out_dir,
-                    selected_concurrency,
-                    AudioFormat(output_format),
-                    hd,
-                    precision,
-                    sample_rate,
-                    custom_pronunciations,
-                    overwrite,
-                    dry_run,
-                    progress,
-                    journal,
-                    resume,
-                    report,
-                    not no_report,
-                    estimate,
+                    _CloudBatchRunOptions(
+                        budget=budget,
+                        price_per_character=price_per_character,
+                        voice=voice_uuid or config.resemble_voice_uuid,
+                        project=project_uuid or config.resemble_project_uuid,
+                        out_dir=out_dir,
+                        concurrency=selected_concurrency,
+                        output_format=AudioFormat(output_format),
+                        hd=hd,
+                        precision=Precision(precision),
+                        sample_rate=sample_rate,
+                        custom_pronunciations=custom_pronunciations,
+                        overwrite=overwrite,
+                        dry_run=dry_run,
+                        progress=progress,
+                        journal=journal,
+                        resume=resume,
+                        report=report,
+                        write_report=not no_report,
+                        preflight=estimate,
+                    ),
                 )
             )
         except (YakboxError, OSError) as error:
@@ -1959,7 +2099,7 @@ def cloud_recordings_group() -> None:
 @click.option("--emotion")
 @click.option("--active/--inactive", default=True)
 @click.option("--fill/--no-fill", default=False)
-def cloud_recording_create_command(
+def cloud_recording_create_command(  # noqa: PLR0917 - Click injects CLI parameters.
     voice_uuid: str,
     audio_file: Path,
     name: str,
@@ -1988,7 +2128,7 @@ def cloud_recording_create_command(
 @click.option("--emotion")
 @click.option("--active/--inactive", default=True)
 @click.option("--fill/--no-fill", default=False)
-def cloud_recording_compat_command(
+def cloud_recording_compat_command(  # noqa: PLR0917 - Click injects CLI parameters.
     voice_uuid: str,
     audio_file: Path,
     name: str,
@@ -2033,11 +2173,11 @@ def _recording_create_impl(
                 _api_key(None, config),
                 voice_uuid,
                 audio_file,
-                name,
-                text,
-                emotion,
-                active,
-                fill,
+                name=name,
+                text=text,
+                emotion=emotion,
+                active=active,
+                fill=fill,
             )
         )
     except YakboxError as error:
@@ -2100,36 +2240,54 @@ def config_auth_group() -> None:
 
 
 @config_auth_group.command("login")
-@click.option("--profile", default="default")
+@click.option(
+    "--credential-profile",
+    "--profile",
+    "profile",
+    default="default",
+    help="Name the OS-keyring credential profile; --profile is an alias.",
+)
 @click.password_option("--token", prompt="Resemble API token")
 def auth_login_command(profile: str, token: str) -> None:
     keyring = _keyring()
     try:
         keyring.set_password("yakbox/resemble", profile, token)
-    except Exception as error:
-        _fail(RuntimeError(f"Secure keyring unavailable: {error}"))
+    except Exception as error:  # noqa: BLE001 - third-party keyring boundary
+        _fail(ConfigurationError(f"Secure keyring unavailable: {error}"))
     _emit({"profile": profile, "stored": True}, f"Stored profile {profile}")
 
 
 @config_auth_group.command("logout")
-@click.option("--profile", default="default")
+@click.option(
+    "--credential-profile",
+    "--profile",
+    "profile",
+    default="default",
+    help="Name the OS-keyring credential profile; --profile is an alias.",
+)
 def auth_logout_command(profile: str) -> None:
     keyring = _keyring()
     try:
         keyring.delete_password("yakbox/resemble", profile)
-    except Exception as error:
-        _fail(RuntimeError(f"Cannot remove keyring profile: {error}"))
+    except Exception as error:  # noqa: BLE001 - third-party keyring boundary
+        _fail(ConfigurationError(f"Cannot remove keyring profile: {error}"))
     _emit({"profile": profile, "stored": False}, f"Removed profile {profile}")
 
 
 @config_auth_group.command("status")
-@click.option("--profile", default="default")
+@click.option(
+    "--credential-profile",
+    "--profile",
+    "profile",
+    default="default",
+    help="Name the OS-keyring credential profile; --profile is an alias.",
+)
 def auth_status_command(profile: str) -> None:
     keyring = _keyring()
     try:
         present = keyring.get_password("yakbox/resemble", profile) is not None
-    except Exception as error:
-        _fail(RuntimeError(f"Cannot access keyring: {error}"))
+    except Exception as error:  # noqa: BLE001 - third-party keyring boundary
+        _fail(ConfigurationError(f"Cannot access keyring: {error}"))
     _emit(
         {"profile": profile, "stored": present},
         "configured" if present else "not configured",
@@ -2226,6 +2384,7 @@ async def _direct_batch(
 async def _cloud_tts(
     api_key: str,
     request: SynthesisRequest,
+    *,
     out: Path,
     overwrite: bool,
     budget: HostedUsageBudget,
@@ -2240,6 +2399,7 @@ async def _cloud_tts(
 async def _cloud_stream(
     api_key: str,
     request: StreamRequest,
+    *,
     out: Path,
     overwrite: bool,
     budget: HostedUsageBudget,
@@ -2251,58 +2411,66 @@ async def _cloud_stream(
         return result, await usage.snapshot()
 
 
+@dataclass(frozen=True, slots=True)
+class _CloudBatchRunOptions:
+    budget: HostedUsageBudget
+    price_per_character: Decimal | None
+    voice: str | None
+    project: str | None
+    out_dir: Path
+    concurrency: int
+    output_format: AudioFormat
+    hd: bool
+    precision: Precision
+    sample_rate: int | None
+    custom_pronunciations: bool
+    overwrite: bool
+    dry_run: bool
+    progress: ProgressCallback
+    journal: Path | None
+    resume: Path | None
+    report: Path | None
+    write_report: bool
+    preflight: HostedWorkEstimate
+
+
 async def _cloud_batch(
     api_key: str,
     rows: Iterable[BatchRow],
-    budget: HostedUsageBudget,
-    price_per_character: Decimal | None,
-    voice: str | None,
-    project: str | None,
-    out_dir: Path,
-    concurrency: int,
-    output_format: AudioFormat,
-    hd: bool,
-    precision: str,
-    sample_rate: int | None,
-    custom_pronunciations: bool,
-    overwrite: bool,
-    dry_run: bool,
-    progress: ProgressCallback,
-    journal: Path | None,
-    resume: Path | None,
-    report: Path | None,
-    write_report: bool,
-    preflight: HostedWorkEstimate,
+    settings: _CloudBatchRunOptions,
 ) -> BatchReport:
-    usage = HostedUsageGate(budget, price_per_character=price_per_character)
+    usage = HostedUsageGate(
+        settings.budget,
+        price_per_character=settings.price_per_character,
+    )
     options = ClientOptions(
-        max_connections=max(20, concurrency),
-        max_keepalive_connections=max(20, concurrency),
+        max_connections=max(20, settings.concurrency),
+        max_keepalive_connections=max(20, settings.concurrency),
     )
     async with ResembleClient(api_key, options=options, usage_gate=usage) as client:
-        service = ResembleSpeechService(client, concurrency=concurrency)
+        service = ResembleSpeechService(client, concurrency=settings.concurrency)
         try:
             return await run_cloud_batch(
                 rows,
                 service,
-                default_voice=voice,
-                project_uuid=project,
-                out_dir=out_dir,
-                concurrency=concurrency,
-                output_format=output_format,
-                use_hd=hd,
-                precision=precision,
-                sample_rate=sample_rate,
-                apply_custom_pronunciations=custom_pronunciations,
-                overwrite=overwrite,
-                dry_run=dry_run,
-                progress=progress,
-                journal_path=journal,
-                resume_path=resume,
-                report_path=report,
-                write_report=write_report,
+                default_voice=settings.voice,
+                project_uuid=settings.project,
+                out_dir=settings.out_dir,
+                concurrency=settings.concurrency,
+                output_format=settings.output_format,
+                use_hd=settings.hd,
+                precision=settings.precision,
+                sample_rate=settings.sample_rate,
+                apply_custom_pronunciations=settings.custom_pronunciations,
+                overwrite=settings.overwrite,
+                dry_run=settings.dry_run,
+                progress=settings.progress,
+                journal_path=settings.journal,
+                resume_path=settings.resume,
+                report_path=settings.report,
+                write_report=settings.write_report,
                 usage_gate=usage,
-                preflight=preflight,
+                preflight=settings.preflight,
             )
         finally:
             await service.aclose()
@@ -2322,6 +2490,7 @@ async def _create_recording(
     api_key: str,
     voice_uuid: str,
     audio_file: Path,
+    *,
     name: str,
     text: str,
     emotion: str | None,
@@ -2381,36 +2550,52 @@ def _load_config() -> YakboxConfig:
         _fail(error)
 
 
-def _api_key(explicit: str | None, config: YakboxConfig) -> str:
-    if explicit:
+def _resolved_api_key(
+    explicit: str | None,
+    config: YakboxConfig,
+) -> str | None:
+    environment_key = os.environ.get("RESEMBLE_API_KEY") or None
+    profile = _context().credential_profile
+    keyring_key = (
+        _keyring_password(profile)
+        if explicit is None and environment_key is None
+        else None
+    )
+    credential = resolve_resemble_credential(
+        explicit=explicit,
+        environment=environment_key,
+        keyring=keyring_key,
+        legacy_config=config.legacy_resemble_api_key,
+        profile=profile,
+    )
+    if credential is None:
+        return None
+    if credential.source is CredentialSource.EXPLICIT:
         error_console.print(
             "Warning: --api-key is deprecated; use RESEMBLE_API_KEY or keyring",
             style="yellow",
         )
-    environment_key = os.environ.get("RESEMBLE_API_KEY")
-    keyring_key = (
-        _keyring_password(_context().cloud_profile)
-        if explicit is None and environment_key is None
-        else None
-    )
-    key = explicit or environment_key or keyring_key or config.resemble_api_key
-    if not key:
-        _fail(
-            ValueError(
-                "No Resemble API key found; set RESEMBLE_API_KEY or configure "
-                f"keyring profile {_context().cloud_profile!r}"
-            )
-        )
-    if (
-        explicit is None
-        and environment_key is None
-        and keyring_key is None
-        and config.resemble_api_key is not None
-    ):
+    elif credential.source is CredentialSource.LEGACY_CONFIG:
         error_console.print(
             "Warning: plaintext config API keys are deprecated; migrate with "
             "yakbox config auth login",
             style="yellow",
+        )
+    return credential.value
+
+
+def _optional_api_key(explicit: str | None, config: YakboxConfig) -> str | None:
+    return _resolved_api_key(explicit, config)
+
+
+def _api_key(explicit: str | None, config: YakboxConfig) -> str:
+    key = _resolved_api_key(explicit, config)
+    if key is None:
+        _fail(
+            BackendUnavailableError(
+                "No Resemble API key found; set RESEMBLE_API_KEY or configure "
+                f"keyring profile {_context().credential_profile!r}"
+            )
         )
     return key
 
@@ -2440,6 +2625,7 @@ def _emit(
     if context.json_output:
         payload = {
             **runtime_metadata("cli-output"),
+            "command": _command_identifier(),
             "status": status,
             "exit_code": exit_code,
             "data": value,
@@ -2455,11 +2641,13 @@ def _emit_bootstrap_error(
     message: str,
     exit_code: int,
     status: str = "error",
+    command: str | None = None,
 ) -> NoReturn:
     click.echo(
         json.dumps(
             {
                 **runtime_metadata("cli-output"),
+                "command": command or _command_identifier(),
                 "status": status,
                 "exit_code": exit_code,
                 "error": {
@@ -2474,6 +2662,18 @@ def _emit_bootstrap_error(
     raise SystemExit(exit_code)
 
 
+def _click_error_code(error: click.ClickException) -> str:
+    if isinstance(error, click.NoSuchOption):
+        return "unknown_option"
+    if isinstance(error, click.MissingParameter):
+        return "missing_parameter"
+    if isinstance(error, click.BadParameter):
+        return "invalid_argument"
+    if isinstance(error, click.UsageError):
+        return "usage_error"
+    return "cli_error"
+
+
 def _fail(error: Exception) -> NoReturn:
     context = _context()
     message = str(error).replace("\n", " ")[:2048]
@@ -2482,10 +2682,11 @@ def _fail(error: Exception) -> NoReturn:
             json.dumps(
                 {
                     **runtime_metadata("cli-output"),
+                    "command": _command_identifier(),
                     "status": "error",
                     "exit_code": 1,
                     "error": {
-                        "code": type(error).__name__,
+                        "code": stable_error_code(error),
                         "message": message,
                     },
                 },
@@ -2494,6 +2695,29 @@ def _fail(error: Exception) -> NoReturn:
         )
         raise click.exceptions.Exit(1)
     raise click.ClickException(message)
+
+
+def _command_identifier() -> str:
+    context = click.get_current_context(silent=True)
+    names: list[str] = []
+    while context is not None and context.parent is not None:
+        if context.info_name:
+            names.append(context.info_name)
+        context = context.parent
+    return " ".join(reversed(names)) or "unknown"
+
+
+def _command_hint(arguments: Sequence[str]) -> str:
+    command: click.Command = main
+    names: list[str] = []
+    for argument in arguments:
+        if not isinstance(command, click.Group):
+            break
+        child = command.commands.get(argument)
+        if child is not None:
+            names.append(argument)
+            command = child
+    return " ".join(names) or "unknown"
 
 
 def _resolved_hosted_budget(
@@ -2609,7 +2833,7 @@ def _keyring() -> KeyringApi:
         module = importlib.import_module("keyring")
     except ImportError:
         _fail(
-            RuntimeError(
+            ConfigurationError(
                 'Keyring support is not installed; install with "yakbox[credentials]"'
             )
         )
@@ -2622,10 +2846,13 @@ def _keyring_password(profile: str) -> str | None:
     keyring = cast(KeyringApi, importlib.import_module("keyring"))
     try:
         return keyring.get_password("yakbox/resemble", profile)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - optional keyring lookup is best-effort
         if _context().verbose:
             error_console.print(
                 f"Warning: keyring profile {profile!r} is unavailable: {error}",
                 style="yellow",
             )
         return None
+
+
+configure_cli_help(main)

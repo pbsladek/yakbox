@@ -18,6 +18,7 @@ def master_wav(
     normalize: bool = True,
     overwrite: bool = False,
 ) -> None:
+    """Master one WAV file to the requested rate and loudness policy."""
     _require_ffmpeg()
     _require_source(source)
     _prepare(destination, overwrite)
@@ -63,6 +64,7 @@ def encode_mp3(
     track: int | None = None,
     overwrite: bool = False,
 ) -> None:
+    """Encode a WAV source as an atomic MP3 with optional book metadata."""
     _require_ffmpeg()
     _require_source(source)
     _prepare(destination, overwrite)
@@ -165,7 +167,7 @@ def _temporary_for(path: Path) -> Path:
 
 def _run(command: list[str], temporary: Path) -> None:
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - validated argv; shell is disabled
             command,
             check=False,
             capture_output=True,

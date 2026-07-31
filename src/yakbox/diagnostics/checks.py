@@ -14,12 +14,14 @@ import httpx
 from yakbox import __version__
 from yakbox.audiobook.manifest import load_manifest
 from yakbox.config import YakboxConfig, load_config
+from yakbox.credentials import resolve_resemble_credential
 from yakbox.diagnostics.models import (
     Diagnostic,
     DiagnosticSeverity,
     DiagnosticStatus,
     DoctorReport,
 )
+from yakbox.errors import ConfigurationError, ValidationError
 
 MIN_FREE_BYTES = 1_000_000_000
 
@@ -31,7 +33,9 @@ async def run_doctor(
     target: str | None = None,
     network: bool = False,
     deep: bool = False,
+    api_key: str | None = None,
 ) -> DoctorReport:
+    """Inspect installation, workspace, and optional backend readiness."""
     checks: list[Diagnostic] = [
         Diagnostic(
             id="python.version",
@@ -54,6 +58,7 @@ async def run_doctor(
         await _backend_checks(
             selected_backend,
             config,
+            api_key=api_key,
             network=network,
             deep=deep,
         )
@@ -64,7 +69,7 @@ async def run_doctor(
 def _load_config_check() -> tuple[YakboxConfig | None, Diagnostic]:
     try:
         config = load_config()
-    except Exception as error:
+    except ConfigurationError as error:
         return None, Diagnostic(
             id="config.load",
             status=DiagnosticStatus.FAIL,
@@ -91,7 +96,7 @@ def _infer_backend(
         loaded = load_manifest(manifest)
         selected_target = loaded.target(target or "default")
         return loaded.profile(selected_target.profile).backend
-    except Exception:
+    except ValidationError:
         return None
 
 
@@ -99,6 +104,7 @@ async def _backend_checks(
     selected_backend: str | None,
     config: YakboxConfig | None,
     *,
+    api_key: str | None,
     network: bool,
     deep: bool,
 ) -> list[Diagnostic]:
@@ -136,7 +142,15 @@ async def _backend_checks(
                 )
             )
     if selected_backend in {"resemble", "cloud"} or network:
-        has_key = bool(config and config.resemble_api_key)
+        credential = resolve_resemble_credential(
+            explicit=api_key,
+            environment=os.environ.get("RESEMBLE_API_KEY"),
+            keyring=None,
+            legacy_config=config.legacy_resemble_api_key if config else None,
+            profile="default",
+        )
+        resolved_key = credential.value if credential is not None else None
+        has_key = bool(resolved_key)
         checks.append(
             Diagnostic(
                 id="backend.resemble.credentials",
@@ -153,7 +167,7 @@ async def _backend_checks(
             )
         )
         if network and has_key:
-            checks.append(await _resemble_network(config.resemble_api_key or ""))
+            checks.append(await _resemble_network(resolved_key or ""))
         elif not network:
             checks.append(
                 Diagnostic(
@@ -194,7 +208,7 @@ def _workspace_checks(path: Path) -> list[Diagnostic]:
     checks: list[Diagnostic] = []
     try:
         manifest = load_manifest(path)
-    except Exception as error:
+    except ValidationError as error:
         return [
             Diagnostic(
                 id="workspace.manifest",

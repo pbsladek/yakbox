@@ -950,10 +950,10 @@ Python 3.14 is the current stable feature release as of this review. Use it for
 local development and the release build, but publish with:
 
 ```toml
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 ```
 
-Support CPython 3.12, 3.13, and 3.14 in CI. This provides modern language and
+Support CPython 3.13 and 3.14 in CI. This provides modern language and
 `asyncio` features without needlessly excluding maintained installations.
 Do not target the Python 3.15 prerelease in required CI; it may run as an
 allowed-to-fail scheduled job once dependencies support it.
@@ -1178,11 +1178,11 @@ bounded build requirement follows Astral's compatibility recommendation:
 
 ```toml
 [build-system]
-requires = ["uv_build>=0.11.26,<0.12"]
+requires = ["uv_build>=0.12.0,<0.13"]
 build-backend = "uv_build"
 
 [tool.uv]
-required-version = ">=0.11.26,<0.12"
+required-version = ">=0.12.0,<0.13"
 
 [tool.uv.build-backend]
 module-name = "yakbox"
@@ -2109,7 +2109,7 @@ never restarts after yielding bytes.
 
 Do not create one task per row. Stream normalized rows from an `Iterable` into
 an `asyncio.Queue` with `maxsize = max(1, 2 * concurrency)`. Create exactly
-`concurrency` workers. Python 3.12 `TaskGroup` supervises the producer and
+`concurrency` workers. `asyncio.TaskGroup` supervises the producer and
 workers because each worker captures per-item exceptions; unexpected
 orchestration failures still cancel the group.
 
@@ -2860,7 +2860,7 @@ Astral `ty` is the only required type checker. It runs as a blocking gate over
 
 ```toml
 [tool.ty.environment]
-python-version = "3.12"
+python-version = "3.13"
 python-platform = "all"
 
 [tool.ty.src]
@@ -2915,12 +2915,12 @@ running `uv run ...`.
 Jobs:
 
 1. `quality` on Python 3.14: Ruff format/lint, `ty check`, config validation.
-2. `test-core` on Ubuntu for Python 3.12, 3.13, and 3.14 with branch
+2. `test-core` on Ubuntu for Python 3.13 and 3.14 with branch
    coverage, audiobook/speech/hosted dependencies, and no local extra.
 3. `platform-smoke` on macOS, Windows, and Ubuntu using Python 3.14.
 4. `minimum-direct`: in a temporary project copy, resolve
    `uv lock --resolution lowest-direct` and run audiobook, speech, cloud, unit,
-   and API tests on Python 3.12, proving published lower bounds.
+   and API tests on Python 3.13, proving published lower bounds.
 5. `local-extra`: install `yakbox[local]`, run local CPU smoke tests, and run
    direct-versus-audiobook Chatterbox conformance only on the Python/platform
    combinations supported by chatterbox and PyTorch.
@@ -3000,7 +3000,7 @@ Gate:
 
 Deliverables:
 
-- `src/` package metadata, `uv.lock`, Python 3.12-3.14 support;
+- `src/` package metadata, `uv.lock`, Python 3.13-3.14 support;
 - `uv_build`, console entry point, Ruff, `ty`, and pytest configuration;
 - canonical `yakbox` namespace, optional compatibility shim, lightweight
   default dependencies, and `local`/`credentials` extras;
@@ -3672,7 +3672,7 @@ automatically when this checklist passes.
 - [ ] Release mode rejects partial-work options and emits immutable manifests,
       checksums, backend/tool versions, watermark disclosures, and
       reference-voice provenance identifiers.
-- [ ] Python 3.12, 3.13, and 3.14 pass CI.
+- [ ] Python 3.13 and 3.14 pass CI.
 - [ ] Ruff, the documented blocking `ty` beta version, complexity, coverage,
       package, and security gates pass.
 - [ ] Every Python function/method and module boundary in `src/` and tests is

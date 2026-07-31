@@ -4,6 +4,8 @@ coverage.xml
 test-results.xml
 .pytest_cache/
 .ruff_cache/
+.import_linter_cache/
+.mutmut-cache/
 .venv/
 __pycache__/
 *.py[cod]
@@ -11,6 +13,7 @@ build/
 dist/
 release-metadata/
 htmlcov/
+mutants/
 *.egg-info/
 .yakbox/
 cloud_batch_output/

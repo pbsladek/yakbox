@@ -7,7 +7,7 @@ name = "yakbox"
 version = "0.1.0"
 description = "A local-first, reproducible audiobook build system"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "yakbox contributors" }]
@@ -15,7 +15,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
@@ -34,8 +33,7 @@ local = [
     "diffusers>=0.38.0",
     "gradio>=6.16.0",
     "numba>=0.66.0",
-    "numpy>=1.24,<2; python_version < '3.13'",
-    "numpy>=2,<2.5; python_version >= '3.13'",
+    "numpy>=2,<2.5",
     "onnx>=1.22.0",
     "safetensors>=0.8.0",
     "setuptools>=83.0.0",
@@ -56,6 +54,8 @@ test = [
     "respx>=0.22",
 ]
 quality = [
+    "import-linter>=2.13",
+    "mutmut>=3.7.0",
     "ruff>=0.14",
     "ty>=0.0.1a32,<0.1",
 ]
@@ -70,7 +70,7 @@ yakbox = "yakbox.cli:main"
 yakbox-release-preflight = "yakbox.release_preflight:main"
 
 [tool.uv]
-required-version = ">=0.11.26,<0.12"
+required-version = ">=0.12.0,<0.13"
 default-groups = ["dev"]
 override-dependencies = [
     # chatterbox-tts 0.1.7 pins vulnerable releases. Keep these overrides
@@ -78,8 +78,7 @@ override-dependencies = [
     "diffusers>=0.38.0",
     "gradio>=6.16.0",
     # Numba 0.66 currently requires NumPy below 2.5.
-    "numpy>=1.24,<2; python_version < '3.13'",
-    "numpy>=2,<2.5; python_version >= '3.13'",
+    "numpy>=2,<2.5",
     "onnx>=1.22.0",
     "safetensors>=0.8.0",
     "setuptools>=83.0.0",
@@ -121,11 +120,86 @@ branch = true
 source = ["yakbox"]
 
 [tool.coverage.report]
+fail_under = 75
 show_missing = true
 skip_covered = true
 
+[tool.importlinter]
+root_package = "yakbox"
+exclude_type_checking_imports = true
+
+[[tool.importlinter.contracts]]
+id = "cli-is-an-entrypoint"
+name = "Production modules do not depend on the CLI"
+type = "forbidden"
+source_modules = ["yakbox.*"]
+forbidden_modules = ["yakbox.cli"]
+ignore_imports = ["yakbox.__main__ -> yakbox.cli"]
+
+[[tool.importlinter.contracts]]
+id = "speech-is-backend-neutral"
+name = "Speech domain contracts do not depend on backend implementations"
+type = "forbidden"
+source_modules = [
+    "yakbox.speech.capabilities",
+    "yakbox.speech.guardrails",
+    "yakbox.speech.models",
+]
+forbidden_modules = ["yakbox.cloud", "yakbox.local"]
+
+[[tool.importlinter.contracts]]
+id = "audio-is-backend-neutral"
+name = "Audio processing does not depend on orchestration or backends"
+type = "forbidden"
+source_modules = ["yakbox.audio"]
+forbidden_modules = [
+    "yakbox.audiobook",
+    "yakbox.cli",
+    "yakbox.cloud",
+    "yakbox.diagnostics",
+    "yakbox.local",
+    "yakbox.speech",
+]
+
+[[tool.importlinter.contracts]]
+id = "backends-do-not-directly-couple"
+name = "Hosted and local backends do not directly depend on each other"
+type = "forbidden"
+source_modules = ["yakbox.cloud", "yakbox.local"]
+forbidden_modules = ["yakbox.cloud", "yakbox.local"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "subpackage-imports-are-acyclic"
+name = "Subpackage imports are acyclic"
+type = "acyclic_siblings"
+ancestors = [
+    "yakbox.audio",
+    "yakbox.audiobook",
+    "yakbox.cloud",
+    "yakbox.diagnostics",
+    "yakbox.speech",
+]
+depth = 0
+
+[tool.mutmut]
+source_paths = ["src/yakbox"]
+only_mutate = [
+    "src/yakbox/_files.py",
+    "src/yakbox/contracts.py",
+    "src/yakbox/audiobook/artifacts.py",
+    "src/yakbox/audiobook/journal.py",
+    "src/yakbox/speech/guardrails.py",
+]
+pytest_add_cli_args_test_selection = ["tests/unit", "tests/integration"]
+pytest_add_cli_args = ["--quiet", "--tb=no"]
+also_copy = [".github", "README.md", "constraints", "docs", "examples"]
+mutate_only_covered_lines = true
+max_stack_depth = 8
+on_dependency_change = "rerun"
+
 [tool.ruff]
-target-version = "py312"
+target-version = "py313"
 line-length = 88
 src = ["src", "tests"]
 
@@ -134,12 +208,15 @@ select = [
     "E",
     "F",
     "W",
+    "ANN",
+    "ARG",
     "I",
     "B",
     "UP",
     "ASYNC",
     "C4",
     "C90",
+    "BLE",
     "DTZ",
     "G",
     "PERF",
@@ -147,26 +224,25 @@ select = [
     "PL",
     "PTH",
     "RUF",
+    "RET",
+    "S",
     "SIM",
+    "T20",
 ]
-ignore = ["PLR0913"]
 extend-ignore = ["ASYNC240"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
+[tool.ruff.lint.pylint]
+max-args = 20
+max-positional-args = 5
+
 [tool.ruff.lint.per-file-ignores]
-"src/yakbox/audiobook/manifest.py" = ["C901", "PLR0912"]
-"src/yakbox/audiobook/sources.py" = ["C901", "PLR0915"]
-"src/yakbox/cli.py" = ["PLC0415", "PLR0917"]
-"src/yakbox/cloud/batch.py" = ["C901", "PLR0911", "PLR0912", "PLR0915", "PLR0917"]
-"src/yakbox/local.py" = ["PLC0415"]
-"src/yakbox/speech/services.py" = ["PLC0415"]
-"src/yakbox/speech/workers.py" = ["PLC0415"]
-"tests/**/*.py" = ["PLR2004"]
+"tests/**/*.py" = ["PLR2004", "S101"]
 
 [tool.ty.environment]
-python-version = "3.12"
+python-version = "3.13"
 
 [tool.ty.src]
 include = ["src", "tests"]

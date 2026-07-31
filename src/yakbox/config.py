@@ -13,7 +13,7 @@ from yakbox.errors import ConfigurationError
 @dataclass(frozen=True, slots=True)
 class YakboxConfig:
     default_backend: str = "fake"
-    resemble_api_key: str | None = None
+    legacy_resemble_api_key: str | None = None
     resemble_voice_uuid: str | None = None
     resemble_project_uuid: str | None = None
     cloud_concurrency: int = 5
@@ -49,13 +49,12 @@ def load_config(path: Path | None = None) -> YakboxConfig:
         raise ConfigurationError("Cloud concurrency must be an integer") from error
     if concurrency < 1:
         raise ConfigurationError("Cloud concurrency must be at least 1")
+    legacy_api_key = _optional_string(cloud.get("api_key"))
     return YakboxConfig(
         default_backend=os.environ.get(
             "YAKBOX_BACKEND", str(defaults.get("backend", "fake"))
         ),
-        resemble_api_key=os.environ.get(
-            "RESEMBLE_API_KEY", _optional_string(cloud.get("api_key"))
-        ),
+        legacy_resemble_api_key=legacy_api_key,
         resemble_voice_uuid=(
             os.environ.get("YAKBOX_CLOUD_VOICE_UUID")
             or os.environ.get("RESEMBLE_VOICE_UUID")

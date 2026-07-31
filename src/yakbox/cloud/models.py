@@ -1,26 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 
 from yakbox.errors import ValidationError
-
-
-class AudioFormat(StrEnum):
-    WAV = "wav"
-    MP3 = "mp3"
-
-
-class Precision(StrEnum):
-    MULAW = "MULAW"
-    PCM_16 = "PCM_16"
-    PCM_24 = "PCM_24"
-    PCM_32 = "PCM_32"
+from yakbox.speech.models import AudioFormat, Precision
 
 
 @dataclass(frozen=True, slots=True)
 class RetryPolicy:
+    """Bounded retry and backoff policy for Resemble API requests."""
+
     max_attempts: int = 4
     base_delay: float = 0.5
     max_backoff: float = 8.0
@@ -35,6 +25,8 @@ class RetryPolicy:
 
 @dataclass(frozen=True, slots=True)
 class ClientOptions:
+    """Endpoints, timeouts, connection limits, and retry policy for a client."""
+
     management_base_url: str = "https://app.resemble.ai/api/v2"
     synthesis_base_url: str = "https://f.cluster.resemble.ai"
     connect_timeout: float = 10.0
@@ -49,6 +41,8 @@ class ClientOptions:
 
 @dataclass(frozen=True, slots=True)
 class SynthesisRequest:
+    """Validated request for non-streaming Resemble speech synthesis."""
+
     text: str
     voice_uuid: str
     project_uuid: str | None = None
@@ -65,6 +59,8 @@ class SynthesisRequest:
 
 @dataclass(frozen=True, slots=True)
 class StreamRequest:
+    """Validated request for streaming Resemble speech synthesis."""
+
     text: str
     voice_uuid: str
     project_uuid: str | None = None
@@ -79,6 +75,8 @@ class StreamRequest:
 
 @dataclass(frozen=True, slots=True)
 class SynthesisResult:
+    """In-memory synthesized audio with provider timing and request metadata."""
+
     audio: bytes
     duration_seconds: float | None
     synthesis_seconds: float | None
@@ -92,6 +90,8 @@ class SynthesisResult:
 
 @dataclass(frozen=True, slots=True)
 class FileSynthesisResult:
+    """Persisted synthesis result with byte count and provider metadata."""
+
     path: Path
     bytes_written: int
     duration_seconds: float | None
@@ -102,6 +102,8 @@ class FileSynthesisResult:
 
 @dataclass(frozen=True, slots=True)
 class Voice:
+    """Resemble voice identity and lifecycle metadata."""
+
     uuid: str
     name: str
     status: str | None = None
@@ -110,6 +112,8 @@ class Voice:
 
 @dataclass(frozen=True, slots=True)
 class Project:
+    """Resemble project identity, collaboration state, and metadata."""
+
     uuid: str
     name: str
     description: str | None = None
@@ -120,6 +124,8 @@ class Project:
 
 @dataclass(frozen=True, slots=True)
 class Recording:
+    """Resemble recording identity, source text, and processing state."""
+
     uuid: str
     name: str
     text: str | None = None
@@ -128,6 +134,8 @@ class Recording:
 
 @dataclass(frozen=True, slots=True)
 class Page[T]:
+    """One page of management API resources and pagination metadata."""
+
     items: tuple[T, ...]
     page: int | None
     page_count: int | None

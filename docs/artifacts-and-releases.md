@@ -45,11 +45,13 @@ yakbox artifacts trash list
 yakbox artifacts trash restore CLEANUP_ID
 yakbox artifacts trash restore CLEANUP_ID --path previews/RUN/sample.wav
 yakbox artifacts trash purge CLEANUP_ID --yes
+yakbox artifacts trash purge --all --yes
 ```
 
 Apply moves eligible artifacts and sidecars into quarantine atomically under a
 target lock. Restore verifies digests and refuses collisions. Purge is the only
-irreversible step.
+irreversible step. Omitting `CLEANUP_ID` requires an explicit `--all`; `--yes`
+is always required.
 
 Normal cleanup protects:
 

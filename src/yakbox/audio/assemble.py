@@ -31,6 +31,7 @@ def assemble_m4b(
     bitrate: str = "192k",
     overwrite: bool = False,
 ) -> None:
+    """Assemble ordered chapter audio into an atomic, metadata-rich M4B file."""
     _validate_assembly_inputs(chapters, destination, overwrite=overwrite)
     destination.parent.mkdir(parents=True, exist_ok=True)
     descriptor, list_name = tempfile.mkstemp(
@@ -152,7 +153,7 @@ def _validate_assembly_inputs(
 
 def _run_ffmpeg_assembly(command: list[str]) -> None:
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - validated argv; shell is disabled
             command, check=False, capture_output=True, text=True, timeout=1800
         )
     except subprocess.TimeoutExpired as error:

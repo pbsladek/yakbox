@@ -27,6 +27,8 @@ class _SynthesisJob:
 
 
 class ResembleSpeechService:
+    """Adapt a Resemble client to the backend-neutral speech protocols."""
+
     capabilities = BackendCapabilities(
         name="resemble",
         synthesis=True,
@@ -50,12 +52,15 @@ class ResembleSpeechService:
         self._closed = False
 
     async def usage_snapshot(self) -> HostedUsageSnapshot | None:
+        """Return the client's current hosted usage snapshot."""
         return await self.client.usage_snapshot()
 
     def set_usage_recorder(self, recorder: HostedUsageRecorder | None) -> None:
+        """Install or clear the durable usage reservation callback."""
         self.client.set_usage_recorder(recorder)
 
     async def restore_usage(self, snapshot: HostedUsageSnapshot) -> None:
+        """Restore durable usage counters before resumed service work."""
         await self.client.restore_usage(snapshot)
 
     async def synthesize_to_file(
@@ -65,6 +70,7 @@ class ResembleSpeechService:
         *,
         overwrite: bool = False,
     ) -> SpeechArtifact:
+        """Map a neutral request to Resemble and commit the resulting file."""
         return await self._synthesize_direct(
             request,
             destination,
@@ -77,6 +83,7 @@ class ResembleSpeechService:
         *,
         overwrite: bool = False,
     ) -> tuple[SpeechArtifact, ...]:
+        """Synthesize ordered requests with bounded concurrency."""
         futures = [
             await self._enqueue(request, destination, overwrite=overwrite)
             for request, destination in requests
@@ -94,6 +101,7 @@ class ResembleSpeechService:
         return tuple(item for item in results if isinstance(item, SpeechArtifact))
 
     async def aclose(self) -> None:
+        """Wait for active calls and prevent new service operations."""
         if self._closed:
             return
         self._closed = True
@@ -149,7 +157,7 @@ class ResembleSpeechService:
                 if not job.future.done():
                     job.future.cancel()
                 raise
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - isolates independent queue jobs
                 if not job.future.done():
                     job.future.set_exception(error)
             finally:

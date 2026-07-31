@@ -4,12 +4,34 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
-from typing import NewType
 
 from yakbox.errors import ValidationError
 
-CurrencyCode = NewType("CurrencyCode", str)
-PricingSourceId = NewType("PricingSourceId", str)
+CURRENCY_CODE_LENGTH = 3
+
+
+class CurrencyCode(str):
+    """Validated three-letter uppercase currency code."""
+
+    def __new__(cls, value: str) -> CurrencyCode:
+        normalized = value.strip().upper()
+        if (
+            len(normalized) != CURRENCY_CODE_LENGTH
+            or not normalized.isascii()
+            or not normalized.isalpha()
+        ):
+            raise ValidationError("Currency code must contain three ASCII letters")
+        return super().__new__(cls, normalized)
+
+
+class PricingSourceId(str):
+    """Validated non-empty identifier for the source of hosted pricing."""
+
+    def __new__(cls, value: str) -> PricingSourceId:
+        normalized = value.strip()
+        if not normalized:
+            raise ValidationError("Pricing source must not be empty")
+        return super().__new__(cls, normalized)
 
 
 class AudioFormat(StrEnum):
@@ -17,8 +39,19 @@ class AudioFormat(StrEnum):
     MP3 = "mp3"
 
 
+class Precision(StrEnum):
+    """Provider-neutral audio sample precision."""
+
+    MULAW = "MULAW"
+    PCM_16 = "PCM_16"
+    PCM_24 = "PCM_24"
+    PCM_32 = "PCM_32"
+
+
 @dataclass(frozen=True, slots=True)
 class ChatterboxSynthesisOptions:
+    """Per-request generation controls for Chatterbox speech synthesis."""
+
     cfg_weight: float | None = None
     exaggeration: float | None = None
     seed: int | None = None
@@ -26,6 +59,8 @@ class ChatterboxSynthesisOptions:
 
 @dataclass(frozen=True, slots=True)
 class SpeechSynthesisRequest:
+    """Provider-neutral request for generating speech from text."""
+
     text: str
     voice: str
     backend: str = "fake"
@@ -34,7 +69,7 @@ class SpeechSynthesisRequest:
     sample_rate: int | None = None
     title: str | None = None
     use_hd: bool = False
-    precision: str | None = None
+    precision: Precision | None = None
     apply_custom_pronunciations: bool = False
     project: str | None = None
     reference_audio: Path | None = None
@@ -51,6 +86,8 @@ class SpeechSynthesisRequest:
 
 @dataclass(frozen=True, slots=True)
 class SpeechTransformationRequest:
+    """Provider-neutral request for transforming an existing audio file."""
+
     input_path: Path
     voice: str
     backend: str = "local"
@@ -66,6 +103,8 @@ class SpeechTransformationRequest:
 
 @dataclass(frozen=True, slots=True)
 class SpeechArtifact:
+    """Persisted speech output with backend provenance and integrity metadata."""
+
     path: Path
     backend: str
     voice: str
@@ -80,6 +119,8 @@ class SpeechArtifact:
 
 @dataclass(frozen=True, slots=True)
 class HostedUsageBudget:
+    """Hard limits and confirmation thresholds for billable hosted work."""
+
     max_submitted_characters: int | None = None
     max_provider_requests: int | None = None
     max_estimated_spend: Decimal | None = None
@@ -109,7 +150,24 @@ class HostedUsageBudget:
 
 
 @dataclass(frozen=True, slots=True)
+class SpeechBackendOptions:
+    """Typed configuration for opening a speech backend."""
+
+    api_key: str | None = None
+    isolated_local: bool = False
+    hosted_budget: HostedUsageBudget | None = None
+    price_per_character: Decimal | None = None
+    max_connections: int | None = None
+    device: str | None = None
+    local_worker_timeout_seconds: float = 3_600
+    local_threads_per_process: int = 1
+    local_worker_log_path: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class HostedUsageSnapshot:
+    """Observed hosted requests, submitted text, and estimated spend totals."""
+
     logical_items: int = 0
     provider_attempts: int = 0
     submitted_characters: int = 0

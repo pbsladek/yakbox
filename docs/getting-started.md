@@ -2,7 +2,7 @@
 
 ## Install
 
-Yakbox supports Python 3.12 through 3.14. Install the default CLI without
+Yakbox supports Python 3.13 and 3.14. Install the default CLI without
 PyTorch:
 
 ```console
@@ -80,11 +80,14 @@ yakbox build --failed
 yakbox build --missing
 ```
 
-`--chapters 2-4,7` accepts ranges and comma-separated titles or chapter IDs.
+`--chapter 2-4,7` accepts one selector containing ranges and comma-separated
+titles or chapter IDs. `--chapters` remains a compatibility alias; it is not a
+repeatable option.
 Targets can inherit from another target and define their normal stage range.
 Starter projects include `--mode draft`, `--mode proof`, and `--mode release`
 targets. Interactive builds show live node progress; `--json`, `--quiet`,
 non-TTY output, and `--no-progress` remain clean for automation.
+`--quiet` and `--verbose` are mutually exclusive.
 
 All commands accept `--help`. Put global machine-output options before the
 command, for example `yakbox --json plan`.

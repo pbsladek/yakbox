@@ -5,3 +5,11 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: import architecture contracts
+        entry: uv run lint-imports --no-cache
+        language: system
+        pass_filenames: false

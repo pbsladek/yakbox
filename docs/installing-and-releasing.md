@@ -2,7 +2,7 @@
 
 ## Install the CLI
 
-Yakbox supports Python 3.12 through 3.14. The default installation is small
+Yakbox supports Python 3.13 and 3.14. The default installation is small
 and does not install PyTorch:
 
 ```console

@@ -164,5 +164,6 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
         == 1
     )
     assert ("uv", "run", "pytest") in commands
+    assert ("uv", "run", "lint-imports", "--no-cache") in commands
     assert ("uv", "audit", "--frozen") in commands
     assert sum(command[:2] == ("uv", "run") for command in commands) >= 6

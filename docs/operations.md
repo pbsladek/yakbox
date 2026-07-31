@@ -36,6 +36,11 @@ Supported environment overrides include `YAKBOX_BACKEND`,
 `YAKBOX_CLOUD_CONCURRENCY`, and `RESEMBLE_API_KEY`. Legacy
 `RESEMBLE_VOICE_UUID`/`RESEMBLE_PROJECT_UUID` aliases remain accepted.
 
+Missing or malformed manifests are application failures because manifest
+loading performs domain validation and may report several related issues.
+Direct file arguments such as audio, recording, batch, resume, and shard inputs
+are validated by Click as usage errors before an operation begins.
+
 ## Security
 
 - Do not place API keys in `yakbox.toml`, source control, batch rows, or shell
@@ -82,8 +87,8 @@ direct test. Worker heartbeat logs are under
 `.yakbox/runs/RUN_ID/logs/local-worker.log`.
 
 `No Resemble API key found`: set `RESEMBLE_API_KEY` or install
-`yakbox[credentials]`, run `config auth login`, and select the profile before
-the cloud subcommand.
+`yakbox[credentials]`, run `config auth login --credential-profile NAME`, and
+select the same profile before the cloud subcommand.
 
 `may have been accepted by the provider`: a management mutation failed after
 the request could have reached Resemble. Inspect the provider project/voice
@@ -98,7 +103,8 @@ outputs from earlier stages. Build from synthesis or remove the stage bound.
 ## Automation and shell completion
 
 Use `--json` before the command. JSON is a versioned, single-document envelope
-with stable statuses and exit codes 0, 1, 2, and 130.
+with a stable `command` discriminator, snake-case error codes, statuses, and
+exit codes 0, 1, 2, and 130.
 
 Click completion can be installed for the current shell:
 

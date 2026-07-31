@@ -24,6 +24,8 @@ type RestoreItem = tuple[Path, Path, Path, Path]
 
 @dataclass(frozen=True, slots=True)
 class CleanupCandidate:
+    """Verified artifact and metadata pair eligible for quarantine."""
+
     id: str
     path: Path
     metadata_path: Path
@@ -35,6 +37,8 @@ class CleanupCandidate:
 
 @dataclass(frozen=True, slots=True)
 class CleanupPlan:
+    """Auditable, reversible artifact cleanup operation prepared for execution."""
+
     schema_version: int
     cleanup_id: str
     workspace: Path
@@ -45,9 +49,11 @@ class CleanupPlan:
 
     @property
     def bytes_reclaimable(self) -> int:
+        """Return the total candidate bytes represented by the plan."""
         return sum(item.size for item in self.candidates)
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize the cleanup plan using its versioned contract."""
         return {
             **runtime_metadata("audiobook-cleanup-plan"),
             "cleanup_id": self.cleanup_id,
@@ -86,6 +92,7 @@ def plan_cleanup(
     raw_until_release: bool = True,
     current_paths: tuple[Path, ...] = (),
 ) -> CleanupPlan:
+    """Plan reversible cleanup while protecting active and retained artifacts."""
     inventory = inventory_artifacts(artifact_root)
     incomplete_runs = _incomplete_run_ids(workspace)
     release_paths = _release_references(artifact_root)
@@ -185,6 +192,7 @@ def _cleanup_eligible(
 
 
 def apply_cleanup(plan: CleanupPlan) -> Path:
+    """Revalidate and move a cleanup plan into workspace quarantine."""
     with target_lock(plan.workspace / ".yakbox", plan.target):
         trash = plan.workspace / ".yakbox" / "trash" / plan.cleanup_id
         if trash.exists():
@@ -244,6 +252,7 @@ def restore_trash(
     *,
     relative_path: Path | None = None,
 ) -> int:
+    """Restore a quarantined cleanup entry after digest and collision checks."""
     trash_root = workspace.resolve() / ".yakbox" / "trash"
     trash = safe_child(trash_root, trash_root / cleanup_id)
     manifest_path = trash / "cleanup.json"
@@ -533,6 +542,7 @@ def _retained_run_ids(
 
 
 def purge_trash(workspace: Path, cleanup_id: str | None = None) -> int:
+    """Permanently remove one quarantine entry, or all entries when ID is absent."""
     trash_root = workspace.resolve() / ".yakbox" / "trash"
     if not trash_root.exists():
         return 0

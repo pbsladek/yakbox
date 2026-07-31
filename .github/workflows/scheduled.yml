@@ -9,6 +9,42 @@ permissions:
   contents: read
 
 jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.0"
+          python-version: "3.14"
+          enable-cache: true
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - run: uv sync --frozen --all-groups
+      - name: Run mutation suite
+        run: uv run mutmut run --max-children 1
+      - name: Report surviving mutants
+        if: always()
+        run: uv run mutmut results
+      - name: Export mutation statistics
+        if: always()
+        run: uv run mutmut export-cicd-stats
+      - name: Enforce mutation baseline
+        run: >-
+          uv run python -c
+          "import json,pathlib; s=json.loads(pathlib.Path('mutants/mutmut-cicd-stats.json').read_text()); assert s['total'] > 0 and s['killed'] / s['total'] >= 0.80 and not any(s[k] for k in ('no_tests','suspicious','timeout','check_was_interrupted_by_user','segfault')), s"
+      - name: Upload mutation statistics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-statistics
+          path: mutants/mutmut-cicd-stats.json
+          if-no-files-found: ignore
+          retention-days: 30
+
   performance:
     runs-on: ubuntu-latest
     steps:
@@ -17,7 +53,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          version: "0.11.32"
+          version: "0.12.0"
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --frozen --all-groups
@@ -32,7 +68,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          version: "0.11.32"
+          version: "0.12.0"
           python-version: "3.14"
           enable-cache: true
       - name: Audit default runtime
@@ -46,7 +82,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          version: "0.11.32"
+          version: "0.12.0"
           python-version: "3.14"
           enable-cache: true
       - name: Audit upstream-constrained local extra
@@ -60,7 +96,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          version: "0.11.32"
+          version: "0.12.0"
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --frozen --all-groups --extra local
