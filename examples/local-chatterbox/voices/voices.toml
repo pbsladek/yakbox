@@ -1,0 +1,452 @@
+schema_version = 1
+rights_policy = "Every bundled prompt must have a verified source, checksum, and permissive reuse basis."
+
+[voices.caro-davy]
+file = "caro-davy.wav"
+sha256 = "0188c45c8588de45ed5ba18632d1acc3174be4a3c97c70e9a581000384ff2cd4"
+reader = "Caro Davy"
+reader_url = "https://librivox.org/reader/10955"
+source_work = "The Emerald Story Book: The Selfish Giant by Oscar Wilde"
+catalog_url = "https://librivox.org/the-emerald-story-book-by-various/"
+source_url = "https://archive.org/download/emeraldstorybook_2106_librivox/emeraldstorybook_05_various_128kb.mp3"
+source_sha256 = "9db28be5621791205dd78df94ab1c6d891cae6f572312aef1840bc626e8f090a"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 24
+filters = ["loudnorm=I=-23:TP=-3:LRA=11"]
+
+[voices.nick-whitley]
+file = "nick-whitley.wav"
+sha256 = "9d530565ed627511d9124235fc20477fc5d8e660aa420b6e4b3e397680bf60d8"
+reader = "Nick Whitley"
+reader_url = "https://librivox.org/reader/8143"
+source_work = "Barchester Towers by Anthony Trollope"
+catalog_url = "https://librivox.org/barchester-towers-2-by-anthony-trollope/"
+source_url = "https://dn710908.ca.archive.org/0/items/barchestertowers_1710_librivox/barchestertowers_01_trollope_64kb.mp3"
+source_sha256 = "46606f273c3947d0cc80f5e8bf7bfef837ac3abf81b0a6b86592b8718502554b"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.andy-minter]
+file = "andy-minter.wav"
+sha256 = "68a34229b5e3ef7e418b7fbfb314194fb670b6c0427d57a03eb9f43fa02e3f53"
+reader = "Andy Minter (1934-2017)"
+reader_url = "https://librivox.org/reader/152"
+source_work = "Ghost Stories, Volume 001: Man-Size in Marble by E. Nesbit"
+catalog_url = "https://archive.org/details/ghost_stories_001_librivox"
+source_url = "https://dn721900.ca.archive.org/0/items/ghost_stories_001_librivox/gs001-man_size_in_marble_nesbit_ajm_64kb.mp3"
+source_sha256 = "ab5826411805f609345f4874c74ec45011a7bd823c9026c04a3b5426fb2bc70d"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.ruth-golding]
+file = "ruth-golding.wav"
+sha256 = "759fe990657ba9f7fa3c04ae6c94acdcb69e5c212bbd8d9d6658466999c64f6d"
+reader = "Ruth Golding"
+reader_url = "https://librivox.org/reader/2607"
+source_work = "A House to Let by Charles Dickens and others"
+catalog_url = "https://librivox.org/a-house-to-let-by-charles-dickens-and-others/"
+source_url = "https://dn710303.ca.archive.org/0/items/house_to_let_rg_librivox/housetolet_1_dickens_64kb.mp3"
+source_sha256 = "2545de1b247b68bc51237352bedb9c264ebc69df41436ec72fecd050e7e34aab"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.bill-boerst]
+file = "bill-boerst.wav"
+sha256 = "e49cf3ef457845b646353df29e2903590ec576e2313649a6c5a3f2f627225db3"
+reader = "Bill Boerst"
+reader_url = "https://librivox.org/reader/4788"
+source_work = "Short Story Collection Vol. 042: A Making of a New Yorker by O. Henry"
+catalog_url = "https://librivox.org/short-story-collection-vol-042-by-various/"
+source_url = "https://archive.org/download/short_story_042_1002_librivox/shortstory042_09newyorker_wjb_64kb.mp3"
+source_sha256 = "0cf25c0edfeb59c2259f0c1ad0b996ec5bc0eb19184c5a7dcf28f376ae69ca73"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.stuart-bell]
+file = "stuart-bell.wav"
+sha256 = "1696056d3442551d6f80879298f9b8a5c7d845df65b5d477f848683d3453f89b"
+reader = "Stuart Bell"
+reader_url = "https://librivox.org/reader/1870"
+source_work = "Celebration of Dialects and Accents, Vol 1: English accent, neutral, southern"
+catalog_url = "https://librivox.org/celebration-of-dialects-and-accents-vol-1/"
+source_url = "https://archive.org/download/dialect_accent_0909_librivox/dialectaccent_vol_01_26sjb_64kb.mp3"
+source_sha256 = "b81a4d01b01c5ed2cf1f39b185fdaa91c5be352de80dafe237dcfa3f9dad9d4e"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 31.1
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.karen-savage]
+file = "karen-savage.wav"
+sha256 = "53a28e3a51b02caced838587de154209ac19904f53ccd351da1eeceb7eea0c30"
+reader = "Karen Savage"
+reader_url = "https://librivox.org/reader/103"
+source_work = "Anne of Green Gables (version 3): Mrs. Rachel Lynde Is Surprised by L. M. Montgomery"
+catalog_url = "https://librivox.org/anne-of-green-gables-by-lucy-maud-montgomery-3/"
+source_url = "https://archive.org/download/anne_greengables_librivox/anne_of_green_gables_01_montgomery_64kb.mp3"
+source_sha256 = "5f4847632ea6a29eba2c3a71fd5d89ffa66daeb3c2ece66ef5dd1c4b357f866f"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.elizabeth-klett]
+file = "elizabeth-klett.wav"
+sha256 = "91adc9fc153ec7f16a53a4e3c06c76967b37dab4122af838a530d718fdf3df7c"
+reader = "Elizabeth Klett"
+reader_url = "https://librivox.org/reader/1259"
+source_work = "Jane Eyre (version 3): Chapter 1 by Charlotte Brontë"
+catalog_url = "https://librivox.org/jane-eyre-version-3-by-charlotte-bronte/"
+source_url = "https://archive.org/download/jane_eyre_ver03_0809_librivox/janeeyre_01_bronte_64kb.mp3"
+source_sha256 = "aa71b5c7c5a9bae54a083e1a1b11b8d9c0543602ed64aa993e7e514427de1110"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.cori-samuel]
+file = "cori-samuel.wav"
+sha256 = "e8954386a7bee08175ad2bcde7f86029e330a14f273eace42266c8e795cd296a"
+reader = "Cori Samuel"
+reader_url = "https://librivox.org/reader/92"
+source_work = "Frankenstein, or the Modern Prometheus (1818 text): Volume I, Letter I by Mary Shelley"
+catalog_url = "https://librivox.org/frankenstein-or-the-modern-prometheus-1818-by-mary-wollstonecraft-shelley/"
+source_url = "https://archive.org/download/frankenstein_cs_librivox/frankenstein_02_shelley_64kb.mp3"
+source_sha256 = "c40fe63f9f01253aee26f3a1c2048a788d89abdf71e772aa638db62955304747"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.mil-nicholson]
+file = "mil-nicholson.wav"
+sha256 = "8d925e8b68a80c6932627950bd5008548622c168e511ced81dda24d07c1d0782"
+reader = "Mil Nicholson"
+reader_url = "https://librivox.org/reader/2026"
+source_work = "Great Expectations (version 3): Chapter 1 by Charles Dickens"
+catalog_url = "https://librivox.org/great-expectations-version-3-by-charles-dickens/"
+source_url = "https://archive.org/download/greatexpectations_1601_librivox/greatexpectations_01_dickens_64kb.mp3"
+source_sha256 = "870a08cb363a39eecd75b63c008fa463251078787e63ef88dbc10b9526a1ad47"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.lucy-burgoyne]
+file = "lucy-burgoyne.wav"
+sha256 = "d60595f5b9ed228edcce6029566a8aa5899e0adf014e8a21be66e49220d2c752"
+reader = "Lucy Burgoyne (1950-2014)"
+reader_url = "https://librivox.org/reader/681"
+source_work = "The Garden Party by Katherine Mansfield"
+catalog_url = "https://librivox.org/the-garden-party-by-katherine-mansfield/"
+source_url = "https://archive.org/download/garden_party/gardenparty_03_mansfield_64kb.mp3"
+source_sha256 = "d9fb7774f617b0efae372480f537a4fda9677714c33a71f3e2ea17c9db10e858"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.mark-f-smith]
+file = "mark-f-smith.wav"
+sha256 = "a33987a4454a3f976a42f82c1874725cddf2335e7b5235e8431995b72d624a3b"
+reader = "Mark F. Smith"
+reader_url = "https://librivox.org/reader/204"
+source_work = "The Adventures of Sherlock Holmes: A Scandal in Bohemia by Arthur Conan Doyle"
+catalog_url = "https://librivox.org/the-adventures-of-sherlock-holmes-by-sir-arthur-conan-doyle-2/"
+source_url = "https://archive.org/download/adventures_sherlockholmes_1007_librivox/adventuresherlockholmes_01_doyle_64kb.mp3"
+source_sha256 = "0287346d5728cef22d84d68803025c26aabf9847324527bba5217cf44fb82b0f"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.bob-neufeld]
+file = "bob-neufeld.wav"
+sha256 = "36b4770a96e9117a50438c7d0dc6bd078dddd0636966e7d8893d52d2f4882fec"
+reader = "Bob Neufeld"
+reader_url = "https://librivox.org/reader/3912"
+source_work = "A Christmas Carol: Marley's Ghost by Charles Dickens"
+catalog_url = "https://librivox.org/a-christmas-carol-by-dickens-charles/"
+source_url = "https://archive.org/download/christmas_carol_1111_librivox/christmascarol_01_dickens_64kb.mp3"
+source_sha256 = "7241a9a749f8e71ae81a2e64f0f029ba547cb1adad005c41149f964d04dac7c4"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.mark-nelson]
+file = "mark-nelson.wav"
+sha256 = "4644734b567f0e85a69dab0cb2f91670672ca09ff68eca6ba6202463e18b65b0"
+reader = "Mark Nelson"
+reader_url = "https://librivox.org/reader/251"
+source_work = "Crime and Punishment (version 3): Part 1, Chapter 1 by Fyodor Dostoyevsky"
+catalog_url = "https://librivox.org/crime-and-punishment-version-3-by-fyodor-dostoyevsky/"
+source_url = "https://archive.org/download/crime_punishment_3_1708_librivox/crimepunishment_01_dostoyevsky_64kb.mp3"
+source_sha256 = "6892dc4aa7bda40b8689e95f393c97016dee12a14690166b299fac2d544a6ca4"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.david-barnes]
+file = "david-barnes.wav"
+sha256 = "3cdd5367e6849ce13495ec5337a1d1afeaf98462c5d28a9e8990b6c13d8d6cb7"
+reader = "David Barnes"
+reader_url = "https://librivox.org/reader/94"
+source_work = "The Canterville Ghost: Chapters 1 to 3 by Oscar Wilde"
+catalog_url = "https://librivox.org/the-canterville-ghost-by-oscar-wilde/"
+source_url = "https://archive.org/download/canterville_ghost_librivox/cantervilleghost_1-3_wilde_64kb.mp3"
+source_sha256 = "7f010fb985d6a6fe47b1e2bd127f3193d7e851d550e7ac2f0c59e77c52a0a990"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.adrian-praetzellis]
+file = "adrian-praetzellis.wav"
+sha256 = "7d391441252d9e759b0c0eec062978eb1785232bcbc35f3585fe819f8a099bf8"
+reader = "Adrian Praetzellis"
+reader_url = "https://librivox.org/reader/1331"
+source_work = "The Thirty-Nine Steps: Chapter 1 by John Buchan"
+catalog_url = "https://librivox.org/the-thirty-nine-steps-by-john-buchan/"
+source_url = "https://archive.org/download/39_steps_0807_librivox/thirtyninesteps_01_buchan_64kb.mp3"
+source_sha256 = "8cb9c013a21fb7a2e27b8dada6ae99bc1d22318ba096681de6a26d5ae9f83e07"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.gregg-margarite]
+file = "gregg-margarite.wav"
+sha256 = "af9f890451f2cf73b284a183288150c727d77dc9ab9d480b8a01bacddbc833bd"
+reader = "Gregg Margarite (1957-2012)"
+reader_url = "https://librivox.org/reader/3490"
+source_work = "Make Mine Homogenized: Section 1 by Rick Raphael"
+catalog_url = "https://librivox.org/make-mine-homogenized-by-rick-raphael/"
+source_url = "https://www.archive.org/download/make_mine_homogenized_1101_librivox/makeminehomogenized_1_raphael_64kb.mp3"
+source_sha256 = "186148c7134a9fa2011bbdc7829d10226f2d084ed95a3db677373f237eeefc07"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.david-clarke]
+file = "david-clarke.wav"
+sha256 = "f7a2403d0c989ddb9777686f6d38dbcadb2823e29ae7417e6ced9c9a48bcc022"
+reader = "David Clarke"
+reader_url = "https://librivox.org/reader/7408"
+source_work = "The Count of Monte Cristo (version 3): Marseilles - The Arrival by Alexandre Dumas"
+catalog_url = "https://librivox.org/the-count-of-monte-cristo-version-3-by-alexandre-dumas/"
+source_url = "https://www.archive.org/download/count_montecristo_1308_librivox/countofmontecristo_001_dumas_64kb.mp3"
+source_sha256 = "25dce3bf23752365a345e73fec58bb8b32e1078bc1b61f3edee0f4e072925af8"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.martin-geeson]
+file = "martin-geeson.wav"
+sha256 = "7b6f6eaef6dfc1a52a373e351eee7a1921d5c6f4e4723179916fd7b54fb14791"
+reader = "Martin Geeson"
+reader_url = "https://librivox.org/reader/3595"
+source_work = "Phaedrus: My dear Phaedrus, whence come you... by Plato"
+catalog_url = "https://librivox.org/phaedrus-by-plato/"
+source_url = "https://www.archive.org/download/phaedrus_1005_librivox/phaedrus_01_plato_64kb.mp3"
+source_sha256 = "abbf054104c638f33612349600ad77b32b8277c8c377a949c31c4f3a75c4d3b0"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.phil-chenevert]
+file = "phil-chenevert.wav"
+sha256 = "688eab2b255577d993bd8e4921a56cdd12624ce19289b44b792dc838004160ba"
+reader = "Phil Chenevert"
+reader_url = "https://librivox.org/reader/5717"
+source_work = "Ozoplaning with the Wizard of Oz (version 2): At Home with the Wizard of Oz by Ruth Plumly Thompson"
+catalog_url = "https://librivox.org/ozoplaning-with-the-wizard-of-oz-by-ruth-plumly-thompson/"
+source_url = "https://www.archive.org/download/ozoplaningwiththewizardofoz_2103_librivox/ozoplaningwiththewizardofoz_01_thompson_64kb.mp3"
+source_sha256 = "98569786a06fedb7291f9eb0162e2f1b04f731921dc9e7600486b3fdac8f8c7a"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.peter-yearsley]
+file = "peter-yearsley.wav"
+sha256 = "c027dc02b5985a08c18e28a694ffea2a32269c22a37743c71f92116cda4afa0b"
+reader = "Peter Yearsley"
+reader_url = "https://librivox.org/reader/167"
+source_work = "Three Men in a Boat (To Say Nothing of the Dog): Chapter 13 by Jerome K. Jerome"
+catalog_url = "https://librivox.org/three-men-in-a-boat-by-jerome-k-jerome/"
+source_url = "https://www.archive.org/download/three_men_boat_librivox/3meninaboat_13_jerome_64kb.mp3"
+source_sha256 = "39a5f57140033b47df654c045f2bdbfb718ab84636db6d199521b13902c9c516"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.kara-shallenberg]
+file = "kara-shallenberg.wav"
+sha256 = "f4e8bf29121fdd745db33a88791667ea2891c026fa67ac62f119c596c3eb76ce"
+reader = "Kara Shallenberg (1969-2023)"
+reader_url = "https://librivox.org/reader/19"
+source_work = "Treasure Island (version 5): The Old Sea-dog at the Admiral Benbow by Robert Louis Stevenson"
+catalog_url = "https://librivox.org/treasure-island-by-robert-louis-stevenson-5/"
+source_url = "https://www.archive.org/download/treasureisland_ks_1510_librivox/treasureisland_01_stevenson_64kb.mp3"
+source_sha256 = "a8b0b0a4b41e767bbcf424d5aba241e35a364c4df17c5cbdc19a55e6e6db20de"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 100
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.kirsten-ferreri]
+file = "kirsten-ferreri.wav"
+sha256 = "e3f61ad287fd4f70651b4a9422e596a29ab7e938271951fe4f427d2aba59446a"
+reader = "Kirsten Ferreri"
+reader_url = "https://librivox.org/reader/56"
+source_work = "The Portrait of a Lady, Volume 1: Chapter 1 by Henry James"
+catalog_url = "https://librivox.org/the-portrait-of-a-lady-vol-1/"
+source_url = "https://www.archive.org/download/portrait_lady_0708_librivox/portraitofalady1_01_james_64kb.mp3"
+source_sha256 = "8125026185283142c3214a300ff9e7ae83e221f4c507e9db9fead76fd6a71ac2"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.sibella-denton]
+file = "sibella-denton.wav"
+sha256 = "1c7dbbdc0328a2565f81b2ae75a5aafd16df4b5ebdb0406ebabf5867a2e89dc3"
+reader = "Sibella Denton"
+reader_url = "https://librivox.org/reader/1401"
+source_work = "Cranford: Our Society by Elizabeth Cleghorn Gaskell"
+catalog_url = "https://librivox.org/cranford-by-elizabeth-gaskell/"
+source_url = "https://www.archive.org/download/cranford_sd_librivox/cranford_01_gaskell_64kb.mp3"
+source_sha256 = "6db83079ba84ca41de8fff0744fdf2cebfa5ce63c33f88295beae41a46779a20"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.laurie-anne-walden]
+file = "laurie-anne-walden.wav"
+sha256 = "207f313c92504a5b8872a4d467f1e0cbfe1623fdbb770326d6c6aa3699742fd0"
+reader = "Laurie Anne Walden"
+reader_url = "https://librivox.org/reader/1066"
+source_work = "The Book of Dragons: The Book of Beasts by E. Nesbit"
+catalog_url = "https://librivox.org/the-book-of-dragons-by-e-nesbit/"
+source_url = "https://www.archive.org/download/bookofdragons_0904_librivox/bookofdragons_1_nesbit_64kb.mp3"
+source_sha256 = "0103a14e0d41f95f0187a18511e906ae132daae64a13ddcf5d864eb5f3d8f312"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []

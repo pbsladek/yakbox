@@ -2,7 +2,7 @@
 
 ## Install
 
-Yakbox supports Python 3.13 and 3.14. Install the default CLI without
+Yakbox supports Python 3.14 only. Install the default CLI without
 PyTorch:
 
 ```console
@@ -15,6 +15,23 @@ Install local Chatterbox only on a machine intended to run the model:
 uv tool install "yakbox[local]" \
   --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
 ```
+
+On Apple Silicon, add the local MLX Whisper aligner when using verified
+context extraction for short utterances:
+
+```console
+uv tool install "yakbox[local,alignment]" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
+```
+
+The aligner is optional and runs locally. Install the pinned Whisper model
+explicitly with `yakbox whisper models install`; audiobook builds never
+download it. The model uses about 1.61 GB on disk.
+
+For optional phoneme-level forced alignment, install
+`yakbox[local,alignment,phoneme]`, install eSpeak NG with the platform package
+manager, and run `yakbox whisper phoneme-models install`. Builds remain
+offline; model downloads occur only through the explicit install command.
 
 FFmpeg and FFprobe are required for mastering, encoding, inspection, and M4B
 assembly. Run `yakbox doctor` after installation.
@@ -44,6 +61,7 @@ The normal build DAG is:
 normalized source
   -> raw synthesis
   -> mastered WAV chapter
+  -> optional manuscript-verification release gate
   -> delivery MP3 chapter
   -> technical inspection
   -> optional M4B and immutable release evidence

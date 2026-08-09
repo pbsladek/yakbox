@@ -96,11 +96,12 @@ artifacts into quarantine; `purge_trash` permanently deletes them.
 
 Manifest and backend models: `AudiobookManifest`, `BookMetadata`,
 `LogicalVoice`, `BackendOptions`, `BackendProfile`, `FakeOptions`,
-`ChatterboxOptions`, `ResembleOptions`, `BuildTarget`, and `RetentionPolicy`.
+`ChatterboxOptions`, `ResembleOptions`, `CharacterRole`, `DialoguePolicy`,
+`BuildTarget`, and `RetentionPolicy`.
 
 Normalized source and planning models: `Chapter`, `Pause`, `SpeechSegment`,
 `SourceLocation`, `NormalizedDocument`, `BuildStage`, `PlanNode`, `BuildPlan`,
-`BuildChangeSummary`, and `BuildPreflight`.
+`ChunkRoute`, `AttributionFinding`, `BuildChangeSummary`, and `BuildPreflight`.
 
 Build models and callbacks: `BuildRequest`, `BuildResult`, `BuildStatus`,
 `BuildProgress`, `BuildProgressEvent`, and `BuildProgressCallback`.

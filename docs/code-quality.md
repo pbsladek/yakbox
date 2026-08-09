@@ -19,8 +19,8 @@ uv lock --check
 uv build --no-sources
 ```
 
-CI runs the same checks on Python 3.13 and 3.14 across Linux, macOS, and
-Windows. Python 3.13 is the minimum supported runtime.
+CI runs the same checks on Python 3.14 across Linux, macOS, and Windows.
+Python 3.14 is the repository's sole supported runtime.
 
 ## Architecture contracts
 
@@ -179,6 +179,12 @@ Declare dependencies in `pyproject.toml` and let `uv` update `uv.lock`. Keep
 optional model dependencies lazy so importing Yakbox does not load or require a
 model runtime. Dependency audits, package builds, and isolated wheel/sdist smoke
 tests are release gates.
+
+Repository licensing follows [the licensing policy](licensing.md). Every
+versioned third-party asset needs a machine-readable provenance record and an
+automated checksum test. Unknown, noncommercial, and no-derivatives rights are
+not acceptable for bundled assets. Review the license of every new direct
+software dependency before locking it; prefer MIT, Apache-2.0, BSD, or ISC.
 
 Review changes in this order:
 

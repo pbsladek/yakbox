@@ -75,7 +75,7 @@ def _command_version(command: str) -> str:
             text=True,
             timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return "unavailable"
     first_line = (result.stdout or result.stderr).splitlines()
     return first_line[0][:512] if first_line else f"exit-{result.returncode}"

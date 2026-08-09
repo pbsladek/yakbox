@@ -4,7 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from yakbox._files import commit_temporary_file
+from yakbox._files import atomic_output_path, commit_temporary_file
+
+
+def test_atomic_output_preserves_media_suffix(tmp_path: Path) -> None:
+    destination = tmp_path / "audio.wav"
+
+    with atomic_output_path(destination) as temporary:
+        assert temporary.name.endswith(".part.wav")
+        temporary.write_bytes(b"audio")
+
+    assert destination.read_bytes() == b"audio"
 
 
 def test_commit_reopens_completed_file_writable_for_windows_fsync(

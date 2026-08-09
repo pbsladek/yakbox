@@ -10,7 +10,7 @@ import time
 from contextlib import redirect_stdout, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TextIO, cast
 
 from yakbox._files import atomic_write_json
 from yakbox.errors import BackendUnavailableError, BuildError, ValidationError
@@ -90,7 +90,7 @@ class IsolatedLocalSpeechService:
     def __init__(
         self,
         *,
-        device: str = "auto",
+        device: str = "cpu",
         timeout_seconds: float = 3_600,
         threads_per_process: int = 1,
         heartbeat_seconds: float = 15,
@@ -146,6 +146,7 @@ class IsolatedLocalSpeechService:
         )
         for item in items:
             item.destination.parent.mkdir(parents=True, exist_ok=True)
+            _remove_stale_part_files(item.destination)
         worker_request = LocalWorkerRequest(
             schema_version=1,
             operation="synthesize_many",
@@ -176,28 +177,55 @@ class IsolatedLocalSpeechService:
                     json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
                 )
                 await process.stdin.drain()
-                response = await self._read_response(process)
+                results = await self._read_batch_responses(
+                    process, len(worker_request.items)
+                )
             except asyncio.CancelledError:
                 self._log(f"worker_cancelled pid={process.pid}")
                 await self._discard_worker(process)
+                _cleanup_worker_parts(worker_request.items)
                 raise
-            except (BrokenPipeError, ConnectionError, OSError) as error:
+            except BuildError:
+                _cleanup_worker_parts(worker_request.items)
+                raise
+            except (BrokenPipeError, ConnectionError, OSError, ValueError) as error:
                 await self._discard_worker(process)
+                _cleanup_worker_parts(worker_request.items)
                 detail = self._stderr_tail.decode(errors="replace").strip()[-2048:]
                 raise BuildError(
                     f"Local Chatterbox worker connection failed: {detail or error}"
                 ) from error
-            if response.get("ok") is not True:
-                detail = str(response.get("error", "worker request failed"))[:2048]
+            self._log(
+                f"worker_request_completed pid={process.pid} items={len(results)}"
+            )
+            return results
+
+    async def _read_batch_responses(
+        self, process: asyncio.subprocess.Process, expected: int
+    ) -> tuple[dict[str, object], ...]:
+        results: list[dict[str, object]] = []
+        while True:
+            response = await self._read_response(process)
+            event = response.get("event")
+            if event == "started":
+                self._log(
+                    f"worker_item_started pid={process.pid} "
+                    f"index={response.get('index')}"
+                )
+                continue
+            if event == "result":
+                result = response.get("item")
+                if not isinstance(result, dict):
+                    raise BuildError("Invalid local worker item response")
+                results.append(cast(dict[str, object], result))
+                continue
+            if event == "error":
+                detail = str(response.get("error", "worker request failed"))[:512]
                 self._log(f"worker_request_failed pid={process.pid} detail={detail}")
                 raise BuildError(f"Local Chatterbox worker failed: {detail}")
-            items = response.get("items")
-            if not isinstance(items, list) or any(
-                not isinstance(item, dict) for item in items
-            ):
-                raise BuildError("Local Chatterbox worker returned invalid results")
-            self._log(f"worker_request_completed pid={process.pid} items={len(items)}")
-            return tuple(cast(dict[str, object], item) for item in items)
+            if event == "complete" and len(results) == expected:
+                return tuple(results)
+            raise BuildError("Invalid local worker protocol response")
 
     async def aclose(self) -> None:
         async with self._request_lock:
@@ -210,7 +238,7 @@ class IsolatedLocalSpeechService:
                     process.stdin.write(b'{"operation":"shutdown"}\n')
                     await process.stdin.drain()
                     await asyncio.wait_for(process.wait(), timeout=5)
-                except (BrokenPipeError, OSError, TimeoutError):
+                except BrokenPipeError, OSError, TimeoutError:
                     await _terminate_process(process)
             await self._finish_stderr_task()
             self._process = None
@@ -264,7 +292,8 @@ class IsolatedLocalSpeechService:
                     await response
                 self._log(f"worker_timed_out pid={process.pid}")
                 raise BuildError(
-                    f"Local Chatterbox worker exceeded {self.timeout_seconds:g}s"
+                    "Local Chatterbox worker item exceeded "
+                    f"{self.timeout_seconds:g}s without progress"
                 )
             done, _ = await asyncio.wait(
                 {response},
@@ -288,6 +317,8 @@ class IsolatedLocalSpeechService:
                     ) from error
                 if not isinstance(value, dict):
                     raise BuildError("Invalid local worker protocol response")
+                if value.get("protocol_version") != WORKER_PROTOCOL_VERSION:
+                    raise BuildError("Unsupported local worker protocol response")
                 return value
             self._log(
                 f"worker_heartbeat pid={process.pid} "
@@ -380,9 +411,13 @@ async def _worker_server(device: str) -> None:
             if raw.get("protocol_version") != WORKER_PROTOCOL_VERSION:
                 raise ValidationError("Unsupported local worker protocol")
             request = _request_from_raw(raw)
-            with redirect_stdout(sys.stderr):
-                artifacts = [
-                    await service.synthesize_to_file(
+            for index, item in enumerate(request.items):
+                _write_worker_message(
+                    protocol_output,
+                    {"event": "started", "index": index},
+                )
+                with redirect_stdout(sys.stderr):
+                    artifact = await service.synthesize_to_file(
                         SpeechSynthesisRequest(
                             text=item.text,
                             voice=item.voice,
@@ -395,21 +430,46 @@ async def _worker_server(device: str) -> None:
                         item.destination,
                         overwrite=request.overwrite,
                     )
-                    for item in request.items
-                ]
-            response: dict[str, object] = {
-                "protocol_version": WORKER_PROTOCOL_VERSION,
-                "ok": True,
-                "items": [_artifact_result(artifact) for artifact in artifacts],
-            }
+                _write_worker_message(
+                    protocol_output,
+                    {
+                        "event": "result",
+                        "index": index,
+                        "item": _artifact_result(artifact),
+                    },
+                )
+            _write_worker_message(
+                protocol_output,
+                {"event": "complete", "count": len(request.items)},
+            )
         except Exception as error:  # noqa: BLE001 - worker protocol returns safe errors
-            response = {
-                "protocol_version": WORKER_PROTOCOL_VERSION,
-                "ok": False,
-                "error": f"{type(error).__name__}: {str(error)[:2000]}",
-            }
-        protocol_output.write(json.dumps(response, ensure_ascii=False) + "\n")
-        protocol_output.flush()
+            _write_worker_message(
+                protocol_output,
+                {
+                    "event": "error",
+                    "error": f"{type(error).__name__}: local synthesis failed",
+                },
+            )
+
+
+def _write_worker_message(stream: TextIO, payload: dict[str, object]) -> None:
+    message = {"protocol_version": WORKER_PROTOCOL_VERSION, **payload}
+    stream.write(json.dumps(message, ensure_ascii=False) + "\n")
+    stream.flush()
+
+
+def _cleanup_worker_parts(items: tuple[LocalWorkerItem, ...]) -> None:
+    for item in items:
+        _remove_stale_part_files(item.destination)
+
+
+def _remove_stale_part_files(destination: Path) -> None:
+    suffixes = (f".part{destination.suffix}", ".part")
+    for suffix in suffixes:
+        pattern = f".{destination.name}.*{suffix}"
+        for candidate in destination.parent.glob(pattern):
+            if candidate.is_file():
+                candidate.unlink(missing_ok=True)
 
 
 def _read_request(path: Path) -> LocalWorkerRequest:
@@ -434,7 +494,7 @@ def _request_from_raw(raw: dict[str, object]) -> LocalWorkerRequest:
     return LocalWorkerRequest(
         schema_version=1,
         operation="synthesize_many",
-        device=str(raw.get("device", "auto")),
+        device=str(raw.get("device", "cpu")),
         items=items,
         overwrite=bool(raw.get("overwrite", False)),
     )

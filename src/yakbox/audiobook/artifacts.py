@@ -40,6 +40,7 @@ class ArtifactRecord:
     dependencies: tuple[str, ...] = ()
     media_type: str | None = None
     logical_voice: str | None = None
+    logical_voices: tuple[str, ...] = ()
     reference_audio_sha256: str | None = None
     reference_rights_basis: str | None = None
     watermark_disclosure: str | None = None
@@ -51,6 +52,7 @@ class ArtifactRecord:
         value["kind"] = self.kind.value
         value["path"] = self.path.resolve().relative_to(root.resolve()).as_posix()
         value["dependencies"] = list(self.dependencies)
+        value["logical_voices"] = list(self.logical_voices)
         return value
 
 
@@ -109,6 +111,7 @@ def load_artifact_record(path: Path, *, root: Path) -> ArtifactRecord:
             dependencies=tuple(str(item) for item in raw.get("dependencies", [])),
             media_type=raw.get("media_type"),
             logical_voice=raw.get("logical_voice"),
+            logical_voices=tuple(str(item) for item in raw.get("logical_voices", [])),
             reference_audio_sha256=raw.get("reference_audio_sha256"),
             reference_rights_basis=raw.get("reference_rights_basis"),
             watermark_disclosure=raw.get("watermark_disclosure"),

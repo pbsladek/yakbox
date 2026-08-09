@@ -76,11 +76,15 @@
         },
         "ArtifactRecord": {
           "kind": "class",
-          "signature": "(schema_version: 'int', id: 'str', kind: 'ArtifactKind', path: 'Path', sha256: 'str', size: 'int', fingerprint: 'str', target: 'str', run_id: 'str', protected: 'bool', dependencies: 'tuple[str, ...]' = (), media_type: 'str | None' = None, logical_voice: 'str | None' = None, reference_audio_sha256: 'str | None' = None, reference_rights_basis: 'str | None' = None, watermark_disclosure: 'str | None' = None) -> None"
+          "signature": "(schema_version: 'int', id: 'str', kind: 'ArtifactKind', path: 'Path', sha256: 'str', size: 'int', fingerprint: 'str', target: 'str', run_id: 'str', protected: 'bool', dependencies: 'tuple[str, ...]' = (), media_type: 'str | None' = None, logical_voice: 'str | None' = None, logical_voices: 'tuple[str, ...]' = (), reference_audio_sha256: 'str | None' = None, reference_rights_basis: 'str | None' = None, watermark_disclosure: 'str | None' = None) -> None"
+        },
+        "AttributionFinding": {
+          "kind": "class",
+          "signature": "(code: 'str', speaker: 'str', message: 'str', suggestion: 'str', source: 'SourceLocation') -> None"
         },
         "AudiobookManifest": {
           "kind": "class",
-          "signature": "(path: 'Path', schema_version: 'int', book: 'BookMetadata', sources: 'tuple[Path, ...]', pronunciations: 'Path | None', voices: 'tuple[LogicalVoice, ...]', profiles: 'tuple[BackendProfile, ...]', targets: 'tuple[BuildTarget, ...]', retention: 'RetentionPolicy', max_pause_ms: 'int' = 30000) -> None"
+          "signature": "(path: 'Path', schema_version: 'int', book: 'BookMetadata', sources: 'tuple[Path, ...]', pronunciations: 'Path | None', voices: 'tuple[LogicalVoice, ...]', profiles: 'tuple[BackendProfile, ...]', characters: 'tuple[CharacterRole, ...]', dialogue: 'DialoguePolicy', whisper_qa: 'WhisperQaPolicy', short_utterances: 'ShortUtterancePolicy', targets: 'tuple[BuildTarget, ...]', retention: 'RetentionPolicy', max_pause_ms: 'int' = 30000) -> None"
         },
         "BackendOptions": {
           "kind": "type_alias"
@@ -99,11 +103,11 @@
         },
         "BuildPlan": {
           "kind": "class",
-          "signature": "(schema_version: 'int', target: 'str', profile: 'str', document_sha256: 'str', fingerprint: 'str', nodes: 'tuple[PlanNode, ...]', complete_document: 'bool' = True) -> None"
+          "signature": "(schema_version: 'int', target: 'str', profile: 'str', document_sha256: 'str', fingerprint: 'str', nodes: 'tuple[PlanNode, ...]', complete_document: 'bool' = True, attribution_findings: 'tuple[AttributionFinding, ...]' = ()) -> None"
         },
         "BuildPreflight": {
           "kind": "class",
-          "signature": "(target: 'str', profile: 'str', planned_nodes: 'int', reusable_nodes: 'int', pending_nodes: 'int', pending_chapters: 'int', estimated_output_bytes: 'int', available_bytes: 'int', storage_budget_bytes: 'int | None', hosted_work: 'HostedWorkEstimate | None', reusable_node_ids: 'tuple[str, ...]', change_summary: 'BuildChangeSummary', from_stage: 'BuildStage' = <BuildStage.SYNTHESIZE: 'synthesize'>, through_stage: 'BuildStage' = <BuildStage.INSPECT: 'inspect'>) -> None"
+          "signature": "(target: 'str', profile: 'str', planned_nodes: 'int', reusable_nodes: 'int', pending_nodes: 'int', pending_chapters: 'int', estimated_output_bytes: 'int', available_bytes: 'int', storage_budget_bytes: 'int | None', hosted_work: 'HostedWorkEstimate | None', reusable_node_ids: 'tuple[str, ...]', change_summary: 'BuildChangeSummary', from_stage: 'BuildStage' = <BuildStage.SYNTHESIZE: 'synthesize'>, through_stage: 'BuildStage' = <BuildStage.INSPECT: 'inspect'>, short_utterance_chunks: 'int' = 0, maximum_short_utterance_generations: 'int' = 0) -> None"
         },
         "BuildProgress": {
           "kind": "class",
@@ -138,7 +142,8 @@
             "INSPECT": "inspect",
             "MASTER": "master",
             "RELEASE": "release",
-            "SYNTHESIZE": "synthesize"
+            "SYNTHESIZE": "synthesize",
+            "VERIFY_MANUSCRIPT": "verify_manuscript"
           },
           "signature": "(*values)"
         },
@@ -171,9 +176,17 @@
           "kind": "class",
           "signature": "(id: 'str', title: 'str', order: 'int', source_path: 'Path', segments: 'tuple[SpeechSegment | Pause, ...]') -> None"
         },
+        "CharacterRole": {
+          "kind": "class",
+          "signature": "(name: 'str', display_name: 'str', profile: 'str', cfg_weight: 'float | None' = None, exaggeration: 'float | None' = None, seed: 'int | None' = None, gender: 'str' = 'unspecified') -> None"
+        },
         "ChatterboxOptions": {
           "kind": "class",
-          "signature": "(device: 'str' = 'auto', cfg_weight: 'float | None' = None, exaggeration: 'float | None' = None, seed: 'int | None' = None, max_processes: 'int' = 1, threads_per_process: 'int' = 1, worker_timeout_seconds: 'float' = 3600, estimated_model_memory_bytes: 'int | None' = None) -> None"
+          "signature": "(device: 'str' = 'cpu', cfg_weight: 'float | None' = None, exaggeration: 'float | None' = None, seed: 'int | None' = 0, max_processes: 'int' = 1, threads_per_process: 'int' = 1, worker_timeout_seconds: 'float' = 3600, estimated_model_memory_bytes: 'int | None' = None) -> None"
+        },
+        "ChunkRoute": {
+          "kind": "class",
+          "signature": "(speaker: 'str | None', profile: 'str | None', cfg_weight: 'float | None' = None, exaggeration: 'float | None' = None, seed: 'int | None' = None) -> None"
         },
         "CleanupCandidate": {
           "kind": "class",
@@ -182,6 +195,10 @@
         "CleanupPlan": {
           "kind": "class",
           "signature": "(schema_version: 'int', cleanup_id: 'str', workspace: 'Path', artifact_root: 'Path', candidates: 'tuple[CleanupCandidate, ...]', target: 'str' = 'default', current_paths: 'tuple[Path, ...]' = ()) -> None"
+        },
+        "DialoguePolicy": {
+          "kind": "class",
+          "signature": "(attribution_assistance: 'str' = 'warn', short_utterance_words: 'int' = 3) -> None"
         },
         "FakeOptions": {
           "kind": "class",
@@ -205,7 +222,7 @@
         },
         "PlanNode": {
           "kind": "class",
-          "signature": "(id: 'str', stage: 'BuildStage', chapter_id: 'str', fingerprint: 'str', dependencies: 'tuple[str, ...]', output: 'Path', chunks: 'tuple[str, ...]' = (), chunk_sources: 'tuple[SourceLocation, ...]' = ()) -> None"
+          "signature": "(id: 'str', stage: 'BuildStage', chapter_id: 'str', fingerprint: 'str', dependencies: 'tuple[str, ...]', output: 'Path', chunks: 'tuple[str, ...]' = (), chunk_sources: 'tuple[SourceLocation, ...]' = (), chunk_boundaries: 'tuple[str, ...]' = (), chunk_routes: 'tuple[ChunkRoute, ...]' = (), chunk_short_utterances: 'tuple[ShortUtteranceMarker | None, ...]' = ()) -> None"
         },
         "PronunciationAudit": {
           "kind": "class",
@@ -241,7 +258,7 @@
         },
         "SpeechSegment": {
           "kind": "class",
-          "signature": "(id: 'str', chapter_id: 'str', text: 'str', source: 'SourceLocation', sha256: 'str') -> None"
+          "signature": "(id: 'str', chapter_id: 'str', text: 'str', source: 'SourceLocation', sha256: 'str', speaker: 'str' = 'narrator', speaker_explicit: 'bool' = False, profile_override: 'str | None' = None, boundary_after: 'ChunkBoundary' = <ChunkBoundary.PARAGRAPH: 'paragraph'>) -> None"
         },
         "apply_cache_cleanup": {
           "kind": "function",
@@ -514,7 +531,7 @@
         },
         "run_doctor": {
           "kind": "function",
-          "signature": "(manifest: 'Path | None' = None, *, backend: 'str | None' = None, target: 'str | None' = None, network: 'bool' = False, deep: 'bool' = False, api_key: 'str | None' = None) -> 'DoctorReport'"
+          "signature": "(manifest: 'Path | None' = None, *, backend: 'str | None' = None, target: 'str | None' = None, network: 'bool' = False, deep: 'bool' = False, whisper: 'bool' = False, api_key: 'str | None' = None) -> 'DoctorReport'"
         }
       }
     },

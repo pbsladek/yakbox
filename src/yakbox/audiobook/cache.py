@@ -170,7 +170,7 @@ def _valid_entry(audio: Path, metadata: Path, fingerprint: str) -> bool:
         return False
     try:
         raw = json.loads(metadata.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return False
     return bool(
         isinstance(raw, dict)

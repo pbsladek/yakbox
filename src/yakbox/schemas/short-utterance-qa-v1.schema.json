@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/short-utterance-qa-v1.schema.json",
+  "title": "yakbox short utterance QA",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "kind", "target_sha256", "policy_fingerprint", "aligner_fingerprint", "selected_candidate", "candidates"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/short-utterance-qa-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "kind": {"const": "short_utterance_qa"},
+    "target_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "policy_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "aligner_fingerprint": {"type": "string"},
+    "selected_candidate": {"type": ["integer", "null"]},
+    "candidates": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

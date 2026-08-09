@@ -2,8 +2,8 @@
 
 - [Tiny book](tiny-book/README.md) — a complete two-chapter project using the
   fast offline fake backend.
-- [Local Chatterbox](local-chatterbox/README.md) — short local model setup and
-  conservative worker controls.
+- [Local Chatterbox](local-chatterbox/README.md) — twenty-five provenance-tracked
+  public-domain reference voices, auditions, and conservative worker controls.
 - [Resemble.ai](resemble/README.md) — hosted synthesis with request and
   character budgets.
 - [Multiple voices](multiple-voices/README.md) — compare profiles and build

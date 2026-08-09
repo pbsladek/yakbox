@@ -2,8 +2,7 @@
 # to Astral uv with --overrides when installing yakbox's local extra.
 diffusers==0.39.0
 gradio==6.21.0
-numpy==1.26.4; python_version < "3.13"
-numpy==2.4.6; python_version >= "3.13"
+numpy==2.4.6
 onnx==1.22.0
 safetensors==0.8.0
 setuptools==83.0.0

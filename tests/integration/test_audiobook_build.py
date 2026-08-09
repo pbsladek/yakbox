@@ -3,14 +3,19 @@ from __future__ import annotations
 import asyncio
 import json
 import tomllib
+import wave
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from tests.schema_helpers import validate_contract
 
 import yakbox.audiobook.build as build_module
+from yakbox.audio.crop import SpeechRegion
 from yakbox.audiobook import (
     apply_cache_cleanup,
     apply_cleanup,
@@ -40,6 +45,7 @@ from yakbox.cloud.usage import HostedUsageGate
 from yakbox.errors import BuildError, ValidationError
 from yakbox.speech import (
     BackendCapabilities,
+    ChatterboxSynthesisOptions,
     FakeSpeechService,
     HostedUsageBudget,
     HostedUsageRecorder,
@@ -48,6 +54,128 @@ from yakbox.speech import (
     SpeechSynthesisRequest,
     TextToSpeechService,
 )
+from yakbox.speech.alignment import AlignmentResult, AlignmentToken, lexical_tokens
+from yakbox.speech.short_utterances import CarrierRecipe
+
+
+def test_chatterbox_chunk_seeds_are_stable_and_distinct() -> None:
+    options = ChatterboxSynthesisOptions(seed=42)
+
+    first = build_module._chunk_chatterbox(
+        options, chapter_id="chapter", chunk_index=1, text="First."
+    )
+    repeated = build_module._chunk_chatterbox(
+        options, chapter_id="chapter", chunk_index=1, text="First."
+    )
+    second = build_module._chunk_chatterbox(
+        options, chapter_id="chapter", chunk_index=2, text="Second."
+    )
+
+    assert first == repeated
+    assert first is not None and second is not None
+    assert first.seed != second.seed
+
+
+class _ChapterVerificationAligner:
+    def __init__(self, *, mismatch: bool = False) -> None:
+        self.mismatch = mismatch
+        self.fingerprint = "v" * 64
+
+    async def align(
+        self,
+        audio: Path,
+        expected_text: str,
+        *,
+        language: str,
+    ) -> AlignmentResult:
+        del audio, language
+        words = lexical_tokens(expected_text)
+        if self.mismatch:
+            words = ("wrong",)
+        tokens = tuple(
+            AlignmentToken(word, index * 0.05, index * 0.05 + 0.04, 0.99)
+            for index, word in enumerate(words)
+        )
+        return AlignmentResult(
+            tokens=tokens,
+            speech_regions=(SpeechRegion(0.0, max(0.05, len(words) * 0.05)),),
+            backend="fake-whisper",
+            model="fake",
+            fingerprint=self.fingerprint,
+            transcript=" ".join(words),
+        )
+
+    async def align_window(
+        self,
+        audio: Path,
+        expected_text: str,
+        *,
+        language: str,
+        start_seconds: float,
+        end_seconds: float,
+    ) -> AlignmentResult:
+        del start_seconds, end_seconds
+        return await self.align(audio, expected_text, language=language)
+
+
+@pytest.mark.asyncio
+async def test_manuscript_verification_is_a_managed_release_gate(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = book_workspace / "yakbox.toml"
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8")
+        + "\n[whisper_qa]\nchapter_verification = true\n",
+        encoding="utf-8",
+    )
+    aligner = _ChapterVerificationAligner()
+    monkeypatch.setattr(
+        build_module, "open_local_aligner", lambda *_args, **_kwargs: aligner
+    )
+    manifest = load_manifest(manifest_path)
+
+    result = await build_audiobook(manifest)
+    verification = (
+        manifest.target("default").output_root
+        / "reports"
+        / "0001-chapter-one.manuscript-verification.json"
+    )
+
+    assert result.status == "complete"
+    assert len(result.artifacts) == 5
+    assert verification.is_file()
+    assert json.loads(verification.read_text(encoding="utf-8"))["accepted"]
+    assert check_release(manifest).complete
+
+
+@pytest.mark.asyncio
+async def test_failed_manuscript_verification_prevents_delivery_encoding(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = book_workspace / "yakbox.toml"
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8")
+        + "\n[whisper_qa]\nchapter_verification = true\n",
+        encoding="utf-8",
+    )
+    aligner = _ChapterVerificationAligner(mismatch=True)
+    monkeypatch.setattr(
+        build_module, "open_local_aligner", lambda *_args, **_kwargs: aligner
+    )
+    manifest = load_manifest(manifest_path)
+
+    with pytest.raises(BuildError, match="Build failed"):
+        await build_audiobook(manifest)
+
+    delivery = (
+        manifest.target("default").output_root / "release/mp3/0001-chapter-one.mp3"
+    )
+    assert not delivery.exists()
+    release = check_release(manifest)
+    assert not release.complete
+    assert any("manuscript verification" in issue for issue in release.issues)
 
 
 @pytest.mark.asyncio
@@ -311,6 +439,170 @@ async def test_preview_is_isolated_from_production(book_workspace: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_local_preview_and_audition_use_isolated_backend(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = book_workspace / "yakbox.toml"
+    content = manifest_path.read_text(encoding="utf-8").replace(
+        'backend = "fake"\nvoice = "narrator"\nsample_rate = 16000',
+        'backend = "chatterbox-local"\nvoice = "narrator"\ndevice = "cpu"',
+    )
+    manifest_path.write_text(content, encoding="utf-8")
+    service = _CapturingFakeService()
+    backend_options: list[dict[str, object]] = []
+
+    @asynccontextmanager
+    async def backend(
+        _name: str, **options: object
+    ) -> AsyncIterator[TextToSpeechService]:
+        backend_options.append(options)
+        yield service
+
+    monkeypatch.setattr(build_module, "open_speech_backend", backend)
+    text = "Complete sentence. " + "word " * 200
+
+    await preview_audiobook(load_manifest(manifest_path), text=text)
+    await audition_audiobook(
+        load_manifest(manifest_path),
+        profiles=("default",),
+        text="Short audition.",
+    )
+
+    assert service.texts == ["Complete sentence.", "Short audition."]
+    assert len(backend_options) == 2
+    assert all(options["isolated_local"] is True for options in backend_options)
+    assert all(
+        options["local_worker_timeout_seconds"] == 3_600 for options in backend_options
+    )
+    assert all(options["local_threads_per_process"] == 1 for options in backend_options)
+
+
+@pytest.mark.asyncio
+async def test_opt_in_short_utterance_build_routes_verified_crop_and_reuses_cache(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = book_workspace / "yakbox.toml"
+    with manifest_path.open("a", encoding="utf-8") as manifest_file:
+        manifest_file.write(
+            "\n[short_utterances]\n"
+            'strategy = "context_extract"\n'
+            "maximum_words = 3\n"
+            "candidate_count = 3\n"
+            "require_review_for_one_word = false\n"
+            "keep_candidates = true\n"
+        )
+    calls: list[tuple[str, tuple[str, ...]]] = []
+    join_calls: list[tuple[object, ...]] = []
+
+    class _Aligner:
+        fingerprint = "a" * 64
+
+    def open_aligner(
+        _backend: str,
+        *,
+        model: str,
+        revision: str | None,
+        **_options: object,
+    ) -> _Aligner:
+        del model, revision
+        return _Aligner()
+
+    async def short_synthesis(**options: object) -> None:
+        request = options["request"]
+        destination = options["destination"]
+        recipes = options["recipes"]
+        service = options["service"]
+        assert isinstance(request, SpeechSynthesisRequest)
+        assert isinstance(destination, Path)
+        assert isinstance(recipes, tuple)
+        assert isinstance(service, TextToSpeechService)
+        typed_recipes = cast(tuple[CarrierRecipe, ...], recipes)
+        calls.append((request.text, tuple(recipe.text for recipe in typed_recipes)))
+        await service.synthesize_to_file(request, destination, overwrite=True)
+
+    async def join_inspection(
+        _audio: Path,
+        joins: tuple[object, ...],
+        **_options: object,
+    ) -> object:
+        join_calls.append(joins)
+        return SimpleNamespace(
+            accepted=True,
+            joins=tuple(SimpleNamespace(accepted=True) for _join in joins),
+            to_dict=lambda: {"accepted": True, "joins": []},
+        )
+
+    monkeypatch.setattr(
+        build_module,
+        "open_local_aligner",
+        open_aligner,
+    )
+    monkeypatch.setattr(
+        build_module,
+        "synthesize_short_utterance",
+        short_synthesis,
+    )
+    monkeypatch.setattr(build_module, "inspect_joins", join_inspection)
+    manifest = load_manifest(manifest_path)
+
+    first = await build_audiobook(manifest, through_stage="synthesize")
+
+    assert first.status == "complete"
+    assert first.preflight.short_utterance_chunks == 1
+    assert first.preflight.maximum_short_utterance_generations == 3
+    assert calls[0][0] == "A brief ending."
+    assert len(calls[0][1]) == 3
+    assert join_calls and join_calls[0]
+    assert (
+        len(
+            tuple(
+                (manifest.target("default").output_root / "qa" / "joins").glob(
+                    "*.joins.json"
+                )
+            )
+        )
+        == 1
+    )
+    raw = first.artifacts[0].path
+    raw.unlink()
+    raw.with_suffix(".wav.artifact.json").unlink()
+    calls.clear()
+
+    resumed = await build_audiobook(manifest, through_stage="synthesize")
+
+    assert resumed.status == "complete"
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_preview_and_audition_apply_manifest_pronunciations(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _CapturingFakeService()
+
+    @asynccontextmanager
+    async def backend(
+        _name: str, **_options: object
+    ) -> AsyncIterator[TextToSpeechService]:
+        yield service
+
+    monkeypatch.setattr(build_module, "open_speech_backend", backend)
+    manifest = load_manifest(book_workspace / "yakbox.toml")
+
+    await preview_audiobook(manifest, text="A short preview.")
+    await audition_audiobook(
+        manifest,
+        profiles=("default",),
+        text="A short audition.",
+    )
+
+    assert service.texts == ["A brief preview.", "A brief audition."]
+
+
+@pytest.mark.asyncio
 async def test_audition_matrix_is_deterministic_and_reports_persistable_settings(
     book_workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -325,6 +617,7 @@ async def test_audition_matrix_is_deterministic_and_reports_persistable_settings
         *,
         api_key: str | None = None,
         device: str | None = None,
+        **_options: object,
     ) -> AsyncIterator[TextToSpeechService]:
         nonlocal opened
         opened += 1
@@ -583,6 +876,62 @@ class _BatchingFakeService(FakeSpeechService):
         )
 
 
+class _NativeRateFakeService(FakeSpeechService):
+    async def synthesize_to_file(
+        self,
+        request: SpeechSynthesisRequest,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+    ) -> SpeechArtifact:
+        return await super().synthesize_to_file(
+            replace(request, sample_rate=24_000),
+            destination,
+            overwrite=overwrite,
+        )
+
+
+class _AlternatingRateFakeService(FakeSpeechService):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def synthesize_to_file(
+        self,
+        request: SpeechSynthesisRequest,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+    ) -> SpeechArtifact:
+        self.calls += 1
+        sample_rate = 24_000 if self.calls % 2 else 16_000
+        return await super().synthesize_to_file(
+            replace(request, sample_rate=sample_rate),
+            destination,
+            overwrite=overwrite,
+        )
+
+
+class _CapturingFakeService(FakeSpeechService):
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+        self.captured_requests: list[SpeechSynthesisRequest] = []
+
+    async def synthesize_to_file(
+        self,
+        request: SpeechSynthesisRequest,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+    ) -> SpeechArtifact:
+        self.texts.append(request.text)
+        self.captured_requests.append(request)
+        return await super().synthesize_to_file(
+            replace(request, sample_rate=24_000),
+            destination,
+            overwrite=overwrite,
+        )
+
+
 class _FailingFakeService(FakeSpeechService):
     def __init__(self, *, fail_after: int | None) -> None:
         self.fail_after = fail_after
@@ -754,6 +1103,196 @@ async def test_local_chapter_chunks_share_one_isolated_worker_request(
     assert result.status == "complete"
     assert service.requests > 1
     assert service.batch_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_character_routes_switch_voice_reference_and_performance_per_chunk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        "# The Array\n\n"
+        "Rain moved across the observatory glass while Mara held one hand "
+        "above the final switch. Wren stood between her and the exit, listening "
+        "to the signal gather strength beneath the floor.\n\n"
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"Mara, step away from the console. If the array recognizes you, we may '
+        'never get another chance to leave," Wren said.\n\n'
+        "<!-- yakbox:speech:speaker name=mara -->\n\n"
+        '"I have spent twelve years wondering why it called my name. I will not '
+        'let fear answer for me again," Mara said.\n\n'
+        "The signal sharpened into a thin, impossible chord, and every dark "
+        "screen in the room woke at once.\n",
+        encoding="utf-8",
+    )
+    references: dict[str, Path] = {}
+    for name in ("narrator", "mara", "wren"):
+        reference = tmp_path / f"{name}.wav"
+        reference.write_bytes(name.encode())
+        references[name] = reference.resolve()
+    manifest_path = tmp_path / "yakbox.toml"
+    manifest_path.write_text(
+        '"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"\n'
+        'schema_version = 1\nsources = ["book.md"]\n'
+        '[book]\ntitle = "The Array"\n'
+        '[voices.narrator]\ndisplay_name = "Narrator"\n'
+        'reference_audio = "narrator.wav"\nrights_basis = "owned"\n'
+        '[voices.mara]\ndisplay_name = "Mara"\n'
+        'reference_audio = "mara.wav"\nrights_basis = "owned"\n'
+        '[voices.wren]\ndisplay_name = "Wren (male)"\n'
+        'reference_audio = "wren.wav"\nrights_basis = "owned"\n'
+        '[profiles.narrator]\nbackend = "chatterbox-local"\nvoice = "narrator"\n'
+        'device = "cpu"\ncfg_weight = 0.5\nexaggeration = 0.5\nseed = 1\n'
+        '[profiles.mara]\nbackend = "chatterbox-local"\nvoice = "mara"\n'
+        'device = "cpu"\nseed = 2\n'
+        '[profiles.wren]\nbackend = "chatterbox-local"\nvoice = "wren"\n'
+        'device = "cpu"\ncfg_weight = 0.4\nexaggeration = 0.6\nseed = 3\n'
+        '[characters.narrator]\nprofile = "narrator"\n'
+        '[characters.mara]\nprofile = "mara"\n'
+        "cfg_weight = 0.3\nexaggeration = 0.7\nseed = 17\n"
+        '[characters.wren]\ndisplay_name = "Wren"\nprofile = "wren"\n'
+        '[dialogue]\nattribution_assistance = "warn"\n'
+        "short_utterance_words = 3\n"
+        '[targets.default]\nprofile = "narrator"\n'
+        'output_root = "build/routed"\nchunk_chars = 500\n',
+        encoding="utf-8",
+    )
+    service = _CapturingFakeService()
+
+    @asynccontextmanager
+    async def backend(
+        _name: str, **_options: object
+    ) -> AsyncIterator[TextToSpeechService]:
+        yield service
+
+    monkeypatch.setattr(build_module, "open_speech_backend", backend)
+    manifest = load_manifest(manifest_path)
+    first = await build_audiobook(manifest)
+    second = await build_audiobook(manifest)
+
+    assert first.status == "complete"
+    assert len(second.reused_nodes) == 4
+    assert all(
+        item.logical_voices == ("narrator", "wren", "mara") for item in first.artifacts
+    )
+    assert all(
+        item.logical_voices == ("narrator", "wren", "mara") for item in second.artifacts
+    )
+    assert check_release(manifest).complete
+    assert [request.profile for request in service.captured_requests] == [
+        "narrator",
+        "wren",
+        "narrator",
+        "mara",
+        "narrator",
+        "narrator",
+    ]
+    assert service.captured_requests[1].text == (
+        "Mara, step away from the console. If the array recognizes you, we may "
+        "never get another chance to leave,"
+    )
+    assert service.captured_requests[3].text == (
+        "I have spent twelve years wondering why it called my name. I will not "
+        "let fear answer for me again,"
+    )
+    assert [request.reference_audio for request in service.captured_requests] == [
+        references["narrator"],
+        references["wren"],
+        references["narrator"],
+        references["mara"],
+        references["narrator"],
+        references["narrator"],
+    ]
+    mara_request = service.captured_requests[3]
+    assert mara_request.chatterbox is not None
+    assert mara_request.chatterbox.cfg_weight == 0.3
+    assert mara_request.chatterbox.exaggeration == 0.7
+    assert mara_request.chatterbox.seed is not None
+
+    plan = json.loads((first.run_directory / "plan.json").read_text(encoding="utf-8"))
+    chunks = plan["nodes"][0]["chunks"]
+    assert [chunk["speaker"] for chunk in chunks] == [
+        "narrator",
+        "wren",
+        "narrator",
+        "mara",
+        "narrator",
+        "narrator",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chatterbox_native_rate_is_used_for_explicit_pauses(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = book_workspace / "source" / "book.md"
+    source.write_text(
+        "# One\n\nBefore.\n\n<!-- yakbox:speech:pause ms=100 -->\n\nAfter.",
+        encoding="utf-8",
+    )
+    manifest_path = book_workspace / "yakbox.toml"
+    content = manifest_path.read_text(encoding="utf-8").replace(
+        'backend = "fake"\nvoice = "narrator"\nsample_rate = 16000',
+        'backend = "chatterbox-local"\nvoice = "narrator"\ndevice = "cpu"',
+    )
+    manifest_path.write_text(content, encoding="utf-8")
+
+    @asynccontextmanager
+    async def backend(
+        _name: str, **_options: object
+    ) -> AsyncIterator[TextToSpeechService]:
+        yield _NativeRateFakeService()
+
+    monkeypatch.setattr(build_module, "open_speech_backend", backend)
+    result = await build_audiobook(
+        load_manifest(manifest_path), through_stage="synthesize"
+    )
+
+    assert result.status == "complete"
+    raw = next((book_workspace / "build" / "yakbox" / "raw").glob("*.wav"))
+    with wave.open(str(raw), "rb") as audio:
+        assert audio.getframerate() == 24_000
+        assert audio.getnframes() > 2_400
+
+
+@pytest.mark.asyncio
+async def test_mismatched_backend_chunks_are_normalized_before_join(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = book_workspace / "source" / "book.md"
+    source.write_text("# One\n\nOne two three four five six seven.", encoding="utf-8")
+    manifest_path = book_workspace / "yakbox.toml"
+    content = (
+        manifest_path.read_text(encoding="utf-8")
+        .replace(
+            'backend = "fake"\nvoice = "narrator"\nsample_rate = 16000',
+            'backend = "chatterbox-local"\nvoice = "narrator"\ndevice = "cpu"',
+        )
+        .replace("chunk_chars = 100", "chunk_chars = 10")
+    )
+    manifest_path.write_text(content, encoding="utf-8")
+    service = _AlternatingRateFakeService()
+
+    @asynccontextmanager
+    async def backend(
+        _name: str, **_options: object
+    ) -> AsyncIterator[TextToSpeechService]:
+        yield service
+
+    monkeypatch.setattr(build_module, "open_speech_backend", backend)
+    result = await build_audiobook(
+        load_manifest(manifest_path), through_stage="synthesize"
+    )
+
+    assert result.status == "complete"
+    assert service.calls > 1
+    raw = next((book_workspace / "build" / "yakbox" / "raw").glob("*.wav"))
+    with wave.open(str(raw), "rb") as audio:
+        assert audio.getframerate() == 24_000
+        assert audio.getnchannels() == 1
 
 
 @pytest.mark.asyncio

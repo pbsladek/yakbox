@@ -17,7 +17,13 @@
     "fingerprint": {"type": "string"},
     "target": {"type": "string"},
     "run_id": {"type": "string"},
-    "protected": {"type": "boolean"}
+    "protected": {"type": "boolean"},
+    "logical_voice": {"type": ["string", "null"]},
+    "logical_voices": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    }
   },
   "additionalProperties": true
 }

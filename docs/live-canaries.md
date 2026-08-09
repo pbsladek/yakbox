@@ -38,3 +38,12 @@ uv run pytest --force-enable-socket -m live \
 The GitHub job requires a deliberately configured self-hosted runner carrying
 the `yakbox-chatterbox` label. It does not consume a general hosted runner or
 attempt a whole chapter.
+
+## Local narration E2E
+
+The canary does not assess audiobook behavior or narration quality. The
+separate opt-in local E2E suite runs the real CLI across validation, planning,
+twenty-five-voice auditioning, a full raw/mastered/MP3 build, inspection, and cache
+reuse. It preserves a technical report and human listening scorecard. See
+[Local narration QA](local-narration-qa.md) for the command, corpus, metrics,
+and review procedure.

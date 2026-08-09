@@ -24,7 +24,7 @@ async def test_short_local_chatterbox_canary(tmp_path: Path) -> None:
     timeout = _bounded_timeout("YAKBOX_LIVE_LOCAL_TIMEOUT_SECONDS", default=300.0)
     destination = tmp_path / "local-canary.wav"
     service = IsolatedLocalSpeechService(
-        device=os.environ.get("YAKBOX_LIVE_LOCAL_DEVICE", "auto"),
+        device=os.environ.get("YAKBOX_LIVE_LOCAL_DEVICE", "cpu"),
         timeout_seconds=timeout,
         threads_per_process=1,
         heartbeat_seconds=10,

@@ -1,0 +1,12 @@
+schema_version = 1
+
+[[terms]]
+written = "Asterion"
+spoken = "Asterion"
+language = "en"
+match = "whole_word"
+case = "sensitive"
+priority = 100
+status = "approved"
+enabled = true
+notes = "Listener-approved natural spelling; syllable-separated aliases sounded broken across every tested voice."

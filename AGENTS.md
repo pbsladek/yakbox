@@ -6,7 +6,7 @@ and documentation with the code they describe.
 
 ## Project overview
 
-Yakbox is a local-first, reproducible audiobook build system for Python 3.13+.
+Yakbox is a local-first, reproducible audiobook build system for Python 3.14.
 The package uses a `src` layout and is managed with `uv`.
 
 - `src/yakbox/`: application and public Python package
@@ -70,6 +70,9 @@ unless they are explicitly part of one of those suites.
   `uv run pytest -m performance tests/performance`.
 - Run live tests only when the task explicitly requires them and the documented
   credentials, consent, budget, and opt-in environment variables are present.
+- Use `tests/live/test_local_chatterbox_e2e.py` for real local audiobook QA;
+  preserve its generated technical report and complete and validate the bound
+  `qa/listening-review.toml` artifact before claiming narration quality.
 - The optional local Chatterbox dependency set is installed with
   `uv sync --frozen --all-groups --extra local`; it is large and is not needed
   for the default fake-backend suite.
@@ -81,7 +84,7 @@ workspaces and the fake backend for audiobook build tests whenever possible.
 ## Coding conventions
 
 - Follow the Ruff and `ty` configuration in `pyproject.toml`; the line length is
-  88 and the target language level is Python 3.13.
+  88 and the target language level is Python 3.14.
 - Do not add file-wide production lint exemptions or suppress complexity,
   branch-count, or statement-count rules. Any line-level exemption must name
   the rule and state why the boundary requires it.
@@ -125,6 +128,11 @@ hand-edit the lockfile. Preserve the security overrides and Python-version
 markers for the `local` extra unless the change explicitly updates and verifies
 that dependency contract.
 
+Follow `docs/licensing.md` for all new dependencies and third-party material.
+Do not add an asset without its source URL, rights basis, and checksum. Reject
+unknown, noncommercial, and no-derivatives assets. Prefer MIT, Apache-2.0, BSD,
+or ISC software; document and review any exception before adding it.
+
 Keep `README.md` concise and route detailed explanations into `docs/`. When a
 CLI flag, manifest field, artifact layout, backend requirement, or operational
 safety rule changes, update the relevant documentation and runnable example in
@@ -132,4 +140,6 @@ the same change.
 
 Before finishing, inspect the diff for accidental generated artifacts,
 credentials, audio files, build outputs, or unrelated formatting churn, and
-state which checks were run and any checks that could not be run.
+state which checks were run and any checks that could not be run. Versioned
+reference audio explicitly approved under the licensing policy is not an
+accidental generated artifact.

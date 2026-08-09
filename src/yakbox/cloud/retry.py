@@ -80,7 +80,7 @@ def parse_retry_after(
         pass
     try:
         parsed = email.utils.parsedate_to_datetime(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)

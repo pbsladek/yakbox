@@ -11,8 +11,175 @@
     "sources": {"type": "array", "minItems": 1, "items": {"type": "string"}},
     "voices": {"type": "object"},
     "profiles": {"type": "object"},
+    "characters": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_-]*$"},
+      "properties": {
+        "narrator": {"$ref": "#/$defs/character"}
+      },
+      "additionalProperties": {"$ref": "#/$defs/character"}
+    },
+    "dialogue": {
+      "type": "object",
+      "properties": {
+        "attribution_assistance": {"enum": ["off", "warn", "error"]},
+        "short_utterance_words": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "whisper_qa": {
+      "type": "object",
+      "properties": {
+        "chapter_verification": {"type": "boolean"},
+        "cache_enabled": {"type": "boolean"},
+        "cache_directory": {"type": "string", "minLength": 1},
+        "join_coalesce_gap_ms": {"type": "integer", "minimum": 0},
+        "phoneme_alignment": {"type": "boolean"},
+        "phoneme_backend": {"const": "wav2vec2-ctc"},
+        "phoneme_model": {"type": "string", "minLength": 1},
+        "phoneme_revision": {"type": "string", "minLength": 1},
+        "phoneme_language": {"type": "string", "minLength": 1},
+        "phoneme_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "minimum_phoneme_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "manuscript_aliases": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[^\\s]+$"},
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "short_utterances": {
+      "type": "object",
+      "properties": {
+        "strategy": {"enum": ["direct", "context_extract"]},
+        "maximum_words": {"type": "integer", "minimum": 1},
+        "candidate_count": {"type": "integer", "minimum": 1},
+        "prefer_natural_context": {"type": "boolean"},
+        "carrier_positions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["middle", "initial", "final"]}
+        },
+        "alignment_backend": {"const": "mlx-whisper"},
+        "alignment_model": {"type": "string", "minLength": 1},
+        "alignment_revision": {"type": "string", "minLength": 1},
+        "prompted_timing": {"type": "boolean"},
+        "decode_consensus": {"type": "boolean"},
+        "prompt_sensitivity": {"type": "boolean"},
+        "maximum_consensus_timing_delta_ms": {"type": "integer", "minimum": 0},
+        "hallucination_silence_threshold": {"type": "number", "exclusiveMinimum": 0},
+        "automatic_join_inspection": {"type": "boolean"},
+        "join_inspection_window_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "alignment_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "alignment_aliases": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[^\\s]+$"},
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        },
+        "minimum_alignment_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_extracted_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_one_word_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_short_phrase_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_segment_average_log_probability": {"type": "number"},
+        "maximum_segment_compression_ratio": {"type": "number", "exclusiveMinimum": 0},
+        "maximum_segment_no_speech_probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maximum_segment_temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "candidate_confidence_tolerance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maximum_extra_speech_ms": {"type": "integer", "minimum": 0},
+        "maximum_internal_token_gap_ms": {"type": "integer", "minimum": 0},
+        "maximum_token_duration_ms": {"type": "integer", "minimum": 1},
+        "acoustic_refinement": {"type": "boolean"},
+        "acoustic_threshold_dbfs": {
+          "type": "number",
+          "minimum": -120,
+          "maximum": 0
+        },
+        "speech_island_gap_ms": {"type": "integer", "minimum": 0},
+        "minimum_edge_silence_ms": {"type": "integer", "minimum": 0},
+        "maximum_edge_silence_ms": {"type": "integer", "minimum": 0},
+        "maximum_clipped_sample_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maximum_boundary_jump_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maximum_vad_disagreement_ms": {"type": "integer", "minimum": 0},
+        "maximum_stationary_voiced_ms": {"type": "integer", "minimum": 0},
+        "minimum_pause_ms": {"type": "integer", "minimum": 0},
+        "pre_roll_ms": {"type": "integer", "minimum": 0},
+        "post_roll_ms": {"type": "integer", "minimum": 0},
+        "fade_ms": {"type": "integer", "minimum": 0},
+        "failure": {"enum": ["error", "review"]},
+        "require_review_for_one_word": {"type": "boolean"},
+        "keep_candidates": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "targets": {"type": "object"},
     "retention": {"type": "object"}
+  },
+  "$defs": {
+    "character": {
+      "type": "object",
+      "required": ["profile"],
+      "properties": {
+        "display_name": {"type": "string", "minLength": 1},
+        "profile": {"type": "string", "minLength": 1},
+        "gender": {"enum": ["female", "male", "unspecified"]},
+        "cfg_weight": {"type": "number"},
+        "exaggeration": {"type": "number"},
+        "seed": {"type": "integer"}
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": true
 }

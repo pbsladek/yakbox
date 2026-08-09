@@ -16,8 +16,9 @@ def test_quality_gates_are_configured() -> None:
     tool = PYPROJECT["tool"]
     lint = tool["ruff"]["lint"]
 
-    assert tool["ruff"]["target-version"] == "py313"
-    assert tool["ty"]["environment"]["python-version"] == "3.13"
+    assert PYPROJECT["project"]["requires-python"] == ">=3.14,<3.15"
+    assert tool["ruff"]["target-version"] == "py314"
+    assert tool["ty"]["environment"]["python-version"] == "3.14"
     assert tool["ruff"]["lint"]["mccabe"]["max-complexity"] <= 10
     assert tool["ruff"]["lint"]["pylint"]["max-args"] <= 20
     assert tool["ruff"]["lint"]["pylint"]["max-positional-args"] <= 5

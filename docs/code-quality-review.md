@@ -89,8 +89,8 @@ to accommodate a change.
 
 ### Runtime and toolchain
 
-Yakbox now supports Python 3.13 and 3.14. Package metadata, Ruff, `ty`, the
-lockfile, documentation, and CI agree on that range. The project and workflows
+Yakbox supports Python 3.14 only. Package metadata, Ruff, `ty`, the lockfile,
+documentation, and CI agree on that runtime. The project and workflows
 also use `uv 0.12.x`, so a standard local installation no longer fails the
 repository's own uv-version check.
 

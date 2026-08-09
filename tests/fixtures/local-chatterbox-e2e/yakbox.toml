@@ -1,0 +1,444 @@
+"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"
+schema_version = 1
+sources = ["source/book.md"]
+pronunciations = "pronunciations.toml"
+
+[book]
+title = "Local Narration QA"
+author = "Yakbox contributors"
+narrator = "Synthetic narration under review"
+language = "en"
+
+[voices.caro-davy]
+display_name = "Caro Davy"
+rights_basis = "public_domain"
+reference_audio = "voices/caro-davy.wav"
+
+[voices.nick-whitley]
+display_name = "Nick Whitley"
+rights_basis = "public_domain"
+reference_audio = "voices/nick-whitley.wav"
+
+[voices.andy-minter]
+display_name = "Andy Minter"
+rights_basis = "public_domain"
+reference_audio = "voices/andy-minter.wav"
+
+[voices.ruth-golding]
+display_name = "Ruth Golding"
+rights_basis = "public_domain"
+reference_audio = "voices/ruth-golding.wav"
+
+[voices.bill-boerst]
+display_name = "Bill Boerst"
+rights_basis = "public_domain"
+reference_audio = "voices/bill-boerst.wav"
+
+[voices.stuart-bell]
+display_name = "Stuart Bell"
+rights_basis = "public_domain"
+reference_audio = "voices/stuart-bell.wav"
+
+[voices.karen-savage]
+display_name = "Karen Savage"
+rights_basis = "public_domain"
+reference_audio = "voices/karen-savage.wav"
+
+[voices.elizabeth-klett]
+display_name = "Elizabeth Klett"
+rights_basis = "public_domain"
+reference_audio = "voices/elizabeth-klett.wav"
+
+[voices.cori-samuel]
+display_name = "Cori Samuel"
+rights_basis = "public_domain"
+reference_audio = "voices/cori-samuel.wav"
+
+[voices.mil-nicholson]
+display_name = "Mil Nicholson"
+rights_basis = "public_domain"
+reference_audio = "voices/mil-nicholson.wav"
+
+[voices.lucy-burgoyne]
+display_name = "Lucy Burgoyne"
+rights_basis = "public_domain"
+reference_audio = "voices/lucy-burgoyne.wav"
+
+[voices.mark-f-smith]
+display_name = "Mark F. Smith"
+rights_basis = "public_domain"
+reference_audio = "voices/mark-f-smith.wav"
+
+[voices.bob-neufeld]
+display_name = "Bob Neufeld"
+rights_basis = "public_domain"
+reference_audio = "voices/bob-neufeld.wav"
+
+[voices.mark-nelson]
+display_name = "Mark Nelson"
+rights_basis = "public_domain"
+reference_audio = "voices/mark-nelson.wav"
+
+[voices.david-barnes]
+display_name = "David Barnes"
+rights_basis = "public_domain"
+reference_audio = "voices/david-barnes.wav"
+
+[voices.adrian-praetzellis]
+display_name = "Adrian Praetzellis"
+rights_basis = "public_domain"
+reference_audio = "voices/adrian-praetzellis.wav"
+
+[voices.gregg-margarite]
+display_name = "Gregg Margarite"
+rights_basis = "public_domain"
+reference_audio = "voices/gregg-margarite.wav"
+
+[voices.david-clarke]
+display_name = "David Clarke"
+rights_basis = "public_domain"
+reference_audio = "voices/david-clarke.wav"
+
+[voices.martin-geeson]
+display_name = "Martin Geeson"
+rights_basis = "public_domain"
+reference_audio = "voices/martin-geeson.wav"
+
+[voices.phil-chenevert]
+display_name = "Phil Chenevert"
+rights_basis = "public_domain"
+reference_audio = "voices/phil-chenevert.wav"
+
+[voices.peter-yearsley]
+display_name = "Peter Yearsley"
+rights_basis = "public_domain"
+reference_audio = "voices/peter-yearsley.wav"
+
+[voices.kara-shallenberg]
+display_name = "Kara Shallenberg"
+rights_basis = "public_domain"
+reference_audio = "voices/kara-shallenberg.wav"
+
+[voices.kirsten-ferreri]
+display_name = "Kirsten Ferreri"
+rights_basis = "public_domain"
+reference_audio = "voices/kirsten-ferreri.wav"
+
+[voices.sibella-denton]
+display_name = "Sibella Denton"
+rights_basis = "public_domain"
+reference_audio = "voices/sibella-denton.wav"
+
+[voices.laurie-anne-walden]
+display_name = "Laurie Anne Walden"
+rights_basis = "public_domain"
+reference_audio = "voices/laurie-anne-walden.wav"
+
+[profiles.caro-davy]
+backend = "chatterbox-local"
+voice = "caro-davy"
+device = "auto"
+cfg_weight = 0.34
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.nick-whitley]
+backend = "chatterbox-local"
+voice = "nick-whitley"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.andy-minter]
+backend = "chatterbox-local"
+voice = "andy-minter"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.ruth-golding]
+backend = "chatterbox-local"
+voice = "ruth-golding"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.5
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.bill-boerst]
+backend = "chatterbox-local"
+voice = "bill-boerst"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.stuart-bell]
+backend = "chatterbox-local"
+voice = "stuart-bell"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.karen-savage]
+backend = "chatterbox-local"
+voice = "karen-savage"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.elizabeth-klett]
+backend = "chatterbox-local"
+voice = "elizabeth-klett"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.cori-samuel]
+backend = "chatterbox-local"
+voice = "cori-samuel"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.mil-nicholson]
+backend = "chatterbox-local"
+voice = "mil-nicholson"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.lucy-burgoyne]
+backend = "chatterbox-local"
+voice = "lucy-burgoyne"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.mark-f-smith]
+backend = "chatterbox-local"
+voice = "mark-f-smith"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.bob-neufeld]
+backend = "chatterbox-local"
+voice = "bob-neufeld"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.mark-nelson]
+backend = "chatterbox-local"
+voice = "mark-nelson"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.david-barnes]
+backend = "chatterbox-local"
+voice = "david-barnes"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.adrian-praetzellis]
+backend = "chatterbox-local"
+voice = "adrian-praetzellis"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.gregg-margarite]
+backend = "chatterbox-local"
+voice = "gregg-margarite"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.david-clarke]
+backend = "chatterbox-local"
+voice = "david-clarke"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.martin-geeson]
+backend = "chatterbox-local"
+voice = "martin-geeson"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.phil-chenevert]
+backend = "chatterbox-local"
+voice = "phil-chenevert"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.peter-yearsley]
+backend = "chatterbox-local"
+voice = "peter-yearsley"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.kara-shallenberg]
+backend = "chatterbox-local"
+voice = "kara-shallenberg"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.kirsten-ferreri]
+backend = "chatterbox-local"
+voice = "kirsten-ferreri"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.sibella-denton]
+backend = "chatterbox-local"
+voice = "sibella-denton"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[profiles.laurie-anne-walden]
+backend = "chatterbox-local"
+voice = "laurie-anne-walden"
+device = "auto"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 1200
+
+[characters.narrator]
+display_name = "Narrator"
+profile = "andy-minter"
+gender = "male"
+
+[characters.mara]
+display_name = "Mara"
+profile = "caro-davy"
+gender = "female"
+cfg_weight = 0.34
+exaggeration = 0.44
+seed = 42
+
+[characters.wren]
+display_name = "Wren"
+profile = "nick-whitley"
+gender = "male"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+
+[dialogue]
+attribution_assistance = "warn"
+short_utterance_words = 3
+
+[targets.default]
+profile = "andy-minter"
+output_root = "artifacts"
+chunk_chars = 260
+mastering = true
+wav_sample_rate = 44100
+mp3_bitrate = "192k"
+m4b = false

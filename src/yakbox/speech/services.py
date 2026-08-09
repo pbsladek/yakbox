@@ -196,7 +196,7 @@ async def open_speech_backend(
             )
 
             service = IsolatedLocalSpeechService(
-                device=device or "auto",
+                device=device or "cpu",
                 timeout_seconds=local_worker_timeout_seconds,
                 threads_per_process=local_threads_per_process,
                 log_path=local_worker_log_path,
@@ -210,7 +210,7 @@ async def open_speech_backend(
                 LocalChatterboxService,
             )
 
-            yield LocalChatterboxService(device=device or "auto")
+            yield LocalChatterboxService(device=device or "cpu")
         return
     if normalized in {"resemble", "cloud"}:
         if not api_key:

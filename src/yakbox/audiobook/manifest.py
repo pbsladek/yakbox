@@ -3,13 +3,21 @@ from __future__ import annotations
 import math
 import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
 from yakbox.contracts import schema_uri
 from yakbox.errors import ValidationError
+from yakbox.speech.alignment import lexical_tokens
+from yakbox.speech.short_utterances import (
+    CarrierPosition,
+    ShortUtteranceFailure,
+    ShortUtterancePolicy,
+    ShortUtteranceStrategy,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,10 +60,10 @@ class FakeOptions:
 class ChatterboxOptions:
     """Runtime and synthesis controls for the local Chatterbox backend."""
 
-    device: str = "auto"
+    device: str = "cpu"
     cfg_weight: float | None = None
     exaggeration: float | None = None
-    seed: int | None = None
+    seed: int | None = 0
     max_processes: int = 1
     threads_per_process: int = 1
     worker_timeout_seconds: float = 3_600
@@ -86,6 +94,62 @@ class BackendProfile:
     voice: str
     executor: str
     options: BackendOptions
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterRole:
+    """Role metadata, profile mapping, and optional performance controls."""
+
+    name: str
+    display_name: str
+    profile: str
+    cfg_weight: float | None = None
+    exaggeration: float | None = None
+    seed: int | None = None
+    gender: str = "unspecified"
+
+
+@dataclass(frozen=True, slots=True)
+class DialoguePolicy:
+    """Controls non-mutating assistance for ambiguous spoken attribution."""
+
+    attribution_assistance: str = "warn"
+    short_utterance_words: int = 3
+
+
+@dataclass(frozen=True, slots=True)
+class WhisperQaPolicy:
+    """Managed chapter, join-cache, and phoneme-alignment policy."""
+
+    chapter_verification: bool = False
+    cache_enabled: bool = True
+    cache_directory: Path = Path(".yakbox/cache/whisper")
+    join_coalesce_gap_ms: int = 100
+    phoneme_alignment: bool = False
+    phoneme_backend: str = "wav2vec2-ctc"
+    phoneme_model: str = "facebook/wav2vec2-lv-60-espeak-cv-ft"
+    phoneme_revision: str | None = "c43348bbaa5a77692c8e7bf3409d683474fdf2a4"
+    phoneme_language: str = "en-us"
+    phoneme_timeout_seconds: float = 180.0
+    minimum_phoneme_confidence: float = 0.20
+    manuscript_aliases: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.join_coalesce_gap_ms < 0:
+            raise ValidationError("whisper_qa.join_coalesce_gap_ms cannot be negative")
+        if self.phoneme_timeout_seconds <= 0 or not math.isfinite(
+            self.phoneme_timeout_seconds
+        ):
+            raise ValidationError("whisper_qa.phoneme_timeout_seconds must be positive")
+        if not 0 <= self.minimum_phoneme_confidence <= 1:
+            raise ValidationError(
+                "whisper_qa.minimum_phoneme_confidence must be between 0 and 1"
+            )
+
+    @property
+    def manuscript_alias_map(self) -> dict[str, tuple[str, ...]]:
+        """Return reviewed chapter-ASR spellings keyed by manuscript spelling."""
+        return dict(self.manuscript_aliases)
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +206,10 @@ class AudiobookManifest:
     pronunciations: Path | None
     voices: tuple[LogicalVoice, ...]
     profiles: tuple[BackendProfile, ...]
+    characters: tuple[CharacterRole, ...]
+    dialogue: DialoguePolicy
+    whisper_qa: WhisperQaPolicy
+    short_utterances: ShortUtterancePolicy
     targets: tuple[BuildTarget, ...]
     retention: RetentionPolicy
     max_pause_ms: int = 30_000
@@ -172,6 +240,55 @@ class AudiobookManifest:
                 return voice
         raise ValidationError(f"Unknown logical voice: {name}")
 
+    def character(self, name: str) -> CharacterRole:
+        """Return a configured narrator or character role."""
+        for character in self.characters:
+            if character.name == name:
+                return character
+        raise ValidationError(f"Unknown character: {name}")
+
+    def profile_for_speaker(
+        self,
+        speaker: str,
+        *,
+        fallback_profile: str,
+    ) -> BackendProfile:
+        """Resolve a speaker profile with character-level performance overrides."""
+        if not self.characters:
+            return self.profile(fallback_profile)
+        character = self.character(speaker)
+        profile = self.profile(character.profile)
+        overrides = (
+            character.cfg_weight,
+            character.exaggeration,
+            character.seed,
+        )
+        if not any(value is not None for value in overrides):
+            return profile
+        if not isinstance(profile.options, ChatterboxOptions):
+            raise ValidationError(
+                f"characters.{speaker} performance settings require a "
+                "Chatterbox profile"
+            )
+        options = profile.options
+        return replace(
+            profile,
+            options=replace(
+                options,
+                cfg_weight=(
+                    character.cfg_weight
+                    if character.cfg_weight is not None
+                    else options.cfg_weight
+                ),
+                exaggeration=(
+                    character.exaggeration
+                    if character.exaggeration is not None
+                    else options.exaggeration
+                ),
+                seed=character.seed if character.seed is not None else options.seed,
+            ),
+        )
+
 
 _ROOT_KEYS = {
     "$schema",
@@ -181,6 +298,10 @@ _ROOT_KEYS = {
     "pronunciations",
     "voices",
     "profiles",
+    "characters",
+    "dialogue",
+    "whisper_qa",
+    "short_utterances",
     "targets",
     "source",
     "retention",
@@ -198,8 +319,14 @@ def load_manifest(path: Path) -> AudiobookManifest:
     sources = _parse_sources(raw, book_raw, root)
     voices = _parse_voices(raw.get("voices"), root)
     profiles = _parse_profiles(raw.get("profiles"))
+    characters = _parse_characters(raw.get("characters"))
+    dialogue = _parse_dialogue(raw.get("dialogue"))
+    whisper_qa = _parse_whisper_qa(raw.get("whisper_qa"), root)
+    short_utterances = _parse_short_utterances(raw.get("short_utterances"))
+    _validate_whisper_configuration(whisper_qa, short_utterances)
     targets = _parse_targets(raw.get("targets"), root)
     _validate_manifest_references(root, sources, voices, profiles, targets)
+    _validate_character_references(characters, profiles)
     return AudiobookManifest(
         path=resolved,
         schema_version=1,
@@ -208,6 +335,10 @@ def load_manifest(path: Path) -> AudiobookManifest:
         pronunciations=_parse_pronunciation_path(raw, root),
         voices=voices,
         profiles=profiles,
+        characters=characters,
+        dialogue=dialogue,
+        whisper_qa=whisper_qa,
+        short_utterances=short_utterances,
         targets=targets,
         retention=_parse_retention(raw.get("retention")),
         max_pause_ms=_parse_source_options(raw),
@@ -324,6 +455,71 @@ def _validate_manifest_references(
             raise ValidationError(
                 f"Target {target.name!r} references unknown profile {target.profile!r}"
             )
+
+
+def _validate_character_references(
+    characters: tuple[CharacterRole, ...],
+    profiles: tuple[BackendProfile, ...],
+) -> None:
+    profiles_by_name = {profile.name: profile for profile in profiles}
+    if characters and not any(character.name == "narrator" for character in characters):
+        raise ValidationError("characters must define a narrator role")
+    for character in characters:
+        profile = profiles_by_name.get(character.profile)
+        if profile is None:
+            raise ValidationError(
+                f"Character {character.name!r} references unknown profile "
+                f"{character.profile!r}"
+            )
+        if (
+            character.cfg_weight is not None
+            or character.exaggeration is not None
+            or character.seed is not None
+        ) and not isinstance(profile.options, ChatterboxOptions):
+            raise ValidationError(
+                f"characters.{character.name} performance settings require a "
+                "Chatterbox profile"
+            )
+    _validate_character_profile_compatibility(characters, profiles_by_name)
+
+
+def _validate_character_profile_compatibility(
+    characters: tuple[CharacterRole, ...],
+    profiles: dict[str, BackendProfile],
+) -> None:
+    if not characters:
+        return
+    narrator = next(item for item in characters if item.name == "narrator")
+    baseline = profiles[narrator.profile]
+    for character in characters:
+        profile = profiles[character.profile]
+        if profile.backend != baseline.backend or profile.executor != baseline.executor:
+            raise ValidationError(
+                "Character profiles must use the narrator backend and executor; "
+                f"characters.{character.name} uses {profile.backend}/{profile.executor}"
+            )
+        if isinstance(profile.options, ChatterboxOptions) and isinstance(
+            baseline.options, ChatterboxOptions
+        ):
+            runtime = (
+                profile.options.device,
+                profile.options.max_processes,
+                profile.options.threads_per_process,
+                profile.options.worker_timeout_seconds,
+                profile.options.estimated_model_memory_bytes,
+            )
+            baseline_runtime = (
+                baseline.options.device,
+                baseline.options.max_processes,
+                baseline.options.threads_per_process,
+                baseline.options.worker_timeout_seconds,
+                baseline.options.estimated_model_memory_bytes,
+            )
+            if runtime != baseline_runtime:
+                raise ValidationError(
+                    "Character Chatterbox profiles must use the narrator runtime "
+                    f"settings; characters.{character.name} differs"
+                )
 
 
 def _parse_pronunciation_path(raw: dict[str, object], root: Path) -> Path | None:
@@ -480,7 +676,7 @@ def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
                 exaggeration=_float_or_none(
                     item.get("exaggeration"), f"profiles.{name}.exaggeration"
                 ),
-                seed=_int_or_none(item.get("seed"), f"profiles.{name}.seed"),
+                seed=_int_or_none(item.get("seed", 0), f"profiles.{name}.seed"),
                 max_processes=max_processes,
                 threads_per_process=_positive_int(
                     item.get("threads_per_process", 1),
@@ -528,6 +724,506 @@ def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
             )
         )
     return tuple(result)
+
+
+def _parse_characters(value: object) -> tuple[CharacterRole, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, dict):
+        raise ValidationError("characters must be named TOML tables")
+    table = cast(dict[str, object], value)
+    result: list[CharacterRole] = []
+    for name, raw in table.items():
+        context = f"characters.{name}"
+        if (
+            not isinstance(name, str)
+            or re.fullmatch(r"[a-z][a-z0-9_-]*", name) is None
+            or not isinstance(raw, dict)
+        ):
+            raise ValidationError("characters must use lowercase named TOML tables")
+        item = cast(dict[str, object], raw)
+        _reject_unknown(
+            item,
+            {
+                "display_name",
+                "profile",
+                "gender",
+                "cfg_weight",
+                "exaggeration",
+                "seed",
+            },
+            context,
+        )
+        result.append(
+            CharacterRole(
+                name=name,
+                display_name=_string_or_default(
+                    item.get("display_name"), f"{context}.display_name", name
+                ),
+                profile=_required_string(item, "profile", context),
+                gender=_character_gender(item.get("gender"), f"{context}.gender"),
+                cfg_weight=_float_or_none(
+                    item.get("cfg_weight"), f"{context}.cfg_weight"
+                ),
+                exaggeration=_float_or_none(
+                    item.get("exaggeration"), f"{context}.exaggeration"
+                ),
+                seed=_int_or_none(item.get("seed"), f"{context}.seed"),
+            )
+        )
+    return tuple(result)
+
+
+def _parse_dialogue(value: object) -> DialoguePolicy:
+    if value is None:
+        return DialoguePolicy()
+    if not isinstance(value, dict):
+        raise ValidationError("dialogue must be a TOML table")
+    table = cast(dict[str, object], value)
+    _reject_unknown(
+        table,
+        {"attribution_assistance", "short_utterance_words"},
+        "dialogue",
+    )
+    assistance = _string_or_default(
+        table.get("attribution_assistance"),
+        "dialogue.attribution_assistance",
+        "warn",
+    )
+    if assistance not in {"off", "warn", "error"}:
+        raise ValidationError(
+            "dialogue.attribution_assistance must be off, warn, or error"
+        )
+    return DialoguePolicy(
+        attribution_assistance=assistance,
+        short_utterance_words=_positive_int(
+            table.get("short_utterance_words", 3),
+            "dialogue.short_utterance_words",
+        ),
+    )
+
+
+def _parse_whisper_qa(value: object, root: Path) -> WhisperQaPolicy:
+    if value is None:
+        return WhisperQaPolicy(
+            cache_directory=(root / ".yakbox/cache/whisper").resolve()
+        )
+    if not isinstance(value, dict):
+        raise ValidationError("whisper_qa must be a TOML table")
+    table = cast(dict[str, object], value)
+    allowed = {
+        "chapter_verification",
+        "cache_enabled",
+        "cache_directory",
+        "join_coalesce_gap_ms",
+        "phoneme_alignment",
+        "phoneme_backend",
+        "phoneme_model",
+        "phoneme_revision",
+        "phoneme_language",
+        "phoneme_timeout_seconds",
+        "minimum_phoneme_confidence",
+        "manuscript_aliases",
+    }
+    _reject_unknown(table, allowed, "whisper_qa")
+    cache_value = table.get("cache_directory", ".yakbox/cache/whisper")
+    if not isinstance(cache_value, str) or not cache_value.strip():
+        raise ValidationError("whisper_qa.cache_directory must be a relative path")
+    backend = _string_or_default(
+        table.get("phoneme_backend"),
+        "whisper_qa.phoneme_backend",
+        "wav2vec2-ctc",
+    )
+    if backend != "wav2vec2-ctc":
+        raise ValidationError("whisper_qa.phoneme_backend must be wav2vec2-ctc")
+    default_phoneme_model = "facebook/wav2vec2-lv-60-espeak-cv-ft"
+    phoneme_model = _string_or_default(
+        table.get("phoneme_model"),
+        "whisper_qa.phoneme_model",
+        default_phoneme_model,
+    )
+    phoneme_revision = (
+        _optional_string(
+            table.get("phoneme_revision"),
+            "whisper_qa.phoneme_revision",
+        )
+        if "phoneme_revision" in table
+        else (
+            "c43348bbaa5a77692c8e7bf3409d683474fdf2a4"
+            if phoneme_model == default_phoneme_model
+            else None
+        )
+    )
+    return WhisperQaPolicy(
+        chapter_verification=_boolean(
+            table.get("chapter_verification", False),
+            "whisper_qa.chapter_verification",
+        ),
+        cache_enabled=_boolean(
+            table.get("cache_enabled", True), "whisper_qa.cache_enabled"
+        ),
+        cache_directory=_workspace_path(
+            root, cache_value, "whisper_qa.cache_directory"
+        ),
+        join_coalesce_gap_ms=_nonnegative_int(
+            table.get("join_coalesce_gap_ms", 100),
+            "whisper_qa.join_coalesce_gap_ms",
+        ),
+        phoneme_alignment=_boolean(
+            table.get("phoneme_alignment", False),
+            "whisper_qa.phoneme_alignment",
+        ),
+        phoneme_backend=backend,
+        phoneme_model=phoneme_model,
+        phoneme_revision=phoneme_revision,
+        phoneme_language=_string_or_default(
+            table.get("phoneme_language"), "whisper_qa.phoneme_language", "en-us"
+        ),
+        phoneme_timeout_seconds=_number_or_default(
+            table.get("phoneme_timeout_seconds"),
+            "whisper_qa.phoneme_timeout_seconds",
+            180.0,
+        ),
+        minimum_phoneme_confidence=_bounded_confidence(
+            table.get("minimum_phoneme_confidence", 0.20),
+            "whisper_qa.minimum_phoneme_confidence",
+        ),
+        manuscript_aliases=_alignment_aliases(
+            table.get("manuscript_aliases"), field="whisper_qa.manuscript_aliases"
+        ),
+    )
+
+
+def _validate_whisper_configuration(
+    policy: WhisperQaPolicy,
+    short_utterances: ShortUtterancePolicy,
+) -> None:
+    if policy.chapter_verification and short_utterances.alignment_revision is None:
+        raise ValidationError(
+            "whisper_qa.chapter_verification requires a pinned "
+            "short_utterances.alignment_revision"
+        )
+    if policy.phoneme_alignment and policy.phoneme_revision is None:
+        raise ValidationError(
+            "whisper_qa.phoneme_alignment requires phoneme_revision for "
+            "reproducible builds"
+        )
+
+
+def _parse_short_utterances(value: object) -> ShortUtterancePolicy:
+    if value is None:
+        return ShortUtterancePolicy()
+    if not isinstance(value, dict):
+        raise ValidationError("short_utterances must be a TOML table")
+    table = cast(dict[str, object], value)
+    allowed = {
+        "strategy",
+        "maximum_words",
+        "candidate_count",
+        "prefer_natural_context",
+        "carrier_positions",
+        "alignment_backend",
+        "alignment_model",
+        "alignment_revision",
+        "alignment_aliases",
+        "prompted_timing",
+        "decode_consensus",
+        "prompt_sensitivity",
+        "maximum_consensus_timing_delta_ms",
+        "hallucination_silence_threshold",
+        "automatic_join_inspection",
+        "join_inspection_window_seconds",
+        "alignment_timeout_seconds",
+        "minimum_alignment_confidence",
+        "minimum_extracted_confidence",
+        "minimum_one_word_confidence",
+        "minimum_short_phrase_confidence",
+        "minimum_segment_average_log_probability",
+        "maximum_segment_compression_ratio",
+        "maximum_segment_no_speech_probability",
+        "maximum_segment_temperature",
+        "candidate_confidence_tolerance",
+        "maximum_extra_speech_ms",
+        "maximum_internal_token_gap_ms",
+        "maximum_token_duration_ms",
+        "acoustic_refinement",
+        "acoustic_threshold_dbfs",
+        "speech_island_gap_ms",
+        "minimum_edge_silence_ms",
+        "maximum_edge_silence_ms",
+        "maximum_clipped_sample_ratio",
+        "maximum_boundary_jump_ratio",
+        "maximum_vad_disagreement_ms",
+        "maximum_stationary_voiced_ms",
+        "minimum_pause_ms",
+        "pre_roll_ms",
+        "post_roll_ms",
+        "fade_ms",
+        "failure",
+        "require_review_for_one_word",
+        "keep_candidates",
+    }
+    _reject_unknown(table, allowed, "short_utterances")
+    strategy = _enum_value(
+        table.get("strategy"),
+        "short_utterances.strategy",
+        ShortUtteranceStrategy,
+        ShortUtteranceStrategy.DIRECT,
+    )
+    failure = _enum_value(
+        table.get("failure"),
+        "short_utterances.failure",
+        ShortUtteranceFailure,
+        ShortUtteranceFailure.ERROR,
+    )
+    positions = _carrier_positions(table.get("carrier_positions"))
+    backend = _string_or_default(
+        table.get("alignment_backend"),
+        "short_utterances.alignment_backend",
+        "mlx-whisper",
+    )
+    if backend != "mlx-whisper":
+        raise ValidationError("short_utterances.alignment_backend must be mlx-whisper")
+    default_model = "mlx-community/whisper-large-v3-turbo"
+    model = _string_or_default(
+        table.get("alignment_model"),
+        "short_utterances.alignment_model",
+        default_model,
+    )
+    revision = (
+        _optional_string(
+            table.get("alignment_revision"),
+            "short_utterances.alignment_revision",
+        )
+        if "alignment_revision" in table
+        else (
+            "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+            if model == default_model
+            else None
+        )
+    )
+    if strategy is ShortUtteranceStrategy.CONTEXT_EXTRACT and revision is None:
+        raise ValidationError(
+            "A custom short_utterances.alignment_model requires "
+            "alignment_revision for reproducible builds"
+        )
+    return ShortUtterancePolicy(
+        strategy=strategy,
+        maximum_words=_positive_int(
+            table.get("maximum_words", 3), "short_utterances.maximum_words"
+        ),
+        candidate_count=_positive_int(
+            table.get("candidate_count", 5), "short_utterances.candidate_count"
+        ),
+        prefer_natural_context=_boolean(
+            table.get("prefer_natural_context", True),
+            "short_utterances.prefer_natural_context",
+        ),
+        carrier_positions=positions,
+        alignment_backend=backend,
+        alignment_model=model,
+        alignment_revision=revision,
+        alignment_aliases=_alignment_aliases(table.get("alignment_aliases")),
+        prompted_timing=_boolean(
+            table.get("prompted_timing", True),
+            "short_utterances.prompted_timing",
+        ),
+        decode_consensus=_boolean(
+            table.get("decode_consensus", True),
+            "short_utterances.decode_consensus",
+        ),
+        prompt_sensitivity=_boolean(
+            table.get("prompt_sensitivity", True),
+            "short_utterances.prompt_sensitivity",
+        ),
+        maximum_consensus_timing_delta_ms=_nonnegative_int(
+            table.get("maximum_consensus_timing_delta_ms", 180),
+            "short_utterances.maximum_consensus_timing_delta_ms",
+        ),
+        hallucination_silence_threshold=_number_or_default(
+            table.get("hallucination_silence_threshold"),
+            "short_utterances.hallucination_silence_threshold",
+            0.8,
+        ),
+        automatic_join_inspection=_boolean(
+            table.get("automatic_join_inspection", True),
+            "short_utterances.automatic_join_inspection",
+        ),
+        join_inspection_window_seconds=_number_or_default(
+            table.get("join_inspection_window_seconds"),
+            "short_utterances.join_inspection_window_seconds",
+            1.5,
+        ),
+        alignment_timeout_seconds=_number_or_default(
+            table.get("alignment_timeout_seconds"),
+            "short_utterances.alignment_timeout_seconds",
+            180.0,
+        ),
+        minimum_alignment_confidence=_bounded_confidence(
+            table.get("minimum_alignment_confidence", 0.5),
+            "short_utterances.minimum_alignment_confidence",
+        ),
+        minimum_extracted_confidence=_bounded_confidence(
+            table.get("minimum_extracted_confidence", 0.2),
+            "short_utterances.minimum_extracted_confidence",
+        ),
+        minimum_one_word_confidence=_bounded_confidence(
+            table.get("minimum_one_word_confidence", 0.6),
+            "short_utterances.minimum_one_word_confidence",
+        ),
+        minimum_short_phrase_confidence=_bounded_confidence(
+            table.get("minimum_short_phrase_confidence", 0.5),
+            "short_utterances.minimum_short_phrase_confidence",
+        ),
+        minimum_segment_average_log_probability=_number_or_default(
+            table.get("minimum_segment_average_log_probability"),
+            "short_utterances.minimum_segment_average_log_probability",
+            -1.0,
+        ),
+        maximum_segment_compression_ratio=_number_or_default(
+            table.get("maximum_segment_compression_ratio"),
+            "short_utterances.maximum_segment_compression_ratio",
+            2.4,
+        ),
+        maximum_segment_no_speech_probability=_bounded_confidence(
+            table.get("maximum_segment_no_speech_probability", 0.6),
+            "short_utterances.maximum_segment_no_speech_probability",
+        ),
+        maximum_segment_temperature=_bounded_confidence(
+            table.get("maximum_segment_temperature", 0.2),
+            "short_utterances.maximum_segment_temperature",
+        ),
+        candidate_confidence_tolerance=_bounded_confidence(
+            table.get("candidate_confidence_tolerance", 0.05),
+            "short_utterances.candidate_confidence_tolerance",
+        ),
+        maximum_extra_speech_ms=_nonnegative_int(
+            table.get("maximum_extra_speech_ms", 60),
+            "short_utterances.maximum_extra_speech_ms",
+        ),
+        maximum_internal_token_gap_ms=_nonnegative_int(
+            table.get("maximum_internal_token_gap_ms", 350),
+            "short_utterances.maximum_internal_token_gap_ms",
+        ),
+        maximum_token_duration_ms=_positive_int(
+            table.get("maximum_token_duration_ms", 1_200),
+            "short_utterances.maximum_token_duration_ms",
+        ),
+        acoustic_refinement=_boolean(
+            table.get("acoustic_refinement", True),
+            "short_utterances.acoustic_refinement",
+        ),
+        acoustic_threshold_dbfs=_number_or_default(
+            table.get("acoustic_threshold_dbfs"),
+            "short_utterances.acoustic_threshold_dbfs",
+            -48.0,
+        ),
+        speech_island_gap_ms=_nonnegative_int(
+            table.get("speech_island_gap_ms", 300),
+            "short_utterances.speech_island_gap_ms",
+        ),
+        minimum_edge_silence_ms=_nonnegative_int(
+            table.get("minimum_edge_silence_ms", 10),
+            "short_utterances.minimum_edge_silence_ms",
+        ),
+        maximum_edge_silence_ms=_nonnegative_int(
+            table.get("maximum_edge_silence_ms", 120),
+            "short_utterances.maximum_edge_silence_ms",
+        ),
+        maximum_clipped_sample_ratio=_bounded_confidence(
+            table.get("maximum_clipped_sample_ratio", 0.005),
+            "short_utterances.maximum_clipped_sample_ratio",
+        ),
+        maximum_boundary_jump_ratio=_bounded_confidence(
+            table.get("maximum_boundary_jump_ratio", 0.35),
+            "short_utterances.maximum_boundary_jump_ratio",
+        ),
+        maximum_vad_disagreement_ms=_nonnegative_int(
+            table.get("maximum_vad_disagreement_ms", 500),
+            "short_utterances.maximum_vad_disagreement_ms",
+        ),
+        maximum_stationary_voiced_ms=_nonnegative_int(
+            table.get("maximum_stationary_voiced_ms", 1_200),
+            "short_utterances.maximum_stationary_voiced_ms",
+        ),
+        minimum_pause_ms=_nonnegative_int(
+            table.get("minimum_pause_ms", 180),
+            "short_utterances.minimum_pause_ms",
+        ),
+        pre_roll_ms=_nonnegative_int(
+            table.get("pre_roll_ms", 30), "short_utterances.pre_roll_ms"
+        ),
+        post_roll_ms=_nonnegative_int(
+            table.get("post_roll_ms", 40), "short_utterances.post_roll_ms"
+        ),
+        fade_ms=_nonnegative_int(table.get("fade_ms", 8), "short_utterances.fade_ms"),
+        failure=failure,
+        require_review_for_one_word=_boolean(
+            table.get("require_review_for_one_word", True),
+            "short_utterances.require_review_for_one_word",
+        ),
+        keep_candidates=_boolean(
+            table.get("keep_candidates", False),
+            "short_utterances.keep_candidates",
+        ),
+    )
+
+
+def _alignment_aliases(
+    value: object,
+    *,
+    field: str = "short_utterances.alignment_aliases",
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, dict):
+        raise ValidationError(f"{field} must be a table")
+    result: list[tuple[str, tuple[str, ...]]] = []
+    for raw_word, raw_aliases in sorted(value.items()):
+        if not isinstance(raw_word, str) or lexical_tokens(raw_word) != (
+            raw_word.casefold(),
+        ):
+            raise ValidationError(f"{field} keys must be single words")
+        if not isinstance(raw_aliases, list) or not raw_aliases:
+            raise ValidationError(f"{field} values must be non-empty arrays")
+        aliases: list[str] = []
+        for raw_alias in raw_aliases:
+            if not isinstance(raw_alias, str):
+                raise ValidationError(f"{field} values must contain strings")
+            tokens = lexical_tokens(raw_alias)
+            if len(tokens) != 1:
+                raise ValidationError(f"{field} values must be single words")
+            aliases.append(tokens[0])
+        result.append((raw_word.casefold(), tuple(dict.fromkeys(aliases))))
+    return tuple(result)
+
+
+def _carrier_positions(value: object) -> tuple[CarrierPosition, ...]:
+    if value is None:
+        return (CarrierPosition.MIDDLE,)
+    if not isinstance(value, list) or not value:
+        raise ValidationError(
+            "short_utterances.carrier_positions must be a non-empty array"
+        )
+    positions = [
+        _enum_value(
+            item,
+            "short_utterances.carrier_positions",
+            CarrierPosition,
+            CarrierPosition.MIDDLE,
+            allowed=(
+                CarrierPosition.MIDDLE,
+                CarrierPosition.INITIAL,
+                CarrierPosition.FINAL,
+            ),
+        )
+        for item in value
+    ]
+    if len(set(positions)) != len(positions):
+        raise ValidationError(
+            "short_utterances.carrier_positions must not contain duplicates"
+        )
+    return tuple(positions)
 
 
 def _parse_targets(value: object, root: Path) -> tuple[BuildTarget, ...]:
@@ -607,7 +1303,13 @@ def _parse_targets(value: object, root: Path) -> tuple[BuildTarget, ...]:
             item.get("through_stage", "inspect"),
             f"targets.{name}.through_stage",
         )
-        stages = ("synthesize", "master", "encode_mp3", "inspect")
+        stages = (
+            "synthesize",
+            "master",
+            "verify_manuscript",
+            "encode_mp3",
+            "inspect",
+        )
         if stages.index(from_stage) > stages.index(through_stage):
             raise ValidationError(
                 f"targets.{name}.from_stage must not come after through_stage"
@@ -866,6 +1568,43 @@ def _string_or_default(value: object, name: str, default: str) -> str:
     return result
 
 
+def _enum_value[EnumValue: StrEnum](
+    value: object,
+    name: str,
+    enum_type: type[EnumValue],
+    default: EnumValue,
+    *,
+    allowed: tuple[EnumValue, ...] | None = None,
+) -> EnumValue:
+    raw = _string_or_default(value, name, default.value)
+    try:
+        result = enum_type(raw)
+    except ValueError as error:
+        choices = allowed if allowed is not None else tuple(enum_type)
+        options = ", ".join(item.value for item in choices)
+        raise ValidationError(f"{name} must be one of: {options}") from error
+    if allowed is not None and result not in allowed:
+        options = ", ".join(item.value for item in allowed)
+        raise ValidationError(f"{name} must be one of: {options}")
+    return result
+
+
+def _bounded_confidence(value: object, name: str) -> float:
+    result = _float_or_none(value, name)
+    if result is None or not 0 <= result <= 1:
+        raise ValidationError(f"{name} must be between 0 and 1")
+    return result
+
+
+def _number_or_default(value: object, name: str, default: float) -> float:
+    if value is None:
+        return default
+    result = _float_or_none(value, name)
+    if result is None:
+        raise ValidationError(f"{name} must be a number")
+    return result
+
+
 def _string_or_number_or_none(value: object, name: str) -> str | None:
     if value is None:
         return None
@@ -884,9 +1623,16 @@ def _boolean(value: object, name: str) -> bool:
 
 
 def _device(value: object, name: str) -> str:
-    result = _string_or_default(value, name, "auto")
+    result = _string_or_default(value, name, "cpu")
     if result not in {"auto", "cpu", "cuda", "mps"}:
         raise ValidationError(f"{name} must be auto, cpu, cuda, or mps")
+    return result
+
+
+def _character_gender(value: object, name: str) -> str:
+    result = _string_or_default(value, name, "unspecified")
+    if result not in {"female", "male", "unspecified"}:
+        raise ValidationError(f"{name} must be female, male, or unspecified")
     return result
 
 
@@ -898,10 +1644,17 @@ def _mp3_bitrate(value: object, name: str) -> str:
 
 def _build_stage(value: object, name: str) -> str:
     result = _string_or_default(value, name, "synthesize")
-    allowed = {"synthesize", "master", "encode_mp3", "inspect"}
+    allowed = {
+        "synthesize",
+        "master",
+        "verify_manuscript",
+        "encode_mp3",
+        "inspect",
+    }
     if result not in allowed:
         raise ValidationError(
-            f"{name} must be synthesize, master, encode_mp3, or inspect"
+            f"{name} must be synthesize, master, verify_manuscript, "
+            "encode_mp3, or inspect"
         )
     return result
 

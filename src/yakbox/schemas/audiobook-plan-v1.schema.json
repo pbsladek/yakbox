@@ -14,19 +14,106 @@
     "document_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "complete_document": {"type": "boolean"},
-    "nodes": {"type": "array", "items": {"type": "object", "required": ["id", "stage", "fingerprint", "output"]}},
+    "attribution_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "speaker", "message", "suggestion", "source"],
+        "properties": {
+          "code": {
+            "enum": ["unrouted-dialogue", "short-dialogue", "shared-voice-transition"]
+          },
+          "speaker": {"type": "string"},
+          "message": {"type": "string"},
+          "suggestion": {"type": "string"},
+          "source": {"$ref": "#/$defs/sourceLocation"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "stage", "fingerprint", "output"],
+        "properties": {
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "characters": {"type": "integer", "minimum": 0},
+                "boundary": {
+                  "enum": ["paragraph", "sentence", "clause", "word", "hard", "end", "explicit_pause"]
+                },
+                "speaker": {"type": ["string", "null"]},
+                "profile": {"type": ["string", "null"]},
+                "performance": {
+                  "oneOf": [
+                    {"type": "null"},
+                    {
+                      "type": "object",
+                      "required": ["cfg_weight", "exaggeration", "seed"],
+                      "properties": {
+                        "cfg_weight": {"type": ["number", "null"]},
+                        "exaggeration": {"type": ["number", "null"]},
+                        "seed": {"type": ["integer", "null"]}
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "short_utterance": {
+                  "oneOf": [
+                    {"type": "null"},
+                    {
+                      "type": "object",
+                      "required": ["word_count", "reason", "policy_fingerprint"],
+                      "properties": {
+                        "word_count": {"type": "integer", "minimum": 1},
+                        "reason": {"const": "word_count"},
+                        "policy_fingerprint": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "source": {"$ref": "#/$defs/sourceLocation"}
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      }
+    },
     "execution": {
       "type": "object",
       "required": ["from_stage", "through_stage", "node_ids"],
       "properties": {
-        "from_stage": {"enum": ["synthesize", "master", "encode_mp3", "inspect"]},
-        "through_stage": {"enum": ["synthesize", "master", "encode_mp3", "inspect"]},
+        "from_stage": {"enum": ["synthesize", "master", "verify_manuscript", "encode_mp3", "inspect"]},
+        "through_stage": {"enum": ["synthesize", "master", "verify_manuscript", "encode_mp3", "inspect"]},
         "node_ids": {"type": "array", "items": {"type": "string"}}
       },
       "additionalProperties": false
     },
     "change_summary": {"type": "object"},
     "preflight": {"type": "object"}
+  },
+  "$defs": {
+    "sourceLocation": {
+      "type": "object",
+      "required": ["path", "start_line", "end_line"],
+      "properties": {
+        "path": {"type": "string"},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }

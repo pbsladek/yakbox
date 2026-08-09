@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/phoneme-inspection-v1.schema.json",
+  "title": "yakbox phoneme forced-alignment inspection",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "audio", "expected_sha256", "accepted", "reason_codes", "minimum_confidence", "start_seconds", "end_seconds", "alignment"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/phoneme-inspection-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "audio": {"type": "string"},
+    "expected_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "accepted": {"type": "boolean"},
+    "reason_codes": {"type": "array", "items": {"type": "string"}},
+    "minimum_confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "start_seconds": {"type": ["number", "null"], "minimum": 0},
+    "end_seconds": {"type": ["number", "null"], "minimum": 0},
+    "alignment": {
+      "type": "object",
+      "required": ["backend", "model", "fingerprint", "language", "issues", "phonemes"],
+      "properties": {
+        "backend": {"const": "wav2vec2-ctc"},
+        "model": {"type": "string"},
+        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "language": {"type": "string"},
+        "issues": {"type": "array", "items": {"type": "string"}},
+        "phonemes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["symbol", "start_seconds", "end_seconds", "confidence"],
+            "properties": {
+              "symbol": {"type": "string", "minLength": 1},
+              "start_seconds": {"type": "number", "minimum": 0},
+              "end_seconds": {"type": "number", "exclusiveMinimum": 0},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

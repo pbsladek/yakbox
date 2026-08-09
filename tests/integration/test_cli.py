@@ -23,6 +23,127 @@ def test_help_does_not_import_torch() -> None:
     assert "chatterbox" not in result.output.casefold()
 
 
+def test_whisper_calibration_cli_emits_versioned_metrics() -> None:
+    result = CliRunner().invoke(main, ["--json", "whisper", "calibrate"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["data"]["false_accepts"] == 0
+    assert payload["data"]["false_rejects"] == 0
+    validate_contract("cli-output", payload)
+    validate_contract("whisper-calibration", payload["data"])
+
+
+def test_whisper_and_short_review_commands_are_discoverable() -> None:
+    runner = CliRunner()
+
+    whisper = runner.invoke(main, ["whisper", "--help"])
+    review = runner.invoke(main, ["short-review", "--help"])
+
+    assert whisper.exit_code == 0
+    assert {
+        "inspect",
+        "reinspect",
+        "verify-manuscript",
+        "inspect-joins",
+        "models",
+        "calibrate",
+    }.issubset(set(whisper.output.split()))
+    assert review.exit_code == 0
+    assert {"list", "play", "approve", "reject"}.issubset(set(review.output.split()))
+
+
+def test_new_whisper_qa_commands_emit_observable_json_contracts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio = tmp_path / "chapter.wav"
+    audio.write_bytes(b"placeholder")
+    manuscript = tmp_path / "chapter.md"
+    manuscript.write_text("# One\n\nWren asked.\n", encoding="utf-8")
+    join_spec = tmp_path / "joins.json"
+    join_spec.write_text('{"joins": [{"at_seconds": 1.0}]}', encoding="utf-8")
+
+    async def fake_inspection(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return SimpleNamespace(
+            accepted=True,
+            reason_codes=(),
+            to_dict=lambda: {"accepted": True, "kind": "targeted"},
+        )
+
+    async def fake_manuscript(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return SimpleNamespace(
+            accepted=True,
+            matched_token_count=2,
+            expected_token_count=2,
+            mismatches=(),
+            to_dict=lambda: {"accepted": True, "kind": "manuscript"},
+        )
+
+    async def fake_joins(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        join = SimpleNamespace(accepted=True)
+        return SimpleNamespace(
+            accepted=True,
+            joins=(join,),
+            to_dict=lambda: {"accepted": True, "kind": "joins"},
+        )
+
+    monkeypatch.setattr("yakbox.cli_whisper.inspect_with_whisper", fake_inspection)
+    monkeypatch.setattr("yakbox.cli_whisper.verify_manuscript", fake_manuscript)
+    monkeypatch.setattr("yakbox.cli_whisper.inspect_joins", fake_joins)
+    runner = CliRunner()
+
+    targeted = runner.invoke(
+        main,
+        [
+            "--json",
+            "whisper",
+            "reinspect",
+            str(audio),
+            "--expected",
+            "Wren asked.",
+            "--start",
+            "0.5",
+            "--end",
+            "1.5",
+        ],
+    )
+    verified = runner.invoke(
+        main,
+        [
+            "--json",
+            "whisper",
+            "verify-manuscript",
+            str(audio),
+            str(manuscript),
+        ],
+    )
+    joins = runner.invoke(
+        main,
+        [
+            "--json",
+            "whisper",
+            "inspect-joins",
+            str(audio),
+            "--spec",
+            str(join_spec),
+        ],
+    )
+
+    for result, kind in (
+        (targeted, "targeted"),
+        (verified, "manuscript"),
+        (joins, "joins"),
+    ):
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["data"]["kind"] == kind
+        validate_contract("cli-output", payload)
+
+
 def test_json_usage_errors_use_stable_envelope_and_exit_two() -> None:
     result = CliRunner().invoke(
         main,
@@ -89,6 +210,52 @@ def test_init_validate_plan_and_doctor_json(tmp_path: Path) -> None:
     assert report["data"]["healthy"] is True
     validate_contract("cli-output", report)
     validate_contract("doctor-report", report["data"])
+
+
+def test_validate_and_plan_report_character_routes_and_attribution(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        "# One\n\nNarration remains on the narrator profile.\n\n"
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"Mara, we need to leave before the signal returns," Wren said.\n\n'
+        '"No."\n',
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "yakbox.toml"
+    manifest.write_text(
+        '"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"\n'
+        'schema_version = 1\nsources = ["book.md"]\n'
+        '[book]\ntitle = "Routed"\n'
+        '[voices.narrator]\ndisplay_name = "Narrator"\n'
+        '[voices.wren]\ndisplay_name = "Wren (male)"\n'
+        '[profiles.narrator]\nbackend = "fake"\nvoice = "narrator"\n'
+        '[profiles.wren]\nbackend = "fake"\nvoice = "wren"\n'
+        '[characters.narrator]\nprofile = "narrator"\n'
+        '[characters.wren]\nprofile = "wren"\n'
+        '[targets.default]\nprofile = "narrator"\n',
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    validated = runner.invoke(main, ["--json", "validate", str(manifest)])
+    assert validated.exit_code == 0, validated.output
+    validate_data = json.loads(validated.output)["data"]
+    assert validate_data["attribution_finding_count"] == 1
+    assert validate_data["attribution_findings"][0]["code"] == "unrouted-dialogue"
+
+    planned = runner.invoke(main, ["--json", "plan", str(manifest)])
+    assert planned.exit_code == 0, planned.output
+    plan_data = json.loads(planned.output)["data"]
+    chunks = plan_data["nodes"][0]["chunks"]
+    assert [chunk["speaker"] for chunk in chunks] == [
+        "narrator",
+        "wren",
+        "narrator",
+        "narrator",
+    ]
+    assert chunks[1]["profile"] == "wren"
 
 
 def test_build_dry_run_and_preview_are_audiobook_first(tmp_path: Path) -> None:

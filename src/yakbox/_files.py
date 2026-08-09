@@ -86,8 +86,11 @@ def atomic_output_path(path: Path, *, overwrite: bool = False) -> Iterator[Path]
     """Yield a sibling temporary path and atomically commit it on success."""
     path = path.resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Media encoders infer their container from the final suffix. Preserve it
+    # on the temporary file while keeping the partial-file marker visible.
+    temporary_suffix = f".part{path.suffix}" if path.suffix else ".part"
     descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".part", dir=path.parent
+        prefix=f".{path.name}.", suffix=temporary_suffix, dir=path.parent
     )
     os.close(descriptor)
     temporary = Path(temporary_name)

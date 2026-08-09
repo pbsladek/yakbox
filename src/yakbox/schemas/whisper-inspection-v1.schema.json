@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/whisper-inspection-v1.schema.json",
+  "title": "yakbox Whisper inspection",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "path", "duration_seconds", "recognized_text", "recognized_tokens", "accepted", "reason_codes", "words", "segments", "speech_islands", "signal_quality", "edge_speech"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/whisper-inspection-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "path": {"type": "string"},
+    "duration_seconds": {"type": "number", "minimum": 0},
+    "recognized_text": {"type": "string"},
+    "recognized_tokens": {"type": "array", "items": {"type": "string"}},
+    "accepted": {"type": "boolean"},
+    "reason_codes": {"type": "array", "items": {"type": "string"}},
+    "clip_type": {"enum": ["one_word", "short_phrase", "sentence", "join", "chapter"]},
+    "confidence_profile": {"type": "object"},
+    "minimum_word_confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "decode_evidence": {"type": "object"},
+    "words": {"type": "array", "items": {"type": "object"}},
+    "segments": {"type": "array", "items": {"type": "object"}},
+    "speech_islands": {"type": "object"},
+    "signal_quality": {"type": "object"},
+    "edge_speech": {"type": "object"}
+  },
+  "additionalProperties": true
+}

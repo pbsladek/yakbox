@@ -4,7 +4,7 @@ import hashlib
 import re
 import tomllib
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -12,14 +12,42 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 from yakbox.errors import ValidationError
+from yakbox.speech.chunking import (
+    CHATTERBOX_CHUNK_CHARACTERS,
+    ChunkBoundary,
+    TextChunk,
+    chunk_text,
+    plan_text_chunks,
+)
+
+__all__ = [
+    "CHATTERBOX_CHUNK_CHARACTERS",
+    "ChunkBoundary",
+    "TextChunk",
+    "chunk_text",
+    "plan_text_chunks",
+]
 
 _DIRECTIVE = re.compile(
     r"<!--\s*yakbox:speech:"
     r"(?P<kind>exclude:start|exclude:end|only:start|only:end|pause(?:\s+ms=(?P<ms>-?\d+))?)"
     r"\s*-->"
 )
+_SPEAKER_DIRECTIVE = re.compile(
+    r"<!--\s*yakbox:speech:speaker\s+name=(?P<name>[a-z][a-z0-9_-]*)"
+    r"(?:\s+profile=(?P<profile>[a-z][a-z0-9_-]*))?"
+    r"(?:\s+narrator_profile=(?P<narrator_profile>[a-z][a-z0-9_-]*))?\s*-->"
+)
 _PAUSE_SENTINEL = "YAKBOXPAUSE"
 _PAUSE_PATTERN = re.compile(rf"(?:<!--\s*)?{_PAUSE_SENTINEL}(\d+)(?:\s*-->)?")
+_SPEAKER_SENTINEL = "YAKBOXSPEAKER"
+_SPEAKER_PATTERN = re.compile(
+    rf"(?:<!--\s*)?{_SPEAKER_SENTINEL}(?P<name>[a-z][a-z0-9_-]*)"
+    rf"(?:PROFILE(?P<profile>[a-z][a-z0-9_-]*))?"
+    rf"(?:NARRATORPROFILE(?P<narrator_profile>[a-z][a-z0-9_-]*))?"
+    rf"(?:\s*-->)?"
+)
+_DIALOGUE_QUOTE_PATTERN = re.compile(r'"[^"\n]+"|“[^”\n]+”|«[^»\n]+»')
 _DIRECTIVE_GAP = "\ue000"
 
 
@@ -41,6 +69,31 @@ class SpeechSegment:
     text: str
     source: SourceLocation
     sha256: str
+    speaker: str = "narrator"
+    speaker_explicit: bool = False
+    profile_override: str | None = None
+    boundary_after: ChunkBoundary = ChunkBoundary.PARAGRAPH
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceEvent:
+    kind: str
+    text: str
+    start: int
+    end: int
+    speaker: str = "narrator"
+    speaker_explicit: bool = False
+    profile_override: str | None = None
+    narrator_profile_override: str | None = None
+    boundary_after: ChunkBoundary = ChunkBoundary.PARAGRAPH
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingSpeaker:
+    name: str
+    profile: str | None
+    narrator_profile: str | None
+    line: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +238,11 @@ def normalize_sources(
     )
 
 
+def apply_pronunciations(text: str, pronunciations: Path | None = None) -> str:
+    """Apply the approved manifest pronunciation rules to explicit speech text."""
+    return _apply_pronunciations(text, _load_pronunciations(pronunciations))
+
+
 def audit_pronunciations(
     paths: tuple[Path, ...],
     pronunciations: Path | None,
@@ -230,36 +288,6 @@ def audit_pronunciations(
     )
 
 
-def chunk_text(text: str, maximum: int) -> tuple[str, ...]:
-    if maximum < 1:
-        raise ValidationError("Chunk size must be positive")
-    text = text.strip()
-    if len(text) <= maximum:
-        return (text,) if text else ()
-    chunks: list[str] = []
-    remainder = text
-    boundaries = ("\n\n", ". ", "? ", "! ", "; ", ", ", " ")
-    while len(remainder) > maximum:
-        point = -1
-        boundary_length = 0
-        window = remainder[:maximum]
-        for boundary in boundaries:
-            candidate = window.rfind(boundary)
-            candidate_end = candidate + len(boundary)
-            if candidate >= 0 and candidate_end <= maximum and candidate > point:
-                point = candidate
-                boundary_length = len(boundary)
-        if point < max(1, maximum // 3):
-            point = _unicode_safe_boundary(remainder, maximum)
-            boundary_length = 0
-        end = point + boundary_length
-        chunks.append(remainder[:end].strip())
-        remainder = remainder[end:].strip()
-    if remainder:
-        chunks.append(remainder)
-    return tuple(chunk for chunk in chunks if chunk)
-
-
 def _normalize_one(
     path: Path,
     *,
@@ -272,7 +300,7 @@ def _normalize_one(
     tokens = MarkdownIt("commonmark", {"html": True}).parse(prepared)
     chapters: list[Chapter] = []
     order = start_order
-    for title, blocks in _chapter_blocks(tokens, _default_chapter_title(path)):
+    for title, blocks in _chapter_blocks(tokens, _default_chapter_title(path), path):
         chapter = _build_chapter(path, title, order, blocks, rules)
         if chapter is not None:
             chapters.append(chapter)
@@ -296,56 +324,201 @@ def _default_chapter_title(path: Path) -> str:
 def _chapter_blocks(
     tokens: list[Token],
     default_title: str,
-) -> list[tuple[str, tuple[tuple[str, int, int], ...]]]:
-    chapters: list[tuple[str, tuple[tuple[str, int, int], ...]]] = []
+    path: Path,
+) -> list[tuple[str, tuple[_SourceEvent, ...]]]:
+    chapters: list[tuple[str, tuple[_SourceEvent, ...]]] = []
     current_title = default_title
-    current: list[tuple[str, int, int]] = []
-    for kind, text, start, end in _source_events(tokens):
-        if kind == "heading":
+    current: list[_SourceEvent] = []
+    for event in _source_events(tokens, path):
+        if event.kind == "heading":
             if current:
                 chapters.append((current_title, tuple(current)))
                 current = []
-            if text:
-                current_title = text
+            if event.text:
+                current_title = event.text
             continue
-        current.append((text, start, end))
+        current.append(event)
     if current:
         chapters.append((current_title, tuple(current)))
     return chapters
 
 
-def _source_events(tokens: list[Token]) -> list[tuple[str, str, int, int]]:
-    events: list[tuple[str, str, int, int]] = []
+def _source_events(tokens: list[Token], path: Path) -> list[_SourceEvent]:
+    events: list[_SourceEvent] = []
+    pending_speaker: _PendingSpeaker | None = None
     index = 0
     while index < len(tokens):
         token = tokens[index]
         if token.type == "heading_open" and token.tag in {"h1", "h2"}:
+            _require_used_speaker(pending_speaker, path)
             inline = tokens[index + 1] if index + 1 < len(tokens) else None
             heading = _inline_text(inline.children or []) if inline else ""
-            events.append(("heading", heading, 0, 0))
+            events.append(_SourceEvent("heading", heading, 0, 0))
             index += 3
             continue
         if token.type == "paragraph_open":
-            inline = _next_inline(tokens, index)
-            if inline is not None:
-                text = _inline_text(inline.children or []).strip()
-                if text:
-                    start, end = _token_lines(token, inline)
-                    events.append(("block", text, start, end))
-        if token.type == "html_block":
-            value = token.content.strip()
-            if _PAUSE_PATTERN.fullmatch(value):
-                start, end = _token_lines(token, token)
-                events.append(("block", value, start, end))
+            event = _paragraph_source_event(tokens, index, pending_speaker)
+            if event is not None:
+                events.extend(_split_routed_dialogue(event))
+                pending_speaker = None
+        elif token.type == "html_block":
+            event, pending_speaker = _html_source_event(token, pending_speaker, path)
+            if event is not None:
+                events.append(event)
         index += 1
+    _require_used_speaker(pending_speaker, path)
     return events
+
+
+def _paragraph_source_event(
+    tokens: list[Token],
+    index: int,
+    pending_speaker: _PendingSpeaker | None,
+) -> _SourceEvent | None:
+    token = tokens[index]
+    inline = _next_inline(tokens, index)
+    if inline is None:
+        return None
+    text = _inline_text(inline.children or []).strip()
+    if not text:
+        return None
+    start, end = _token_lines(token, inline)
+    return _SourceEvent(
+        "block",
+        text,
+        start,
+        end,
+        speaker=pending_speaker.name if pending_speaker else "narrator",
+        speaker_explicit=pending_speaker is not None,
+        profile_override=pending_speaker.profile if pending_speaker else None,
+        narrator_profile_override=(
+            pending_speaker.narrator_profile if pending_speaker else None
+        ),
+    )
+
+
+def _split_routed_dialogue(event: _SourceEvent) -> tuple[_SourceEvent, ...]:
+    """Route quoted speech to a character and surrounding prose to narration."""
+    if not event.speaker_explicit or event.speaker == "narrator":
+        return (event,)
+    matches = tuple(_DIALOGUE_QUOTE_PATTERN.finditer(event.text))
+    if not matches:
+        return (event,)
+
+    result: list[_SourceEvent] = []
+    cursor = 0
+    for match in matches:
+        _append_dialogue_event(result, event, event.text[cursor : match.start()], False)
+        _append_dialogue_event(result, event, match.group()[1:-1], True)
+        cursor = match.end()
+    _append_dialogue_event(result, event, event.text[cursor:], False)
+    if not result:
+        return (event,)
+    return tuple(
+        replace(
+            item,
+            boundary_after=(
+                event.boundary_after
+                if index == len(result) - 1
+                else _internal_dialogue_boundary(item.text)
+            ),
+        )
+        for index, item in enumerate(result)
+    )
+
+
+def _internal_dialogue_boundary(text: str) -> ChunkBoundary:
+    """Infer the pause at an intra-paragraph speaker handoff."""
+    tail = text.rstrip().rstrip("\"”'\u2019»)]}")
+    if tail.endswith((".", "!", "?", "…")):
+        return ChunkBoundary.SENTENCE
+    return ChunkBoundary.CLAUSE
+
+
+def _append_dialogue_event(
+    result: list[_SourceEvent],
+    event: _SourceEvent,
+    text: str,
+    character_speech: bool,
+) -> None:
+    spoken = text.strip()
+    if not spoken:
+        return
+    speaker = event.speaker if character_speech else "narrator"
+    speaker_explicit = character_speech
+    candidate = _SourceEvent(
+        kind=event.kind,
+        text=spoken,
+        start=event.start,
+        end=event.end,
+        speaker=speaker,
+        speaker_explicit=speaker_explicit,
+        profile_override=(
+            event.profile_override
+            if character_speech
+            else event.narrator_profile_override
+        ),
+    )
+    if result and (
+        result[-1].speaker,
+        result[-1].speaker_explicit,
+        result[-1].profile_override,
+    ) == (speaker, speaker_explicit, candidate.profile_override):
+        previous = result[-1]
+        result[-1] = _SourceEvent(
+            kind=previous.kind,
+            text=f"{previous.text} {spoken}",
+            start=previous.start,
+            end=previous.end,
+            speaker=speaker,
+            speaker_explicit=speaker_explicit,
+            profile_override=candidate.profile_override,
+        )
+        return
+    result.append(candidate)
+
+
+def _html_source_event(
+    token: Token,
+    pending_speaker: _PendingSpeaker | None,
+    path: Path,
+) -> tuple[_SourceEvent | None, _PendingSpeaker | None]:
+    value = token.content.strip()
+    speaker = _SPEAKER_PATTERN.fullmatch(value)
+    if speaker:
+        start, _ = _token_lines(token, token)
+        if pending_speaker is not None:
+            raise ValidationError(
+                f"{path}:{start}: speaker directive replaces an unused directive"
+            )
+        return None, _PendingSpeaker(
+            speaker.group("name"),
+            speaker.group("profile"),
+            speaker.group("narrator_profile"),
+            start,
+        )
+    if _PAUSE_PATTERN.fullmatch(value):
+        _require_used_speaker(pending_speaker, path)
+        start, end = _token_lines(token, token)
+        return _SourceEvent("block", value, start, end), None
+    return None, pending_speaker
+
+
+def _require_used_speaker(
+    pending_speaker: _PendingSpeaker | None,
+    path: Path,
+) -> None:
+    if pending_speaker is not None:
+        raise ValidationError(
+            f"{path}:{pending_speaker.line}: speaker directive must precede speech"
+        )
 
 
 def _build_chapter(
     path: Path,
     title: str,
     order: int,
-    blocks: tuple[tuple[str, int, int], ...],
+    blocks: tuple[_SourceEvent, ...],
     rules: tuple[Pronunciation, ...],
 ) -> Chapter | None:
     chapter_id = f"{order:04d}-{_slug(title)}"
@@ -370,11 +543,11 @@ def _build_chapter_item(
     path: Path,
     chapter_id: str,
     item_index: int,
-    block: tuple[str, int, int],
+    block: _SourceEvent,
     rules: tuple[Pronunciation, ...],
 ) -> SpeechSegment | Pause | None:
-    text, start, end = block
-    location = SourceLocation(path=path, start_line=start, end_line=end)
+    text = block.text
+    location = SourceLocation(path=path, start_line=block.start, end_line=block.end)
     pause = _PAUSE_PATTERN.fullmatch(text)
     if pause:
         return Pause(
@@ -385,20 +558,31 @@ def _build_chapter_item(
     spoken = _apply_pronunciations(text, rules).strip()
     if not spoken:
         return None
-    digest = hashlib.sha256(spoken.encode()).hexdigest()
+    digest = hashlib.sha256(
+        f"{block.speaker}\0{block.profile_override or ''}\0"
+        f"{block.boundary_after.value}\0{spoken}".encode()
+    ).hexdigest()
     return SpeechSegment(
         id=f"{chapter_id}-{item_index:04d}-{digest[:10]}",
         chapter_id=chapter_id,
         text=spoken,
         source=location,
         sha256=digest,
+        speaker=block.speaker,
+        speaker_explicit=block.speaker_explicit,
+        profile_override=block.profile_override,
+        boundary_after=block.boundary_after,
     )
 
 
 def _apply_directives(source: str, *, path: Path, max_pause_ms: int) -> str:
-    if _DIRECTIVE_GAP in source:
+    if any(marker in source for marker in (_DIRECTIVE_GAP, _SPEAKER_SENTINEL)):
         raise ValidationError(f"{path}: source contains a reserved directive marker")
     _validate_directive_tokens(source, path)
+    source = _SPEAKER_DIRECTIVE.sub(
+        lambda match: _speaker_replacement(source, match, path=path),
+        source,
+    )
     result: list[str] = []
     cursor = 0
     active: str | None = None
@@ -432,11 +616,41 @@ def _apply_directives(source: str, *, path: Path, max_pause_ms: int) -> str:
 
 
 def _validate_directive_tokens(source: str, path: Path) -> None:
-    recognized = {match.start() for match in _DIRECTIVE.finditer(source)}
+    recognized = {
+        *(match.start() for match in _DIRECTIVE.finditer(source)),
+        *(match.start() for match in _SPEAKER_DIRECTIVE.finditer(source)),
+    }
     for generic in re.finditer(r"<!--\s*yakbox:speech:", source):
         if generic.start() not in recognized:
             line = source.count("\n", 0, generic.start()) + 1
             raise ValidationError(f"{path}:{line}: malformed yakbox speech directive")
+
+
+def _speaker_replacement(
+    source: str,
+    match: re.Match[str],
+    *,
+    path: Path,
+) -> str:
+    line = source.count("\n", 0, match.start()) + 1
+    line_start = source.rfind("\n", 0, match.start()) + 1
+    line_end = source.find("\n", match.end())
+    line_end = len(source) if line_end < 0 else line_end
+    if (
+        source[line_start : match.start()].strip()
+        or source[match.end() : line_end].strip()
+    ):
+        raise ValidationError(
+            f"{path}:{line}: speaker directive must occupy its own line"
+        )
+    profile = match.group("profile")
+    profile_marker = f"PROFILE{profile}" if profile else ""
+    narrator_profile = match.group("narrator_profile")
+    narrator_marker = f"NARRATORPROFILE{narrator_profile}" if narrator_profile else ""
+    return (
+        f"<!--{_SPEAKER_SENTINEL}{match.group('name')}"
+        f"{profile_marker}{narrator_marker}-->" + ("\n" * match.group(0).count("\n"))
+    )
 
 
 def _directive_transition(
@@ -712,26 +926,15 @@ def _slug(value: str) -> str:
 
 
 def _identity_line(chapter_id: str, item: SpeechSegment | Pause) -> str:
-    value = item.text if isinstance(item, SpeechSegment) else str(item.milliseconds)
+    value = (
+        f"{item.speaker}:{int(item.speaker_explicit)}:"
+        f"{item.boundary_after.value}:{item.text}"
+        if isinstance(item, SpeechSegment)
+        else str(item.milliseconds)
+    )
     return f"{chapter_id}:{value}"
 
 
 def _removed_text_gap(value: str) -> str:
     newlines = "\n" * value.count("\n")
     return newlines if newlines else _DIRECTIVE_GAP
-
-
-def _unicode_safe_boundary(text: str, maximum: int) -> int:
-    point = maximum
-    while point > 0 and (
-        unicodedata.combining(text[point]) != 0
-        or text[point] in {"\ufe0e", "\ufe0f"}
-        or text[point] == "\u200d"
-        or text[point - 1] == "\u200d"
-    ):
-        point -= 1
-    if point == 0:
-        raise ValidationError(
-            "A single Unicode grapheme exceeds the configured chunk size"
-        )
-    return point

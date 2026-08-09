@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -10,8 +11,10 @@ import pytest
 from yakbox.errors import BuildError, ValidationError
 from yakbox.speech.models import SpeechSynthesisRequest
 from yakbox.speech.workers import (
+    WORKER_PROTOCOL_VERSION,
     IsolatedLocalSpeechService,
     _read_request,
+    _remove_stale_part_files,
 )
 
 
@@ -78,13 +81,23 @@ class _Reader:
         return content
 
 
+class _SequenceReader:
+    def __init__(self, messages: list[dict[str, object]]) -> None:
+        self.lines = [f"{json.dumps(message)}\n".encode() for message in messages]
+
+    async def readline(self) -> bytes:
+        return self.lines.pop(0) if self.lines else b""
+
+
 class _Writer:
     def __init__(self, process: _SilentProcess | _TerminatedProcess) -> None:
         self.process = process
         self.payloads: list[bytes] = []
+        self.written = asyncio.Event()
 
     def write(self, payload: bytes) -> None:
         self.payloads.append(payload)
+        self.written.set()
         if b'"operation":"shutdown"' in payload:
             self.process.returncode = 0
             if isinstance(self.process, _SilentProcess):
@@ -183,6 +196,75 @@ async def test_local_worker_process_is_reused_until_service_closes(
     assert starts == 1
     assert process.returncode == 0
     assert process.stdin.payloads[-1] == b'{"operation":"shutdown"}\n'
+
+
+@pytest.mark.asyncio
+async def test_worker_batch_protocol_streams_hundreds_of_bounded_results() -> None:
+    count = 300
+    messages: list[dict[str, object]] = [
+        {
+            "protocol_version": WORKER_PROTOCOL_VERSION,
+            "event": "result",
+            "index": index,
+            "item": {"path": f"chunk-{index}.wav"},
+        }
+        for index in range(count)
+    ]
+    messages.append(
+        {
+            "protocol_version": WORKER_PROTOCOL_VERSION,
+            "event": "complete",
+            "count": count,
+        }
+    )
+    process = cast(
+        asyncio.subprocess.Process,
+        SimpleNamespace(pid=1234, stdout=_SequenceReader(messages)),
+    )
+    service = IsolatedLocalSpeechService(timeout_seconds=1)
+
+    results = await service._read_batch_responses(process, count)
+
+    assert len(results) == count
+
+
+def test_worker_cleanup_removes_old_and_format_preserving_parts(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "speech.wav"
+    old = tmp_path / ".speech.wav.old.part"
+    current = tmp_path / ".speech.wav.new.part.wav"
+    old.write_bytes(b"partial")
+    current.write_bytes(b"partial")
+
+    _remove_stale_part_files(destination)
+
+    assert not old.exists()
+    assert not current.exists()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_worker_request_cleans_child_partial_files(
+    tmp_path: Path,
+) -> None:
+    process = _SilentProcess()
+    service = IsolatedLocalSpeechService(timeout_seconds=30)
+    service._process = cast(asyncio.subprocess.Process, process)
+    destination = tmp_path / "speech.wav"
+    task = asyncio.create_task(
+        service.synthesize_to_file(
+            SpeechSynthesisRequest(text="Hi.", voice="narrator"), destination
+        )
+    )
+    await process.stdin.written.wait()
+    partial = tmp_path / ".speech.wav.child.part.wav"
+    partial.write_bytes(b"partial")
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert not partial.exists()
 
 
 @pytest.mark.asyncio

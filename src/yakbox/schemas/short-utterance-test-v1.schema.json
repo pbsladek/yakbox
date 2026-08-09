@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/short-utterance-test-v1.schema.json",
+  "title": "yakbox short utterance test package",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "kind", "profile", "text", "selected_candidate", "selected_audio", "selected_audio_sha256", "recipes"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/short-utterance-test-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "kind": {"const": "short_utterance_test"},
+    "profile": {"type": "string"},
+    "text": {"type": "string", "minLength": 1},
+    "selected_candidate": {"type": "integer"},
+    "selected_audio": {"type": "string"},
+    "selected_audio_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "recipes": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

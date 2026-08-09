@@ -60,6 +60,7 @@ from yakbox.cli_options import (
     hosted_budget_options,
     text_file_option,
 )
+from yakbox.cli_whisper import register_whisper_commands
 from yakbox.cloud import (
     AudioFormat as CloudAudioFormat,
 )
@@ -337,17 +338,25 @@ def validate_command(manifest: Path) -> None:
             pronunciations=loaded.pronunciations,
             max_pause_ms=loaded.max_pause_ms,
         )
+        attribution_findings: dict[str, dict[str, object]] = {}
         for target in loaded.targets:
-            plan_audiobook(loaded, document, target_name=target.name)
+            plan = plan_audiobook(loaded, document, target_name=target.name)
+            for finding in plan.attribution_findings:
+                value = finding.to_dict(root=loaded.root)
+                attribution_findings[json.dumps(value, sort_keys=True)] = value
     except YakboxError as error:
         _fail(error)
+    findings = list(attribution_findings.values())
     _emit(
         {
             "manifest": str(loaded.path),
             "chapters": len(document.chapters),
             "document_sha256": document.sha256,
+            "attribution_finding_count": len(findings),
+            "attribution_findings": findings,
         },
-        f"Valid: {len(document.chapters)} chapter(s)",
+        f"Valid: {len(document.chapters)} chapter(s); "
+        f"{len(findings)} attribution suggestion(s)",
     )
 
 
@@ -1077,12 +1086,19 @@ def explain_command(
 @click.option("--backend")
 @click.option("--network", is_flag=True)
 @click.option("--deep", is_flag=True)
-def doctor_command(
+@click.option(
+    "--whisper",
+    "check_whisper",
+    is_flag=True,
+    help="Check the local MLX Whisper package and pinned model.",
+)
+def doctor_command(  # noqa: PLR0917 - Click injects CLI parameters.
     manifest: Path | None,
     target: str | None,
     backend: str | None,
     network: bool,
     deep: bool,
+    check_whisper: bool,
 ) -> None:
     """Run read-only installation and workspace diagnostics."""
     config = _load_config()
@@ -1094,6 +1110,7 @@ def doctor_command(
                 backend=backend,
                 network=network,
                 deep=deep,
+                whisper=check_whisper,
                 api_key=_optional_api_key(None, config),
             )
         )
@@ -2855,4 +2872,5 @@ def _keyring_password(profile: str) -> str | None:
         return None
 
 
+register_whisper_commands(main, emit=_emit, fail=_fail)
 configure_cli_help(main)

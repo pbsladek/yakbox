@@ -2,7 +2,7 @@
 
 ## Install the CLI
 
-Yakbox supports Python 3.13 and 3.14. The default installation is small
+Yakbox supports Python 3.14 only. The default installation is small
 and does not install PyTorch:
 
 ```console
@@ -25,6 +25,8 @@ uv tool install "yakbox[local]" \
   --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
 uv tool install "yakbox[credentials,local]" \
   --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
+uv tool install "yakbox[local,alignment]" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
 ```
 
 Local Chatterbox has a much larger machine-learning dependency graph. Install
@@ -32,6 +34,11 @@ it only on a machine that will run the model. The versioned override file
 replaces vulnerable exact pins in Chatterbox 0.1.7; do not omit it. FFmpeg and
 FFprobe are separate system tools required for mastering, MP3 encoding,
 inspection, and M4B assembly.
+
+The `alignment` extra installs `mlx-whisper` only on Apple Silicon macOS. It is
+needed only for `short_utterances.strategy = "context_extract"`; direct
+synthesis and the default CLI do not import or install it. The configured model
+revision is resolved into the local Hugging Face cache before transcription.
 
 ## Install a GitHub Release
 

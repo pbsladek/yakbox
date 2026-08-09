@@ -1,0 +1,99 @@
+schema_version = 1
+profiles = [
+  "caro-davy",
+  "nick-whitley",
+  "andy-minter",
+  "ruth-golding",
+  "bill-boerst",
+  "stuart-bell",
+  "karen-savage",
+  "elizabeth-klett",
+  "cori-samuel",
+  "mil-nicholson",
+  "lucy-burgoyne",
+  "mark-f-smith",
+  "bob-neufeld",
+  "mark-nelson",
+  "david-barnes",
+  "adrian-praetzellis",
+  "gregg-margarite",
+  "david-clarke",
+  "martin-geeson",
+  "phil-chenevert",
+  "peter-yearsley",
+  "kara-shallenberg",
+  "kirsten-ferreri",
+  "sibella-denton",
+  "laurie-anne-walden",
+]
+required_boundaries = ["sentence", "paragraph", "explicit_pause"]
+max_chunk_characters = 260
+explicit_pause_ms = 450
+
+[[audition_passages]]
+id = "narration"
+text_file = "audition.txt"
+purpose = "Sustained suspense narration, pronunciation, and emotional turn"
+
+[[audition_passages]]
+id = "dialogue"
+text_file = "dialogue.txt"
+purpose = "Escalating Mara and Wren argument with rapid speaker changes"
+
+[automated]
+minimum_clip_seconds = 1.0
+maximum_clip_seconds = 120.0
+minimum_words_per_minute = 110.0
+maximum_words_per_minute = 190.0
+minimum_chunk_words_for_pace = 8
+minimum_loudness_lufs = -30.0
+maximum_loudness_lufs = -10.0
+maximum_true_peak_dbfs = 0.1
+maximum_edge_silence_seconds = 1.0
+maximum_splice_step_dbfs = -50.0
+
+[manual]
+scale_min = 1
+scale_max = 5
+passing_score = 4
+chapter_profile = "character-routed"
+
+[[manual.voice_dimensions]]
+id = "narration_fit"
+prompt = "Does the voice sustain an audiobook-style read instead of sounding like an assistant, advertisement, or isolated demo?"
+
+[[manual.voice_dimensions]]
+id = "listener_clarity"
+prompt = "Are names, dialogue speakers, and the sequence of events clear on a first listen without seeing the text?"
+
+[[manual.voice_dimensions]]
+id = "character_and_emotion"
+prompt = "Does the delivery preserve suspense, reflection, dialogue, and the final emotional turn without overacting?"
+
+[[manual.voice_dimensions]]
+id = "pronunciation"
+prompt = "Is Asterion read naturally without syllable-separated artifacts, and are Mara and Wren intelligible?"
+
+[[manual.dialogue_dimensions]]
+id = "speaker_differentiation"
+prompt = "Can a first-time listener track Mara and Wren through the rapid exchange without reading the text?"
+
+[[manual.dialogue_dimensions]]
+id = "conflict_escalation"
+prompt = "Does the argument intensify from restraint to fear without starting at full volume or becoming melodramatic?"
+
+[[manual.dialogue_dimensions]]
+id = "dialogue_naturalness"
+prompt = "Do the attributed turns, accusations, action beat, and final exchange sound like one continuous confrontation?"
+
+[[manual.chapter_dimensions]]
+id = "pacing_and_pauses"
+prompt = "Do sentence, paragraph, dialogue, and explicit pauses feel intentional without sounding stitched together?"
+
+[[manual.chapter_dimensions]]
+id = "voice_continuity"
+prompt = "Does timbre, loudness, pace, and vocal character remain stable across generated chunks and their joins?"
+
+[[manual.chapter_dimensions]]
+id = "emotional_turn"
+prompt = "Does the joined chapter preserve reflection, suspense, dialogue, and the final reveal without rushing or overacting?"

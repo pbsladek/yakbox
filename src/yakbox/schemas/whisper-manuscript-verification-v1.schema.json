@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/whisper-manuscript-verification-v1.schema.json",
+  "title": "yakbox Whisper manuscript verification",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "audio", "manuscript", "manuscript_sha256", "expected_token_count", "recognized_token_count", "matched_token_count", "token_accuracy", "accepted", "reason_codes", "diagnostic_reason_codes", "mismatches", "alignment", "confidence_profile"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/whisper-manuscript-verification-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "audio": {"type": "string"},
+    "manuscript": {"type": "string"},
+    "manuscript_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "expected_token_count": {"type": "integer", "minimum": 0},
+    "recognized_token_count": {"type": "integer", "minimum": 0},
+    "matched_token_count": {"type": "integer", "minimum": 0},
+    "token_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+    "accepted": {"type": "boolean"},
+    "reason_codes": {"type": "array", "items": {"type": "string"}},
+    "diagnostic_reason_codes": {"type": "array", "items": {"type": "string"}},
+    "mismatches": {"type": "array", "items": {"type": "object"}},
+    "alignment": {"type": "object"},
+    "confidence_profile": {"type": "object"}
+  },
+  "additionalProperties": false
+}

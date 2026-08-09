@@ -1,0 +1,93 @@
+schema_version = 1
+name = "yakbox-short-utterance-known-failures"
+
+[[cases]]
+id = "correct-alone"
+expected = "Alone?"
+recognized = "Alone"
+expected_accept = true
+confidence = 0.94
+word_starts = [0.10]
+word_ends = [0.52]
+expected_start = 0.09
+expected_end = 0.54
+listening_score = 5
+consonant_sensitive = true
+
+[[cases]]
+id = "prefixed-wren-asked"
+expected = "Wren asked."
+recognized = "Or Wren asked"
+expected_accept = false
+confidence = 0.91
+word_starts = [0.03, 0.21, 0.48]
+word_ends = [0.16, 0.46, 0.76]
+expected_start = 0.21
+expected_end = 0.76
+listening_score = 1
+consonant_sensitive = true
+
+[[cases]]
+id = "suffix-liora-added"
+expected = "Liora added."
+recognized = "Liora added it"
+expected_accept = false
+confidence = 0.88
+word_starts = [0.08, 0.38, 0.68]
+word_ends = [0.33, 0.62, 0.84]
+expected_start = 0.08
+expected_end = 0.62
+listening_score = 1
+consonant_sensitive = false
+
+[[cases]]
+id = "elongated-no"
+expected = "No."
+recognized = "Nah no"
+expected_accept = false
+confidence = 0.79
+word_starts = [0.04, 0.52]
+word_ends = [0.47, 0.82]
+expected_start = 0.52
+expected_end = 0.82
+listening_score = 1
+consonant_sensitive = false
+
+[[cases]]
+id = "natural-you-first-in"
+expected = "You first in?"
+recognized = "You first in"
+expected_accept = true
+confidence = 0.90
+word_starts = [0.08, 0.31, 0.56]
+word_ends = [0.25, 0.50, 0.72]
+expected_start = 0.07
+expected_end = 0.74
+listening_score = 5
+consonant_sensitive = true
+
+[[cases]]
+id = "paused-you-first-in"
+expected = "You first in?"
+recognized = "You first in"
+expected_accept = false
+confidence = 0.92
+word_starts = [0.08, 0.91, 1.72]
+word_ends = [0.25, 1.10, 1.90]
+expected_start = 0.08
+expected_end = 1.90
+listening_score = 2
+consonant_sensitive = true
+
+[[cases]]
+id = "low-confidence-third"
+expected = "Third."
+recognized = "Third"
+expected_accept = false
+confidence = 0.12
+word_starts = [0.10]
+word_ends = [0.42]
+expected_start = 0.09
+expected_end = 0.44
+listening_score = 2
+consonant_sensitive = true

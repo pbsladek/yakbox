@@ -5,28 +5,623 @@ sources = ["source/book.md"]
 [book]
 title = "Local Chatterbox Example"
 author = "Example Author"
-narrator = "Example Narrator"
+narrator = "Synthetic narration (Caro Davy reference profile)"
 language = "en"
 
-[voices.narrator]
-display_name = "Narrator"
-rights_basis = "not_applicable"
+[voices.caro-davy]
+display_name = "Caro Davy"
+rights_basis = "public_domain"
+reference_audio = "voices/caro-davy.wav"
 
-[profiles.local]
+[voices.nick-whitley]
+display_name = "Nick Whitley"
+rights_basis = "public_domain"
+reference_audio = "voices/nick-whitley.wav"
+
+[voices.andy-minter]
+display_name = "Andy Minter"
+rights_basis = "public_domain"
+reference_audio = "voices/andy-minter.wav"
+
+[voices.ruth-golding]
+display_name = "Ruth Golding"
+rights_basis = "public_domain"
+reference_audio = "voices/ruth-golding.wav"
+
+[voices.bill-boerst]
+display_name = "Bill Boerst"
+rights_basis = "public_domain"
+reference_audio = "voices/bill-boerst.wav"
+
+[voices.stuart-bell]
+display_name = "Stuart Bell"
+rights_basis = "public_domain"
+reference_audio = "voices/stuart-bell.wav"
+
+[voices.karen-savage]
+display_name = "Karen Savage"
+rights_basis = "public_domain"
+reference_audio = "voices/karen-savage.wav"
+
+[voices.elizabeth-klett]
+display_name = "Elizabeth Klett"
+rights_basis = "public_domain"
+reference_audio = "voices/elizabeth-klett.wav"
+
+[voices.cori-samuel]
+display_name = "Cori Samuel"
+rights_basis = "public_domain"
+reference_audio = "voices/cori-samuel.wav"
+
+[voices.mil-nicholson]
+display_name = "Mil Nicholson"
+rights_basis = "public_domain"
+reference_audio = "voices/mil-nicholson.wav"
+
+[voices.lucy-burgoyne]
+display_name = "Lucy Burgoyne"
+rights_basis = "public_domain"
+reference_audio = "voices/lucy-burgoyne.wav"
+
+[voices.mark-f-smith]
+display_name = "Mark F. Smith"
+rights_basis = "public_domain"
+reference_audio = "voices/mark-f-smith.wav"
+
+[voices.bob-neufeld]
+display_name = "Bob Neufeld"
+rights_basis = "public_domain"
+reference_audio = "voices/bob-neufeld.wav"
+
+[voices.mark-nelson]
+display_name = "Mark Nelson"
+rights_basis = "public_domain"
+reference_audio = "voices/mark-nelson.wav"
+
+[voices.david-barnes]
+display_name = "David Barnes"
+rights_basis = "public_domain"
+reference_audio = "voices/david-barnes.wav"
+
+[voices.adrian-praetzellis]
+display_name = "Adrian Praetzellis"
+rights_basis = "public_domain"
+reference_audio = "voices/adrian-praetzellis.wav"
+
+[voices.gregg-margarite]
+display_name = "Gregg Margarite"
+rights_basis = "public_domain"
+reference_audio = "voices/gregg-margarite.wav"
+
+[voices.david-clarke]
+display_name = "David Clarke"
+rights_basis = "public_domain"
+reference_audio = "voices/david-clarke.wav"
+
+[voices.martin-geeson]
+display_name = "Martin Geeson"
+rights_basis = "public_domain"
+reference_audio = "voices/martin-geeson.wav"
+
+[voices.phil-chenevert]
+display_name = "Phil Chenevert"
+rights_basis = "public_domain"
+reference_audio = "voices/phil-chenevert.wav"
+
+[voices.peter-yearsley]
+display_name = "Peter Yearsley"
+rights_basis = "public_domain"
+reference_audio = "voices/peter-yearsley.wav"
+
+[voices.kara-shallenberg]
+display_name = "Kara Shallenberg"
+rights_basis = "public_domain"
+reference_audio = "voices/kara-shallenberg.wav"
+
+[voices.kirsten-ferreri]
+display_name = "Kirsten Ferreri"
+rights_basis = "public_domain"
+reference_audio = "voices/kirsten-ferreri.wav"
+
+[voices.sibella-denton]
+display_name = "Sibella Denton"
+rights_basis = "public_domain"
+reference_audio = "voices/sibella-denton.wav"
+
+[voices.laurie-anne-walden]
+display_name = "Laurie Anne Walden"
+rights_basis = "public_domain"
+reference_audio = "voices/laurie-anne-walden.wav"
+
+[profiles.caro-davy]
 backend = "chatterbox-local"
-voice = "narrator"
-device = "auto"
-cfg_weight = 0.5
+voice = "caro-davy"
+device = "cpu"
+cfg_weight = 0.34
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.nick-whitley]
+backend = "chatterbox-local"
+voice = "nick-whitley"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.andy-minter]
+backend = "chatterbox-local"
+voice = "andy-minter"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.ruth-golding]
+backend = "chatterbox-local"
+voice = "ruth-golding"
+device = "cpu"
+cfg_weight = 0.2
 exaggeration = 0.5
 seed = 42
 max_processes = 1
 threads_per_process = 1
 worker_timeout_seconds = 600
 
+[profiles.bill-boerst]
+backend = "chatterbox-local"
+voice = "bill-boerst"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.stuart-bell]
+backend = "chatterbox-local"
+voice = "stuart-bell"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.karen-savage]
+backend = "chatterbox-local"
+voice = "karen-savage"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.elizabeth-klett]
+backend = "chatterbox-local"
+voice = "elizabeth-klett"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.cori-samuel]
+backend = "chatterbox-local"
+voice = "cori-samuel"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.mil-nicholson]
+backend = "chatterbox-local"
+voice = "mil-nicholson"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.lucy-burgoyne]
+backend = "chatterbox-local"
+voice = "lucy-burgoyne"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.mark-f-smith]
+backend = "chatterbox-local"
+voice = "mark-f-smith"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.bob-neufeld]
+backend = "chatterbox-local"
+voice = "bob-neufeld"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.mark-nelson]
+backend = "chatterbox-local"
+voice = "mark-nelson"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.david-barnes]
+backend = "chatterbox-local"
+voice = "david-barnes"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.adrian-praetzellis]
+backend = "chatterbox-local"
+voice = "adrian-praetzellis"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.gregg-margarite]
+backend = "chatterbox-local"
+voice = "gregg-margarite"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.david-clarke]
+backend = "chatterbox-local"
+voice = "david-clarke"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.martin-geeson]
+backend = "chatterbox-local"
+voice = "martin-geeson"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.phil-chenevert]
+backend = "chatterbox-local"
+voice = "phil-chenevert"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.peter-yearsley]
+backend = "chatterbox-local"
+voice = "peter-yearsley"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.kara-shallenberg]
+backend = "chatterbox-local"
+voice = "kara-shallenberg"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.kirsten-ferreri]
+backend = "chatterbox-local"
+voice = "kirsten-ferreri"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.sibella-denton]
+backend = "chatterbox-local"
+voice = "sibella-denton"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.laurie-anne-walden]
+backend = "chatterbox-local"
+voice = "laurie-anne-walden"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[characters.narrator]
+display_name = "Narrator"
+profile = "andy-minter"
+gender = "male"
+
+[characters.character-1]
+display_name = "Character 1"
+profile = "caro-davy"
+gender = "female"
+cfg_weight = 0.34
+exaggeration = 0.44
+seed = 42
+
+[characters.character-2]
+display_name = "Character 2"
+profile = "nick-whitley"
+gender = "male"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+
+[characters.character-3]
+display_name = "Character 3"
+profile = "ruth-golding"
+gender = "female"
+cfg_weight = 0.2
+exaggeration = 0.5
+seed = 42
+
+[characters.character-4]
+display_name = "Character 4"
+profile = "bill-boerst"
+gender = "male"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+
+[characters.character-5]
+display_name = "Character 5"
+profile = "stuart-bell"
+gender = "male"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+
+[characters.character-6]
+display_name = "Character 6"
+profile = "karen-savage"
+gender = "female"
+
+[characters.character-7]
+display_name = "Character 7"
+profile = "elizabeth-klett"
+gender = "female"
+
+[characters.character-8]
+display_name = "Character 8"
+profile = "cori-samuel"
+gender = "female"
+
+[characters.character-9]
+display_name = "Character 9"
+profile = "mil-nicholson"
+gender = "female"
+
+[characters.character-10]
+display_name = "Character 10"
+profile = "lucy-burgoyne"
+gender = "female"
+
+[characters.character-11]
+display_name = "Character 11"
+profile = "mark-f-smith"
+gender = "male"
+
+[characters.character-12]
+display_name = "Character 12"
+profile = "bob-neufeld"
+gender = "male"
+
+[characters.character-13]
+display_name = "Character 13"
+profile = "mark-nelson"
+gender = "male"
+
+[characters.character-14]
+display_name = "Character 14"
+profile = "david-barnes"
+gender = "male"
+
+[characters.character-15]
+display_name = "Character 15"
+profile = "adrian-praetzellis"
+gender = "male"
+
+[characters.character-16]
+display_name = "Character 16"
+profile = "gregg-margarite"
+gender = "male"
+
+[characters.character-17]
+display_name = "Character 17"
+profile = "david-clarke"
+gender = "male"
+
+[characters.character-18]
+display_name = "Character 18"
+profile = "martin-geeson"
+gender = "male"
+
+[characters.character-19]
+display_name = "Character 19"
+profile = "phil-chenevert"
+gender = "male"
+
+[characters.character-20]
+display_name = "Character 20"
+profile = "peter-yearsley"
+gender = "male"
+
+[characters.character-21]
+display_name = "Character 21"
+profile = "kara-shallenberg"
+gender = "female"
+
+[characters.character-22]
+display_name = "Character 22"
+profile = "kirsten-ferreri"
+gender = "female"
+
+[characters.character-23]
+display_name = "Character 23"
+profile = "sibella-denton"
+gender = "female"
+
+[characters.character-24]
+display_name = "Character 24"
+profile = "laurie-anne-walden"
+gender = "female"
+
+[dialogue]
+attribution_assistance = "warn"
+short_utterance_words = 3
+
+[whisper_qa]
+# Enable after installing the pinned Whisper model. A passing managed report
+# is then required before MP3 encoding and release publication.
+chapter_verification = false
+cache_enabled = true
+cache_directory = ".yakbox/cache/whisper"
+join_coalesce_gap_ms = 100
+# Optional second opinion for weak openings and final consonants.
+phoneme_alignment = false
+phoneme_backend = "wav2vec2-ctc"
+phoneme_model = "facebook/wav2vec2-lv-60-espeak-cv-ft"
+phoneme_revision = "c43348bbaa5a77692c8e7bf3409d683474fdf2a4"
+phoneme_language = "en-us"
+phoneme_timeout_seconds = 180.0
+minimum_phoneme_confidence = 0.2
+
+[short_utterances]
+# Existing behavior is the default. Change to "context_extract" after installing
+# yakbox[alignment] on an Apple Silicon Mac.
+strategy = "direct"
+maximum_words = 3
+candidate_count = 5
+prefer_natural_context = true
+carrier_positions = ["middle"]
+alignment_backend = "mlx-whisper"
+alignment_model = "mlx-community/whisper-large-v3-turbo"
+alignment_revision = "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+prompted_timing = true
+decode_consensus = true
+prompt_sensitivity = true
+maximum_consensus_timing_delta_ms = 180
+hallucination_silence_threshold = 0.8
+automatic_join_inspection = true
+join_inspection_window_seconds = 1.5
+alignment_timeout_seconds = 180.0
+# Add only reviewed ASR spelling variants for invented names, for example:
+# alignment_aliases = { liora = ["leora"] }
+minimum_alignment_confidence = 0.5
+minimum_extracted_confidence = 0.2
+minimum_one_word_confidence = 0.6
+minimum_short_phrase_confidence = 0.5
+minimum_segment_average_log_probability = -1.0
+maximum_segment_compression_ratio = 2.4
+maximum_segment_no_speech_probability = 0.6
+maximum_segment_temperature = 0.2
+candidate_confidence_tolerance = 0.05
+maximum_extra_speech_ms = 60
+maximum_internal_token_gap_ms = 350
+maximum_token_duration_ms = 1200
+acoustic_refinement = true
+acoustic_threshold_dbfs = -48.0
+speech_island_gap_ms = 300
+minimum_edge_silence_ms = 10
+maximum_edge_silence_ms = 120
+maximum_clipped_sample_ratio = 0.005
+maximum_boundary_jump_ratio = 0.35
+maximum_vad_disagreement_ms = 500
+maximum_stationary_voiced_ms = 1200
+minimum_pause_ms = 180
+pre_roll_ms = 30
+post_roll_ms = 40
+fade_ms = 8
+failure = "error"
+require_review_for_one_word = true
+keep_candidates = false
+
 [targets.default]
-profile = "local"
+profile = "andy-minter"
 output_root = "build/yakbox"
-chunk_chars = 1000
+chunk_chars = 500
 mastering = true
 wav_sample_rate = 44100
 mp3_bitrate = "192k"

@@ -50,14 +50,23 @@ from yakbox.audiobook.manifest import (
     BackendProfile,
     BookMetadata,
     BuildTarget,
+    CharacterRole,
     ChatterboxOptions,
+    DialoguePolicy,
     FakeOptions,
     LogicalVoice,
     ResembleOptions,
     RetentionPolicy,
     load_manifest,
 )
-from yakbox.audiobook.planner import BuildPlan, BuildStage, PlanNode, plan_audiobook
+from yakbox.audiobook.planner import (
+    AttributionFinding,
+    BuildPlan,
+    BuildStage,
+    ChunkRoute,
+    PlanNode,
+    plan_audiobook,
+)
 from yakbox.audiobook.shards import (
     ShardManifest,
     export_shard_manifests,
@@ -78,6 +87,7 @@ from yakbox.audiobook.sources import (
 __all__ = [
     "ArtifactKind",
     "ArtifactRecord",
+    "AttributionFinding",
     "AudiobookManifest",
     "BackendOptions",
     "BackendProfile",
@@ -97,9 +107,12 @@ __all__ = [
     "CacheEntry",
     "CacheInventory",
     "Chapter",
+    "CharacterRole",
     "ChatterboxOptions",
+    "ChunkRoute",
     "CleanupCandidate",
     "CleanupPlan",
+    "DialoguePolicy",
     "FakeOptions",
     "InventoryReport",
     "LogicalVoice",

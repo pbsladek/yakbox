@@ -18,7 +18,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
-from yakbox._files import atomic_output_path, atomic_write_json, sha256_file
+from yakbox._files import atomic_write_json, sha256_file
 from yakbox.audio import (
     AudioQualityPolicy,
     assemble_m4b,
@@ -43,11 +43,19 @@ from yakbox.audiobook.manifest import (
     LogicalVoice,
     ResembleOptions,
 )
-from yakbox.audiobook.planner import BuildPlan, BuildStage, PlanNode, plan_audiobook
+from yakbox.audiobook.planner import (
+    BuildPlan,
+    BuildStage,
+    ChunkRoute,
+    PlanNode,
+    ShortUtteranceMarker,
+    plan_audiobook,
+)
 from yakbox.audiobook.sources import (
     Chapter,
     NormalizedDocument,
     SpeechSegment,
+    apply_pronunciations,
     normalize_sources,
 )
 from yakbox.contracts import runtime_metadata, schema_uri
@@ -64,6 +72,8 @@ from yakbox.fingerprints import (
     media_tool_fingerprint,
     media_tool_versions,
 )
+from yakbox.local_alignment import open_local_aligner
+from yakbox.local_phoneme_alignment import open_phoneme_aligner
 from yakbox.speech import (
     AudioFormat,
     BatchTextToSpeechService,
@@ -81,6 +91,25 @@ from yakbox.speech import (
     open_speech_backend,
     validate_hosted_preflight,
 )
+from yakbox.speech.alignment import SpeechAligner, WindowSpeechAligner
+from yakbox.speech.chunking import CHATTERBOX_CHUNK_CHARACTERS, chunk_text
+from yakbox.speech.phonemes import PhonemeAligner
+from yakbox.speech.short_synthesis import synthesize_short_utterance
+from yakbox.speech.short_utterances import (
+    CarrierRecipe,
+    ShortUtteranceFailure,
+    ShortUtteranceStrategy,
+    carrier_recipes,
+)
+from yakbox.speech.waves import (
+    WavJoinBoundary,
+    WavJoinPart,
+    concatenate_wavs,
+    wav_join_boundaries,
+    write_silence,
+)
+from yakbox.whisper_cache import CachedWhisperAligner
+from yakbox.whisper_qa import JoinSpecification, inspect_joins, verify_manuscript
 
 _PAUSE = re.compile(r"__YAKBOX_PAUSE_MS=(\d+)__")
 _STORAGE_BYTES_PER_CHARACTER = 16_000
@@ -88,6 +117,7 @@ _STORAGE_BYTES_PER_CHAPTER_FLOOR = 256 * 1024
 _EXECUTION_STAGES = (
     BuildStage.SYNTHESIZE,
     BuildStage.MASTER,
+    BuildStage.VERIFY_MANUSCRIPT,
     BuildStage.ENCODE_MP3,
     BuildStage.INSPECT,
 )
@@ -136,6 +166,8 @@ class BuildPreflight:
     change_summary: BuildChangeSummary
     from_stage: BuildStage = BuildStage.SYNTHESIZE
     through_stage: BuildStage = BuildStage.INSPECT
+    short_utterance_chunks: int = 0
+    maximum_short_utterance_generations: int = 0
 
     @property
     def storage_sufficient(self) -> bool:
@@ -167,6 +199,10 @@ class BuildPreflight:
             "change_summary": self.change_summary.to_dict(),
             "from_stage": self.from_stage.value,
             "through_stage": self.through_stage.value,
+            "short_utterance_chunks": self.short_utterance_chunks,
+            "maximum_short_utterance_generations": (
+                self.maximum_short_utterance_generations
+            ),
         }
 
 
@@ -438,6 +474,16 @@ class _ExecutionContext:
     progress: _BuildProgressTracker
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingShortUtterance:
+    request: SpeechSynthesisRequest
+    destination: Path
+    fingerprint: str
+    chunk_index: int
+    recipes: tuple[CarrierRecipe, ...]
+    qa_directory: Path | None
+
+
 async def build_audiobook(
     manifest: AudiobookManifest,
     *,
@@ -567,8 +613,7 @@ async def build_audiobook(
                 open_speech_backend(
                     profile.backend,
                     api_key=api_key,
-                    isolated_local=profile.backend
-                    in {"local", "chatterbox", "chatterbox-local"},
+                    isolated_local=_is_local_backend(profile.backend),
                     hosted_budget=budget,
                     price_per_character=resolved_price,
                     max_connections=target.provider_concurrency,
@@ -967,6 +1012,10 @@ async def _execute_node_chain(
             artifact_root=target.output_root,
         )
         if existing is not None:
+            expected_voices = _node_logical_voice_names(plan, node, manifest)
+            if existing.logical_voices != expected_voices:
+                existing = replace(existing, logical_voices=expected_voices)
+                write_artifact_record(existing, root=target.output_root)
             records.append(existing)
             reused.append(node.id)
             journal.append(
@@ -1037,7 +1086,11 @@ async def audition_audiobook(
         pronunciations=manifest.pronunciations,
         max_pause_ms=manifest.max_pause_ms,
     )
-    sample = text or _audition_text(document, chapter_selector)
+    sample = (
+        _audition_text(document, chapter_selector)
+        if text is None
+        else apply_pronunciations(text, manifest.pronunciations)
+    )
     run_id = new_run_id()
     target = manifest.target(target_name)
     root = target.output_root / "auditions" / run_id
@@ -1063,13 +1116,17 @@ async def audition_audiobook(
                     open_speech_backend(
                         profile.backend,
                         api_key=api_key,
+                        isolated_local=_is_local_backend(profile.backend),
                         device=_profile_device(profile),
+                        local_worker_timeout_seconds=_profile_worker_timeout(profile),
+                        local_threads_per_process=_profile_threads(profile),
+                        local_worker_log_path=root / "logs" / "local-worker.log",
                     )
                 )
                 services[service_key] = service
             artifact = await service.synthesize_to_file(
                 SpeechSynthesisRequest(
-                    text=sample[: min(1_000, len(sample))],
+                    text=_preview_sample(sample, profile),
                     voice=voice,
                     backend=profile.backend,
                     profile=profile.name,
@@ -1334,7 +1391,11 @@ async def preview_audiobook(
         pronunciations=manifest.pronunciations,
         max_pause_ms=manifest.max_pause_ms,
     )
-    sample = text or _audition_text(document, chapter_selector)
+    sample = (
+        _audition_text(document, chapter_selector)
+        if text is None
+        else apply_pronunciations(text, manifest.pronunciations)
+    )
     if not sample.strip():
         raise BuildError("Preview text must not be empty")
     target = manifest.target(target_name)
@@ -1353,11 +1414,15 @@ async def preview_audiobook(
     async with open_speech_backend(
         profile.backend,
         api_key=api_key,
+        isolated_local=_is_local_backend(profile.backend),
         device=_profile_device(profile),
+        local_worker_timeout_seconds=_profile_worker_timeout(profile),
+        local_threads_per_process=_profile_threads(profile),
+        local_worker_log_path=root / "logs" / "local-worker.log",
     ) as service:
         artifact = await service.synthesize_to_file(
             SpeechSynthesisRequest(
-                text=sample[: min(1_000, len(sample))],
+                text=_preview_sample(sample, profile),
                 voice=voice,
                 backend=profile.backend,
                 profile=profile.name,
@@ -1408,7 +1473,8 @@ def check_release(
     target = manifest.target(target_name)
     plan = plan_audiobook(manifest, document, target_name=target_name)
     expected = {node.output.resolve(): node for node in plan.nodes}
-    release_voice = manifest.voice(manifest.profile(target.profile).voice)
+    release_voice = manifest.voice(manifest.profile(plan.profile).voice)
+    release_voices = _plan_logical_voices(plan, manifest)
     masters = tuple(
         target.output_root / "mastered" / f"{chapter.id}.wav"
         for chapter in document.chapters
@@ -1417,27 +1483,37 @@ def check_release(
         target.output_root / "release" / "mp3" / f"{chapter.id}.mp3"
         for chapter in document.chapters
     )
-    issues: list[str] = []
-    if release_voice.reference_audio is not None and release_voice.rights_basis not in {
-        "owned",
-        "licensed",
-        "consented",
-        "public_domain",
-    }:
-        issues.append(
-            f"logical voice {release_voice.name!r} has release-ineligible "
-            f"rights_basis {release_voice.rights_basis!r}"
-        )
+    issues = [
+        f"logical voice {voice.name!r} has release-ineligible "
+        f"rights_basis {voice.rights_basis!r}"
+        for voice in release_voices
+        if voice.reference_audio is not None
+        and voice.rights_basis
+        not in {"owned", "licensed", "consented", "public_domain"}
+    ]
     for path in (*masters, *mp3s):
         issues.extend(
             _release_artifact_issues(
                 path,
                 expected.get(path.resolve()),
                 target_name=target_name,
-                release_voice=release_voice,
+                expected_voices=_node_logical_voice_names(
+                    plan,
+                    expected.get(path.resolve()),
+                    manifest,
+                ),
                 quality=_quality_policy(target),
             )
         )
+    for node in plan.nodes:
+        if node.stage is BuildStage.VERIFY_MANUSCRIPT:
+            issues.extend(
+                _release_verification_issues(
+                    node,
+                    target_name=target_name,
+                    expected_voices=_node_logical_voice_names(plan, node, manifest),
+                )
+            )
     release_manifest: Path | None = None
     if not issues and write_manifest:
         release_id = new_run_id()
@@ -1451,6 +1527,7 @@ def check_release(
             masters=masters,
             mp3s=mp3s,
             release_voice=release_voice,
+            release_voices=release_voices,
         )
     return ReleaseCheck(
         complete=not issues,
@@ -1459,6 +1536,50 @@ def check_release(
         delivery_mp3s=mp3s,
         release_manifest=release_manifest,
     )
+
+
+def _plan_logical_voices(
+    plan: BuildPlan,
+    manifest: AudiobookManifest,
+) -> tuple[LogicalVoice, ...]:
+    names: list[str] = []
+    for node in plan.nodes:
+        if node.stage is not BuildStage.SYNTHESIZE:
+            continue
+        for name in _node_logical_voice_names(plan, node, manifest):
+            if name not in names:
+                names.append(name)
+    if not names:
+        names.append(manifest.profile(plan.profile).voice)
+    return tuple(manifest.voice(name) for name in names)
+
+
+def _node_logical_voice_names(
+    plan: BuildPlan,
+    node: PlanNode | None,
+    manifest: AudiobookManifest,
+) -> tuple[str, ...]:
+    if node is None:
+        return ()
+    synthesis = next(
+        (
+            candidate
+            for candidate in plan.nodes
+            if candidate.chapter_id == node.chapter_id
+            and candidate.stage is BuildStage.SYNTHESIZE
+        ),
+        None,
+    )
+    names: list[str] = []
+    for route in synthesis.chunk_routes if synthesis is not None else ():
+        if route.profile is None:
+            continue
+        name = manifest.profile(route.profile).voice
+        if name not in names:
+            names.append(name)
+    if not names:
+        names.append(manifest.profile(plan.profile).voice)
+    return tuple(names)
 
 
 def diff_releases(left: Path, right: Path) -> ReleaseDiff:
@@ -1557,13 +1678,14 @@ def _snapshot_release(
     masters: tuple[Path, ...],
     mp3s: tuple[Path, ...],
     release_voice: LogicalVoice,
+    release_voices: tuple[LogicalVoice, ...],
 ) -> tuple[tuple[Path, ...], tuple[Path, ...], Path]:
     release_root = target.output_root / "release" / release_id
     _validate_release_storage(target, (*masters, *mp3s))
     snapshot_masters = tuple(release_root / "wav" / source.name for source in masters)
     snapshot_mp3s = tuple(release_root / "mp3" / source.name for source in mp3s)
     release_manifest = release_root / "release.json"
-    profile = manifest.profile(target.profile)
+    profile = manifest.profile(plan.profile)
     try:
         for source, destination in zip(masters, snapshot_masters, strict=True):
             _copy_release_artifact(
@@ -1575,6 +1697,7 @@ def _snapshot_release(
                 media_type="audio/wav",
                 dependency=f"{source.stem}:master",
                 release_voice=release_voice,
+                release_voices=release_voices,
                 profile=profile,
             )
         for source, destination in zip(mp3s, snapshot_mp3s, strict=True):
@@ -1587,6 +1710,7 @@ def _snapshot_release(
                 media_type="audio/mpeg",
                 dependency=f"{source.stem}:encode_mp3",
                 release_voice=release_voice,
+                release_voices=release_voices,
                 profile=profile,
             )
         atomic_write_json(
@@ -1690,6 +1814,7 @@ def _snapshot_release(
                 ),
                 media_type="application/json",
                 logical_voice=release_voice.name,
+                logical_voices=tuple(voice.name for voice in release_voices),
                 reference_audio_sha256=(
                     sha256_file(release_voice.reference_audio)
                     if release_voice.reference_audio
@@ -1739,6 +1864,7 @@ def _copy_release_artifact(
     media_type: str,
     dependency: str,
     release_voice: LogicalVoice,
+    release_voices: tuple[LogicalVoice, ...],
     profile: BackendProfile,
 ) -> None:
     copy_audio(source, destination)
@@ -1759,6 +1885,7 @@ def _copy_release_artifact(
             dependencies=(dependency,),
             media_type=media_type,
             logical_voice=release_voice.name,
+            logical_voices=tuple(voice.name for voice in release_voices),
             reference_audio_sha256=(
                 sha256_file(release_voice.reference_audio)
                 if release_voice.reference_audio
@@ -1776,7 +1903,7 @@ def _release_artifact_issues(
     planned: PlanNode | None,
     *,
     target_name: str,
-    release_voice: LogicalVoice,
+    expected_voices: tuple[str, ...],
     quality: AudioQualityPolicy,
 ) -> tuple[str, ...]:
     metadata = path.with_suffix(f"{path.suffix}.artifact.json")
@@ -1784,7 +1911,7 @@ def _release_artifact_issues(
         return (f"missing release artifact or manifest: {path}",)
     try:
         raw = json.loads(metadata.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return (f"invalid artifact manifest: {metadata}",)
 
     issues: list[str] = []
@@ -1792,7 +1919,12 @@ def _release_artifact_issues(
         issues.append(f"stale or unplanned release artifact: {path}")
     if raw.get("target") != target_name:
         issues.append(f"release artifact target differs from {target_name}: {path}")
-    if raw.get("logical_voice") != release_voice.name:
+    actual_voices = tuple(
+        str(item)
+        for item in raw.get("logical_voices", [raw.get("logical_voice")])
+        if item is not None
+    )
+    if actual_voices != expected_voices:
         issues.append(f"mixed logical voice in release artifact: {path}")
     if sha256_file(path) != raw.get("sha256"):
         issues.append(f"digest mismatch: {path}")
@@ -1808,6 +1940,42 @@ def _release_artifact_issues(
     return tuple(issues)
 
 
+def _release_verification_issues(
+    node: PlanNode,
+    *,
+    target_name: str,
+    expected_voices: tuple[str, ...],
+) -> tuple[str, ...]:
+    path = node.output
+    metadata = path.with_suffix(f"{path.suffix}.artifact.json")
+    if not path.is_file() or not metadata.is_file():
+        return (f"missing manuscript verification artifact: {path}",)
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(metadata.read_text(encoding="utf-8"))
+    except OSError, json.JSONDecodeError:
+        return (f"invalid manuscript verification artifact: {path}",)
+    issues: list[str] = []
+    if report.get("accepted") is not True:
+        issues.append(f"manuscript verification did not pass: {path}")
+    if raw.get("fingerprint") != node.fingerprint:
+        issues.append(f"stale manuscript verification artifact: {path}")
+    if raw.get("target") != target_name:
+        issues.append(
+            f"verification artifact target differs from {target_name}: {path}"
+        )
+    actual_voices = tuple(
+        str(item)
+        for item in raw.get("logical_voices", [raw.get("logical_voice")])
+        if item is not None
+    )
+    if actual_voices != expected_voices:
+        issues.append(f"mixed logical voice in verification artifact: {path}")
+    if sha256_file(path) != raw.get("sha256"):
+        issues.append(f"verification digest mismatch: {path}")
+    return tuple(issues)
+
+
 def assemble_release(
     manifest: AudiobookManifest, *, target_name: str = "default"
 ) -> Path:
@@ -1820,6 +1988,13 @@ def assemble_release(
     target = manifest.target(target_name)
     if not target.m4b:
         raise BuildError("M4B assembly is not enabled for this target")
+    document = normalize_sources(
+        manifest.sources,
+        pronunciations=manifest.pronunciations,
+        max_pause_ms=manifest.max_pause_ms,
+    )
+    plan = plan_audiobook(manifest, document, target_name=target_name)
+    release_voices = _plan_logical_voices(plan, manifest)
     assembly_id = new_run_id()
     destination = (
         target.output_root
@@ -1842,14 +2017,7 @@ def assemble_release(
         series=manifest.book.series,
         series_position=manifest.book.series_position,
         cover=manifest.book.cover,
-        chapter_titles=tuple(
-            chapter.title
-            for chapter in normalize_sources(
-                manifest.sources,
-                pronunciations=manifest.pronunciations,
-                max_pause_ms=manifest.max_pause_ms,
-            ).chapters
-        ),
+        chapter_titles=tuple(chapter.title for chapter in document.chapters),
         bitrate=target.m4b_bitrate,
     )
     record = ArtifactRecord(
@@ -1865,11 +2033,12 @@ def assemble_release(
         protected=True,
         dependencies=tuple(f"{path.stem}:master" for path in check.master_wavs),
         media_type="audio/mp4",
-        logical_voice=manifest.profile(target.profile).voice,
+        logical_voice=manifest.profile(plan.profile).voice,
+        logical_voices=tuple(voice.name for voice in release_voices),
         reference_rights_basis=manifest.voice(
-            manifest.profile(target.profile).voice
+            manifest.profile(plan.profile).voice
         ).rights_basis,
-        watermark_disclosure=_watermark_disclosure(manifest.profile(target.profile)),
+        watermark_disclosure=_watermark_disclosure(manifest.profile(plan.profile)),
     )
     write_artifact_record(record, root=target.output_root)
     return destination
@@ -1888,8 +2057,9 @@ async def _execute_node(
     target = manifest.target(plan.target)
     profile = manifest.profile(plan.profile)
     logical_voice = manifest.voice(profile.voice)
+    logical_voices = _node_logical_voice_names(plan, node, manifest)
     if node.stage is BuildStage.SYNTHESIZE:
-        await _synthesize_node(node, profile, manifest, service)
+        await _synthesize_node(node, profile, target, manifest, service)
         kind = ArtifactKind.RAW
         protected = False
         media_type = "audio/wav"
@@ -1914,6 +2084,53 @@ async def _execute_node(
         kind = ArtifactKind.MASTER
         protected = False
         media_type = "audio/wav"
+    elif node.stage is BuildStage.VERIFY_MANUSCRIPT:
+        source = _dependency_output(plan, node, BuildStage.MASTER)
+        chapter = _chapter(document, node.chapter_id)
+        expected_text = " ".join(
+            segment.text
+            for segment in chapter.segments
+            if isinstance(segment, SpeechSegment)
+        )
+        aligner = open_local_aligner(
+            manifest.short_utterances.alignment_backend,
+            model=manifest.short_utterances.alignment_model,
+            revision=manifest.short_utterances.alignment_revision,
+            timeout_seconds=manifest.short_utterances.alignment_timeout_seconds,
+            prompted_timing=False,
+            decode_consensus=manifest.short_utterances.decode_consensus,
+            prompt_sensitivity=False,
+            maximum_consensus_timing_delta_ms=(
+                manifest.short_utterances.maximum_consensus_timing_delta_ms
+            ),
+            hallucination_silence_threshold=(
+                manifest.short_utterances.hallucination_silence_threshold
+            ),
+        )
+        report = await verify_manuscript(
+            source,
+            chapter.source_path,
+            expected_text,
+            language=manifest.book.language,
+            model=manifest.short_utterances.alignment_model,
+            revision=manifest.short_utterances.alignment_revision,
+            aligner=aligner,
+            cache_root=(
+                manifest.whisper_qa.cache_directory
+                if manifest.whisper_qa.cache_enabled
+                else None
+            ),
+            token_aliases=_chapter_token_aliases(manifest),
+        )
+        atomic_write_json(node.output, report.to_dict())
+        if not report.accepted:
+            raise ArtifactError(
+                f"Chapter manuscript verification rejected {node.chapter_id}; "
+                f"review {node.output}"
+            )
+        kind = ArtifactKind.REPORT
+        protected = False
+        media_type = "application/json"
     elif node.stage is BuildStage.ENCODE_MP3:
         source = _dependency_output(plan, node, BuildStage.MASTER)
         chapter = _chapter(document, node.chapter_id)
@@ -1967,6 +2184,7 @@ async def _execute_node(
         dependencies=node.dependencies,
         media_type=media_type,
         logical_voice=profile.voice,
+        logical_voices=logical_voices,
         reference_audio_sha256=(
             sha256_file(logical_voice.reference_audio)
             if logical_voice.reference_audio
@@ -1982,17 +2200,11 @@ async def _execute_node(
 async def _synthesize_node(
     node: PlanNode,
     profile: BackendProfile,
+    target: BuildTarget,
     manifest: AudiobookManifest,
     service: TextToSpeechService,
 ) -> None:
-    (
-        voice,
-        sample_rate,
-        project,
-        use_hd,
-        reference_audio,
-        chatterbox,
-    ) = _resolved_speech(profile, manifest)
+    primary_sample_rate = _resolved_speech(profile, manifest)[1]
     chunk_paths = [
         node.output.with_name(f".{node.output.stem}.chunk-{index:04d}.wav")
         for index in range(1, len(node.chunks) + 1)
@@ -2000,23 +2212,100 @@ async def _synthesize_node(
     try:
         for path in chunk_paths:
             path.unlink(missing_ok=True)
-        pending = _prepare_synthesis_chunks(
+        aligner: WindowSpeechAligner | None = (
+            open_local_aligner(
+                manifest.short_utterances.alignment_backend,
+                model=manifest.short_utterances.alignment_model,
+                revision=manifest.short_utterances.alignment_revision,
+                timeout_seconds=manifest.short_utterances.alignment_timeout_seconds,
+                prompted_timing=manifest.short_utterances.prompted_timing,
+                decode_consensus=manifest.short_utterances.decode_consensus,
+                prompt_sensitivity=manifest.short_utterances.prompt_sensitivity,
+                maximum_consensus_timing_delta_ms=(
+                    manifest.short_utterances.maximum_consensus_timing_delta_ms
+                ),
+                hallucination_silence_threshold=(
+                    manifest.short_utterances.hallucination_silence_threshold
+                ),
+            )
+            if _uses_context_extraction(node, manifest)
+            else None
+        )
+        if aligner is not None and manifest.whisper_qa.cache_enabled:
+            aligner = CachedWhisperAligner(
+                aligner,
+                manifest.whisper_qa.cache_directory,
+            )
+        phoneme_aligner: PhonemeAligner | None = (
+            open_phoneme_aligner(
+                manifest.whisper_qa.phoneme_backend,
+                model=manifest.whisper_qa.phoneme_model,
+                revision=manifest.whisper_qa.phoneme_revision,
+                timeout_seconds=manifest.whisper_qa.phoneme_timeout_seconds,
+            )
+            if aligner is not None and manifest.whisper_qa.phoneme_alignment
+            else None
+        )
+        pending, short_pending = _prepare_synthesis_chunks(
             node,
             chunk_paths,
-            profile=profile,
+            default_profile=profile,
+            target=target,
+            manifest=manifest,
             workspace=manifest.root,
-            voice=voice,
-            sample_rate=sample_rate,
-            project=project,
-            use_hd=use_hd,
-            reference_audio=reference_audio,
-            chatterbox=chatterbox,
+            aligner_fingerprint=(
+                ":".join(
+                    (
+                        aligner.fingerprint,
+                        phoneme_aligner.fingerprint,
+                    )
+                )
+                if aligner is not None and phoneme_aligner is not None
+                else (aligner.fingerprint if aligner else None)
+            ),
         )
         try:
             await _render_pending_chunks(pending, service, workspace=manifest.root)
+            if short_pending:
+                if aligner is None:
+                    raise BuildError("Short-utterance alignment was not initialized")
+                await _render_short_utterances(
+                    short_pending,
+                    service=service,
+                    aligner=aligner,
+                    phoneme_aligner=phoneme_aligner,
+                    manifest=manifest,
+                )
         except Exception as error:
             raise _chunk_failure(node, chunk_paths, manifest.root, error) from error
-        _concatenate_wav(tuple(chunk_paths), node.output)
+        wav_params = _normalize_synthesis_chunks(
+            node,
+            chunk_paths,
+            preferred_sample_rate=_synthesis_sample_rate(profile, primary_sample_rate),
+        )
+        _materialize_pause_chunks(node, chunk_paths, wav_params)
+        join_parts = tuple(
+            WavJoinPart(
+                path,
+                boundary,
+                explicit_pause=_PAUSE.fullmatch(chunk) is not None,
+            )
+            for path, chunk, boundary in zip(
+                chunk_paths,
+                node.chunks,
+                _node_boundaries(node),
+                strict=True,
+            )
+        )
+        concatenate_wavs(join_parts, node.output, overwrite=True)
+        if aligner is not None and manifest.short_utterances.automatic_join_inspection:
+            await _inspect_synthesis_joins(
+                node,
+                join_parts=join_parts,
+                aligner=aligner,
+                manifest=manifest,
+                target=target,
+            )
     finally:
         for path in chunk_paths:
             path.unlink(missing_ok=True)
@@ -2026,25 +2315,34 @@ def _prepare_synthesis_chunks(
     node: PlanNode,
     chunk_paths: list[Path],
     *,
-    profile: BackendProfile,
+    default_profile: BackendProfile,
+    target: BuildTarget,
+    manifest: AudiobookManifest,
     workspace: Path,
-    voice: str,
-    sample_rate: int | None,
-    project: str | None,
-    use_hd: bool,
-    reference_audio: Path | None,
-    chatterbox: ChatterboxSynthesisOptions | None,
-) -> list[tuple[SpeechSynthesisRequest, Path, str]]:
+    aligner_fingerprint: str | None,
+) -> tuple[
+    list[tuple[SpeechSynthesisRequest, Path, str]],
+    list[_PendingShortUtterance],
+]:
     pending: list[tuple[SpeechSynthesisRequest, Path, str]] = []
-    for chunk, chunk_path in zip(node.chunks, chunk_paths, strict=True):
+    short_pending: list[_PendingShortUtterance] = []
+    routes = _node_routes(node, default_profile)
+    markers = _node_short_utterances(node)
+    for index, (chunk, chunk_path, route, marker) in enumerate(
+        zip(node.chunks, chunk_paths, routes, markers, strict=True), start=1
+    ):
         pause = _PAUSE.fullmatch(chunk)
         if pause:
-            _write_silence(
-                chunk_path,
-                int(pause.group(1)),
-                sample_rate=sample_rate or 16_000,
-            )
             continue
+        profile = _profile_from_route(manifest, route, default_profile)
+        (
+            voice,
+            sample_rate,
+            project,
+            use_hd,
+            reference_audio,
+            chatterbox,
+        ) = _resolved_speech(profile, manifest)
         request = _new_speech_request(
             chunk,
             profile=profile,
@@ -2053,15 +2351,95 @@ def _prepare_synthesis_chunks(
             project=project,
             use_hd=use_hd,
             reference_audio=reference_audio,
-            chatterbox=chatterbox,
+            chatterbox=_chunk_chatterbox(
+                chatterbox,
+                chapter_id=node.chapter_id,
+                chunk_index=index,
+                text=chunk,
+            ),
         )
+        if (
+            marker is not None
+            and manifest.short_utterances.strategy
+            is ShortUtteranceStrategy.CONTEXT_EXTRACT
+        ):
+            if aligner_fingerprint is None:
+                raise BuildError("Short-utterance aligner fingerprint is missing")
+            recipes = carrier_recipes(
+                chunk,
+                manifest.short_utterances,
+                seed_material=f"{node.chapter_id}:{index}",
+                previous_context=_neighbor_context(node, index - 1, route, step=-1),
+                next_context=_neighbor_context(node, index - 1, route, step=1),
+            )
+            fingerprint = _short_utterance_fingerprint(
+                request,
+                recipes=recipes,
+                policy_fingerprint=manifest.short_utterances.fingerprint,
+                aligner_fingerprint=aligner_fingerprint,
+            )
+            cached = _cached_chunk(workspace, fingerprint)
+            if cached is not None:
+                _materialize_cached_chunk(cached, chunk_path)
+            else:
+                short_pending.append(
+                    _PendingShortUtterance(
+                        request=request,
+                        destination=chunk_path,
+                        fingerprint=fingerprint,
+                        chunk_index=index,
+                        recipes=recipes,
+                        qa_directory=_short_utterance_qa_directory(
+                            target,
+                            node,
+                            index=index,
+                            fingerprint=fingerprint,
+                            word_count=marker.word_count,
+                            manifest=manifest,
+                        ),
+                    )
+                )
+            continue
         fingerprint = _speech_request_fingerprint(request)
         cached = _cached_chunk(workspace, fingerprint)
         if cached is not None:
             _materialize_cached_chunk(cached, chunk_path)
         else:
             pending.append((request, chunk_path, fingerprint))
-    return pending
+    return pending, short_pending
+
+
+def _node_routes(
+    node: PlanNode,
+    default_profile: BackendProfile,
+) -> tuple[ChunkRoute, ...]:
+    if node.chunk_routes:
+        return node.chunk_routes
+    return tuple(ChunkRoute("narrator", default_profile.name) for _ in node.chunks)
+
+
+def _profile_from_route(
+    manifest: AudiobookManifest,
+    route: ChunkRoute,
+    default_profile: BackendProfile,
+) -> BackendProfile:
+    profile = (
+        manifest.profile(route.profile)
+        if route.profile is not None
+        else default_profile
+    )
+    options = profile.options
+    if not isinstance(options, ChatterboxOptions) or route.profile is None:
+        return profile
+    return replace(
+        profile,
+        options=replace(
+            options,
+            cfg_weight=route.cfg_weight,
+            exaggeration=route.exaggeration,
+            seed=route.seed,
+        ),
+    )
 
 
 def _chunk_failure(
@@ -2071,7 +2449,13 @@ def _chunk_failure(
     error: Exception,
 ) -> BuildError:
     failed_index = next(
-        (index for index, path in enumerate(chunk_paths) if not _is_readable_wav(path)),
+        (
+            index
+            for index, (chunk, path) in enumerate(
+                zip(node.chunks, chunk_paths, strict=True)
+            )
+            if _PAUSE.fullmatch(chunk) is None and not _is_readable_wav(path)
+        ),
         0,
     )
     source = node.chunk_sources[failed_index]
@@ -2111,6 +2495,28 @@ def _new_speech_request(
     )
 
 
+def _chunk_chatterbox(
+    options: ChatterboxSynthesisOptions | None,
+    *,
+    chapter_id: str,
+    chunk_index: int,
+    text: str,
+) -> ChatterboxSynthesisOptions | None:
+    if options is None:
+        return None
+    material = json.dumps(
+        {
+            "base_seed": options.seed if options.seed is not None else 0,
+            "chapter_id": chapter_id,
+            "chunk_index": chunk_index,
+            "text_sha256": hashlib.sha256(text.encode()).hexdigest(),
+        },
+        sort_keys=True,
+    ).encode()
+    seed = int.from_bytes(hashlib.sha256(material).digest()[:4], "big")
+    return replace(options, seed=seed)
+
+
 async def _render_pending_chunks(
     pending: list[tuple[SpeechSynthesisRequest, Path, str]],
     service: TextToSpeechService,
@@ -2134,6 +2540,184 @@ async def _render_pending_chunks(
         for _, destination, fingerprint in pending:
             if _is_readable_wav(destination):
                 _store_cached_chunk(workspace, fingerprint, destination)
+
+
+async def _render_short_utterances(
+    pending: list[_PendingShortUtterance],
+    *,
+    service: TextToSpeechService,
+    aligner: SpeechAligner,
+    phoneme_aligner: PhonemeAligner | None,
+    manifest: AudiobookManifest,
+) -> None:
+    for item in pending:
+        await synthesize_short_utterance(
+            service=service,
+            aligner=aligner,
+            request=item.request,
+            destination=item.destination,
+            recipes=item.recipes,
+            policy=manifest.short_utterances,
+            language=manifest.book.language,
+            qa_directory=item.qa_directory,
+            phoneme_aligner=phoneme_aligner,
+            phoneme_language=manifest.whisper_qa.phoneme_language,
+            minimum_phoneme_confidence=(manifest.whisper_qa.minimum_phoneme_confidence),
+        )
+        if _is_readable_wav(item.destination):
+            _store_cached_chunk(
+                manifest.root,
+                item.fingerprint,
+                item.destination,
+            )
+
+
+def _uses_context_extraction(node: PlanNode, manifest: AudiobookManifest) -> bool:
+    return (
+        manifest.short_utterances.strategy is ShortUtteranceStrategy.CONTEXT_EXTRACT
+        and any(marker is not None for marker in _node_short_utterances(node))
+    )
+
+
+async def _inspect_synthesis_joins(
+    node: PlanNode,
+    *,
+    join_parts: tuple[WavJoinPart, ...],
+    aligner: WindowSpeechAligner,
+    manifest: AudiobookManifest,
+    target: BuildTarget,
+) -> None:
+    boundaries = wav_join_boundaries(join_parts)
+    if not boundaries:
+        return
+    report = await inspect_joins(
+        node.output,
+        tuple(
+            specification
+            for boundary in boundaries
+            for specification in _boundary_join_specifications(boundary)
+        ),
+        language=manifest.book.language,
+        model=manifest.short_utterances.alignment_model,
+        revision=manifest.short_utterances.alignment_revision,
+        window_seconds=manifest.short_utterances.join_inspection_window_seconds,
+        coalesce_gap_seconds=manifest.whisper_qa.join_coalesce_gap_ms / 1_000,
+        aligner=aligner,
+    )
+    destination = target.output_root / "qa" / "joins" / f"{node.chapter_id}.joins.json"
+    atomic_write_json(destination, report.to_dict())
+    if not report.accepted:
+        failed = sum(not item.accepted for item in report.joins)
+        raise BuildError(
+            f"Automatic join inspection rejected {failed} join(s) in "
+            f"{node.chapter_id}; review {destination}"
+        )
+
+
+def _boundary_join_specifications(
+    boundary: WavJoinBoundary,
+) -> tuple[JoinSpecification, ...]:
+    kind = (
+        "explicit_pause" if boundary.adjacent_to_explicit_pause else boundary.boundary
+    )
+    previous = JoinSpecification(
+        at_seconds=boundary.previous_end_seconds,
+        boundary=f"{kind}:previous_end",
+    )
+    if boundary.at_seconds == boundary.previous_end_seconds:
+        return (previous,)
+    return (
+        previous,
+        JoinSpecification(
+            at_seconds=boundary.at_seconds,
+            boundary=f"{kind}:next_start",
+        ),
+    )
+
+
+def _node_short_utterances(
+    node: PlanNode,
+) -> tuple[ShortUtteranceMarker | None, ...]:
+    if node.chunk_short_utterances:
+        return node.chunk_short_utterances
+    return tuple(None for _ in node.chunks)
+
+
+def _neighbor_context(
+    node: PlanNode,
+    chunk_index: int,
+    route: ChunkRoute,
+    *,
+    step: int,
+) -> str | None:
+    routes = node.chunk_routes
+    candidate = chunk_index + step
+    while 0 <= candidate < len(node.chunks):
+        text = node.chunks[candidate]
+        if _PAUSE.fullmatch(text) is not None:
+            return None
+        candidate_route = routes[candidate] if routes else route
+        if (
+            candidate_route.speaker == route.speaker
+            and candidate_route.profile == route.profile
+        ):
+            return text
+        candidate += step
+    return None
+
+
+def _short_utterance_fingerprint(
+    request: SpeechSynthesisRequest,
+    *,
+    recipes: tuple[CarrierRecipe, ...],
+    policy_fingerprint: str,
+    aligner_fingerprint: str,
+) -> str:
+    payload = {
+        "version": 1,
+        "request": _speech_request_fingerprint(request),
+        "policy": policy_fingerprint,
+        "aligner": aligner_fingerprint,
+        "recipes": [
+            {
+                "index": recipe.candidate_index,
+                "text_sha256": hashlib.sha256(recipe.text.encode()).hexdigest(),
+                "template": recipe.template_id,
+                "position": recipe.position.value,
+                "natural": recipe.natural,
+                "seed": recipe.seed,
+            }
+            for recipe in recipes
+        ],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _short_utterance_qa_directory(
+    target: BuildTarget,
+    node: PlanNode,
+    *,
+    index: int,
+    fingerprint: str,
+    word_count: int,
+    manifest: AudiobookManifest,
+) -> Path | None:
+    policy = manifest.short_utterances
+    requires_review = policy.require_review_for_one_word and word_count == 1
+    if not (
+        policy.keep_candidates
+        or policy.failure is ShortUtteranceFailure.REVIEW
+        or requires_review
+    ):
+        return None
+    return (
+        target.output_root
+        / "qa"
+        / "short-utterances"
+        / node.chapter_id
+        / f"chunk-{index:04d}-{fingerprint[:12]}"
+    )
 
 
 def _write_inspection_report(
@@ -2204,21 +2788,32 @@ def _matching_artifact(
             dependencies=tuple(raw.get("dependencies", [])),
             media_type=raw.get("media_type"),
             logical_voice=raw.get("logical_voice"),
+            logical_voices=tuple(raw.get("logical_voices", [])),
             reference_audio_sha256=raw.get("reference_audio_sha256"),
             reference_rights_basis=raw.get("reference_rights_basis"),
             watermark_disclosure=raw.get("watermark_disclosure"),
         )
-    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+    except OSError, KeyError, TypeError, ValueError, json.JSONDecodeError:
         return None
     valid, _ = verify_artifact(record)
     return record if valid else None
 
 
 def _dependency_output(plan: BuildPlan, node: PlanNode, stage: BuildStage) -> Path:
-    for dependency in node.dependencies:
-        for candidate in plan.nodes:
-            if candidate.id == dependency and candidate.stage is stage:
-                return candidate.output
+    by_id = {candidate.id: candidate for candidate in plan.nodes}
+    pending = list(node.dependencies)
+    visited: set[str] = set()
+    while pending:
+        dependency = pending.pop(0)
+        if dependency in visited:
+            continue
+        visited.add(dependency)
+        candidate = by_id.get(dependency)
+        if candidate is None:
+            continue
+        if candidate.stage is stage:
+            return candidate.output
+        pending.extend(candidate.dependencies)
     raise BuildError(f"{node.id} lacks {stage.value} dependency")
 
 
@@ -2276,6 +2871,10 @@ def _profile_device(profile: BackendProfile) -> str | None:
     )
 
 
+def _is_local_backend(backend: str) -> bool:
+    return backend.casefold() in {"local", "chatterbox", "chatterbox-local"}
+
+
 def _profile_worker_timeout(profile: BackendProfile) -> float:
     return (
         profile.options.worker_timeout_seconds
@@ -2292,56 +2891,98 @@ def _profile_threads(profile: BackendProfile) -> int:
     )
 
 
+def _synthesis_sample_rate(
+    profile: BackendProfile, requested_sample_rate: int | None
+) -> int:
+    if isinstance(profile.options, ChatterboxOptions):
+        return 24_000
+    return requested_sample_rate or 16_000
+
+
 def _watermark_disclosure(profile: BackendProfile) -> str:
     if isinstance(profile.options, ResembleOptions):
         return "Provider watermarking behavior is governed by the Resemble account/API"
+    if isinstance(profile.options, ChatterboxOptions):
+        return (
+            "Yakbox adds no watermark; local Chatterbox embeds its upstream "
+            "PerTh watermark"
+        )
     return "No Yakbox watermark is added"
 
 
-def _concatenate_wav(paths: tuple[Path, ...], destination: Path) -> None:
-    if not paths:
-        raise ArtifactError("Synthesis produced no chunks")
-    params: tuple[int, int, int] | None = None
-    with (
-        atomic_output_path(destination, overwrite=True) as temporary,
-        wave.open(str(temporary), "wb") as writer,
-    ):
-        for path in paths:
-            with wave.open(str(path), "rb") as source:
-                current = (
-                    source.getnchannels(),
-                    source.getsampwidth(),
-                    source.getframerate(),
-                )
-                if params is None:
-                    params = current
-                    writer.setnchannels(params[0])
-                    writer.setsampwidth(params[1])
-                    writer.setframerate(params[2])
-                elif params != current:
-                    raise ArtifactError(
-                        "Synthesized chunks have incompatible WAV formats"
-                    )
-                while frames := source.readframes(64 * 1024):
-                    writer.writeframesraw(frames)
-        if params is None:
-            raise ArtifactError("Synthesis produced no readable WAV chunks")
+def _normalize_synthesis_chunks(
+    node: PlanNode,
+    chunk_paths: list[Path],
+    *,
+    preferred_sample_rate: int,
+) -> tuple[int, int, int]:
+    speech_paths = tuple(
+        path
+        for chunk, path in zip(node.chunks, chunk_paths, strict=True)
+        if _PAUSE.fullmatch(chunk) is None
+    )
+    if not speech_paths:
+        return 1, 2, preferred_sample_rate
+    params = tuple(_wav_params(path) for path in speech_paths)
+    if all(item == params[0] for item in params[1:]):
+        return params[0]
+    for path in speech_paths:
+        normalized = path.with_name(f"{path.stem}.normalized.wav")
+        try:
+            master_wav(
+                path,
+                normalized,
+                sample_rate=preferred_sample_rate,
+                normalize=False,
+                overwrite=True,
+            )
+            normalized.replace(path)
+        finally:
+            normalized.unlink(missing_ok=True)
+    normalized_params = tuple(_wav_params(path) for path in speech_paths)
+    if any(item != normalized_params[0] for item in normalized_params[1:]):
+        raise ArtifactError("Could not normalize synthesized WAV chunk formats")
+    return normalized_params[0]
 
 
-def _write_silence(path: Path, milliseconds: int, *, sample_rate: int) -> None:
-    remaining = int(sample_rate * milliseconds / 1_000)
-    with (
-        atomic_output_path(path, overwrite=True) as temporary,
-        wave.open(str(temporary), "wb") as writer,
-    ):
-        writer.setnchannels(1)
-        writer.setsampwidth(2)
-        writer.setframerate(sample_rate)
-        silence = b"\0\0" * min(64 * 1024, remaining)
-        while remaining:
-            frames = min(remaining, len(silence) // 2)
-            writer.writeframesraw(silence[: frames * 2])
-            remaining -= frames
+def _materialize_pause_chunks(
+    node: PlanNode,
+    chunk_paths: list[Path],
+    params: tuple[int, int, int],
+) -> None:
+    channels, sample_width, sample_rate = params
+    for chunk, path in zip(node.chunks, chunk_paths, strict=True):
+        pause = _PAUSE.fullmatch(chunk)
+        if pause is not None:
+            write_silence(
+                path,
+                int(pause.group(1)),
+                sample_rate=sample_rate,
+                channels=channels,
+                sample_width=sample_width,
+            )
+
+
+def _wav_params(path: Path) -> tuple[int, int, int]:
+    try:
+        with wave.open(str(path), "rb") as source:
+            if source.getnframes() < 1:
+                raise ArtifactError(f"Synthesized WAV contains no frames: {path}")
+            return (
+                source.getnchannels(),
+                source.getsampwidth(),
+                source.getframerate(),
+            )
+    except (OSError, EOFError, wave.Error) as error:
+        raise ArtifactError(
+            f"Synthesized chunk is not a readable WAV: {path}"
+        ) from error
+
+
+def _node_boundaries(node: PlanNode) -> tuple[str, ...]:
+    if node.chunk_boundaries:
+        return node.chunk_boundaries
+    return tuple("end" for _ in node.chunks)
 
 
 def _speech_request_fingerprint(request: SpeechSynthesisRequest) -> str:
@@ -2390,7 +3031,7 @@ def _cached_chunk(workspace: Path, fingerprint: str) -> Path | None:
             or not _is_readable_wav(audio)
         ):
             return None
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return None
     return audio
 
@@ -2433,8 +3074,9 @@ def _is_readable_wav(path: Path) -> bool:
                 source.getnchannels() > 0
                 and source.getsampwidth() > 0
                 and source.getframerate() > 0
+                and source.getnframes() > 0
             )
-    except (OSError, EOFError, wave.Error):
+    except OSError, EOFError, wave.Error:
         return False
 
 
@@ -2456,8 +3098,20 @@ def _audition_text(document: NormalizedDocument, chapter_selector: str | None) -
             segment.text
             for segment in chapter.segments
             if isinstance(segment, SpeechSegment)
-        )[:1_000]
+        )
     raise BuildError("No chapter is available for audition")
+
+
+def _preview_sample(text: str, profile: BackendProfile) -> str:
+    maximum = (
+        CHATTERBOX_CHUNK_CHARACTERS
+        if isinstance(profile.options, ChatterboxOptions)
+        else 1_000
+    )
+    chunks = chunk_text(text, maximum)
+    if not chunks:
+        raise BuildError("Preview text must not be empty")
+    return chunks[0]
 
 
 def _preflight_for_plan(
@@ -2512,6 +3166,15 @@ def _preflight_for_plan(
         )
         for characters in chapter_characters.values()
     )
+    short_utterance_chunks = (
+        sum(
+            marker is not None
+            for node in synthesis_nodes
+            for marker in _node_short_utterances(node)
+        )
+        if manifest.short_utterances.strategy is ShortUtteranceStrategy.CONTEXT_EXTRACT
+        else 0
+    )
     storage_path = _nearest_existing_parent(target.output_root)
     return BuildPreflight(
         target=plan.target,
@@ -2528,6 +3191,10 @@ def _preflight_for_plan(
         change_summary=_compare_to_previous_success(manifest, plan),
         from_stage=from_stage,
         through_stage=through_stage,
+        short_utterance_chunks=short_utterance_chunks,
+        maximum_short_utterance_generations=(
+            short_utterance_chunks * manifest.short_utterances.candidate_count
+        ),
     )
 
 
@@ -2536,28 +3203,37 @@ def _uncached_synthesis_texts(
     profile: BackendProfile,
     nodes: tuple[PlanNode, ...],
 ) -> tuple[str, ...]:
-    (
-        voice,
-        sample_rate,
-        project,
-        use_hd,
-        reference_audio,
-        chatterbox,
-    ) = _resolved_speech(profile, manifest)
     texts: list[str] = []
     for node in nodes:
-        for chunk in node.chunks:
+        routes = _node_routes(node, profile)
+        for index, (chunk, route) in enumerate(
+            zip(node.chunks, routes, strict=True), start=1
+        ):
             if _PAUSE.fullmatch(chunk) is not None:
                 continue
+            routed_profile = _profile_from_route(manifest, route, profile)
+            (
+                voice,
+                sample_rate,
+                project,
+                use_hd,
+                reference_audio,
+                chatterbox,
+            ) = _resolved_speech(routed_profile, manifest)
             request = _new_speech_request(
                 chunk,
-                profile=profile,
+                profile=routed_profile,
                 voice=voice,
                 sample_rate=sample_rate,
                 project=project,
                 use_hd=use_hd,
                 reference_audio=reference_audio,
-                chatterbox=chatterbox,
+                chatterbox=_chunk_chatterbox(
+                    chatterbox,
+                    chapter_id=node.chapter_id,
+                    chunk_index=index,
+                    text=chunk,
+                ),
             )
             if (
                 _cached_chunk(
@@ -2597,6 +3273,7 @@ def _select_stages(
         fingerprint=fingerprint,
         nodes=plan.nodes,
         complete_document=plan.complete_document,
+        attribution_findings=plan.attribution_findings,
     )
     return effective, selected, start, end
 
@@ -3011,6 +3688,21 @@ def _failed_node_detail(journal: RunJournal, node_id: str) -> str | None:
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^\w-]+", "-", value.casefold()).strip("-") or "audiobook"
+
+
+def _chapter_token_aliases(
+    manifest: AudiobookManifest,
+) -> dict[str, tuple[str, ...]]:
+    short_aliases = manifest.short_utterances.alignment_alias_map
+    chapter_aliases = manifest.whisper_qa.manuscript_alias_map
+    return {
+        word: tuple(
+            dict.fromkeys(
+                (*short_aliases.get(word, ()), *chapter_aliases.get(word, ()))
+            )
+        )
+        for word in sorted(short_aliases.keys() | chapter_aliases.keys())
+    }
 
 
 def _assembly_fingerprint(

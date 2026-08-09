@@ -118,10 +118,11 @@ def test_ci_installs_ffmpeg_on_every_supported_runner_and_allows_only_local_ipc(
     for runner in ("Linux", "macOS", "Windows"):
         assert f"runner.os == '{runner}'" in workflow
     assert 'python: "3.12"' not in workflow
-    assert all(
-        'python-version: "3.12"' not in path.read_text(encoding="utf-8")
-        for path in (root / ".github" / "workflows").glob("*.yml")
-    )
+    assert 'python: "3.13"' not in workflow
+    for path in (root / ".github" / "workflows").glob("*.yml"):
+        content = path.read_text(encoding="utf-8")
+        assert 'python-version: "3.12"' not in content
+        assert 'python-version: "3.13"' not in content
     assert "--disable-socket" not in project
     assert "localhost,127.0.0.0/8,::1/128" in project
     assert "--allow-unix-socket" in project
@@ -177,6 +178,9 @@ def test_live_workflow_and_canaries_are_explicitly_bounded() -> None:
     local = (root / "tests" / "live" / "test_local_chatterbox_live.py").read_text(
         encoding="utf-8"
     )
+    local_e2e = (root / "tests" / "live" / "test_local_chatterbox_e2e.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "workflow_dispatch:" in workflow
     assert "schedule:" not in workflow
@@ -186,4 +190,9 @@ def test_live_workflow_and_canaries_are_explicitly_bounded() -> None:
     assert "max_attempts=1" in resemble
     assert 'text="Hi."' in local
     assert "threads_per_process=1" in local
+    assert 'YAKBOX_RUN_LOCAL_E2E") != "1"' in local_e2e
+    assert "YAKBOX_NARRATION_REVIEW" in local_e2e
+    assert (root / "tests" / "live" / "test_narration_review.py").is_file()
+    assert "local_e2e:" in workflow
+    assert "Upload narration QA package" in workflow
     assert "self-hosted" in workflow

@@ -30,7 +30,7 @@ rights_basis = "not_applicable"
 [profiles.local]
 backend = "chatterbox-local"
 voice = "narrator"
-device = "auto"
+device = "cpu"
 cfg_weight = 0.5
 exaggeration = 0.5
 seed = 42
@@ -41,7 +41,7 @@ worker_timeout_seconds = 3600
 [targets.default]
 profile = "local"
 output_root = "build/yakbox"
-chunk_chars = 2800
+chunk_chars = 500
 mastering = true
 wav_sample_rate = 44100
 mp3_bitrate = "192k"
@@ -72,11 +72,162 @@ audio. Profiles describe backend render settings. Targets describe execution,
 formats, limits, and output policy. Keeping those concerns separate allows the
 same narrator identity to be auditioned on more than one backend.
 
+Local Chatterbox defaults to `cpu`. Set `device = "auto"` only when Yakbox
+should select CUDA, then MPS, then CPU from the available PyTorch runtimes.
+Chatterbox requests are capped at 500 characters even when a target declares a
+larger generic `chunk_chars` value. The base seed defaults to `0`; each request
+derives a stable chunk-specific seed from it.
+
+## Character voices and performance
+
+Map the narrator and each speaking character to a declared profile. Character
+names are lowercase identifiers because the same names appear in source
+directives and plan output.
+
+```toml
+[characters.narrator]
+display_name = "Narrator"
+profile = "andy-minter"
+gender = "male"
+
+[characters.character-1]
+display_name = "Character 1"
+profile = "caro-davy"
+gender = "female"
+cfg_weight = 0.34
+exaggeration = 0.44
+seed = 42
+
+[characters.character-2]
+display_name = "Character 2"
+profile = "nick-whitley"
+gender = "male"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+
+[characters.character-3]
+display_name = "Character 3"
+profile = "ruth-golding"
+gender = "female"
+
+[characters.character-4]
+display_name = "Character 4"
+profile = "bill-boerst"
+gender = "male"
+
+[characters.character-5]
+display_name = "Character 5"
+profile = "stuart-bell"
+gender = "male"
+
+[dialogue]
+attribution_assistance = "warn"
+short_utterance_words = 3
+
+[whisper_qa]
+chapter_verification = true
+cache_enabled = true
+cache_directory = ".yakbox/cache/whisper"
+join_coalesce_gap_ms = 100
+manuscript_aliases = { mara = ["marah"] }
+phoneme_alignment = true
+phoneme_backend = "wav2vec2-ctc"
+phoneme_model = "facebook/wav2vec2-lv-60-espeak-cv-ft"
+phoneme_revision = "c43348bbaa5a77692c8e7bf3409d683474fdf2a4"
+phoneme_language = "en-us"
+minimum_phoneme_confidence = 0.2
+
+[short_utterances]
+strategy = "context_extract"
+maximum_words = 3
+candidate_count = 5
+prefer_natural_context = true
+carrier_positions = ["middle"]
+alignment_backend = "mlx-whisper"
+alignment_model = "mlx-community/whisper-large-v3-turbo"
+alignment_revision = "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+alignment_aliases = { liora = ["leora"] }
+decode_consensus = true
+prompt_sensitivity = true
+maximum_consensus_timing_delta_ms = 180
+hallucination_silence_threshold = 0.8
+automatic_join_inspection = true
+join_inspection_window_seconds = 1.5
+minimum_alignment_confidence = 0.5
+minimum_extracted_confidence = 0.2
+minimum_one_word_confidence = 0.6
+minimum_short_phrase_confidence = 0.5
+maximum_segment_temperature = 0.2
+candidate_confidence_tolerance = 0.05
+maximum_extra_speech_ms = 60
+acoustic_refinement = true
+acoustic_threshold_dbfs = -48.0
+speech_island_gap_ms = 300
+minimum_edge_silence_ms = 10
+maximum_edge_silence_ms = 120
+minimum_pause_ms = 180
+pre_roll_ms = 30
+post_roll_ms = 40
+fade_ms = 8
+failure = "error"
+require_review_for_one_word = true
+keep_candidates = true
+```
+
+The bundled local example continues the generic mapping through
+`character-24`: Karen Savage, Elizabeth Klett, Cori Samuel, Mil Nicholson, and
+Lucy Burgoyne occupy female slots 6–10; Mark F. Smith, Bob Neufeld, Mark
+Nelson, David Barnes, Adrian Praetzellis, Gregg Margarite, David Clarke, Martin
+Geeson, Phil Chenevert, and Peter Yearsley occupy male slots 11–20; Kara
+Shallenberg, Kirsten Ferreri, Sibella Denton, and Laurie Anne Walden occupy
+female slots 21–24. These are editable defaults, not inferred casting rules.
+
+The settings under a character override that character's Chatterbox profile.
+They don't change the profile used by anyone else. All routed profiles must use
+the narrator's backend, executor, and Chatterbox device so one open worker can
+switch voices safely between chunks.
+
+`gender` is role metadata and accepts `female`, `male`, or `unspecified`. It
+does not select or transform a voice. Choose the actual voice with `profile`;
+this keeps role metadata separate from synthesis behavior.
+
+Change `characters.narrator.profile` to select a different default narrator.
+Keep `targets.default.profile` set to the same profile so the target remains
+clear to readers and continues to work if the character map is removed.
+
+Short-utterance context extraction is opt-in; omit its table or use
+`strategy = "direct"` to retain ordinary synthesis. On Apple Silicon,
+`context_extract` uses the optional local MLX Whisper adapter to verify and
+time every marked narrator or character chunk at or below `maximum_words`.
+Candidate count, carrier position, confidence, timing, crop padding, review,
+and retention behavior are manifest settings. A custom alignment model must
+provide an immutable `alignment_revision`. The default model revision is also
+pinned explicitly above so project intent remains visible. Explicit
+`alignment_aliases` handle reviewed ASR spelling variants for invented names;
+they canonicalize exact single tokens and do not alter synthesis text or permit
+extra words.
+
+`whisper_qa.chapter_verification` adds a managed chapter-verification node and
+blocks MP3 encoding and release publication when it fails. The
+content-addressed cache is workspace-scoped and may be moved or disabled
+without changing output semantics. Reviewed single-token spelling and
+homophone variants belong in `whisper_qa.manuscript_aliases`; unlike
+`short_utterances.alignment_aliases`, they affect only the final chapter
+comparison and do not invalidate synthesized short-utterance candidates.
+`phoneme_alignment` adds an independent
+IPA/CTC forced-alignment gate to context-extracted short utterances; it requires
+the `phoneme` extra, the pinned model, and the external eSpeak NG executable.
+
 ## Markdown normalization
 
 Level-one and level-two headings start chapters. Speakable paragraphs, lists,
 quotes, and link text are normalized through CommonMark. Code and non-speech
 markup are not treated as narration.
+
+Speech chunks prefer paragraph, sentence, clause, and word boundaries in that
+order and never split a Unicode grapheme. Plans record the chosen boundary;
+assembly applies stable boundary spacing and short PCM fades.
 
 Use namespaced HTML comments when printed and spoken text differ:
 
@@ -93,6 +244,71 @@ This narration-only bridge is spoken.
 
 <!-- yakbox:speech:pause ms=750 -->
 ```
+
+Route one paragraph by placing a speaker directive on its own line immediately
+before that paragraph:
+
+```markdown
+The receiver woke with a pale blue pulse.
+
+<!-- yakbox:speech:speaker name=character-2 -->
+
+“Step away from the console,” the second technician said. “If it recognizes
+us, we may never get another chance to leave.”
+
+<!-- yakbox:speech:speaker name=character-1 -->
+
+“We have waited years for this answer,” the first technician said. “I will not
+let fear choose for us now.”
+
+The signal sharpened. Every unmarked paragraph returns to the narrator.
+```
+
+A speaker directive applies to exactly the next spoken paragraph. Within a
+routed paragraph, paired straight, curly, or guillemet double quotation marks
+identify the character's spoken text. Yakbox routes the quoted spans to the
+character and surrounding action or attribution such as `Wren said` back to the
+narrator. The paired quote delimiters identify the route but are not submitted
+to speech synthesis; punctuation inside them is preserved. A routed paragraph
+without paired double quotation marks remains one character turn. The directive
+does not remain active and cannot be placed inline. `yakbox plan --json` records
+the resolved speaker, profile, and performance settings for every speech chunk.
+
+To retry one narrator paragraph with another declared profile while preserving
+the logical narrator and dialogue parsing, add `profile=` to the one-shot
+directive:
+
+```markdown
+<!-- yakbox:speech:speaker name=narrator profile=narrator-retry -->
+
+“No cameras,” the clerk said.
+```
+
+The override profile must exist in `[profiles]`. It affects only that paragraph
+and is included in source identity, planning, and artifact lineage.
+For routed character dialogue, `narrator_profile=` retries only the surrounding
+action or attribution while preserving the configured character voice:
+
+```markdown
+<!-- yakbox:speech:speaker name=liora narrator_profile=narrator-retry -->
+
+"Quill," Liora said.
+```
+
+Speaker changes inside one source paragraph preserve their local punctuation:
+commas use the configured clause pause, sentence-ending punctuation uses the
+sentence pause, and only the final routed span uses the paragraph pause. This
+avoids inserting a full paragraph break between a line and its attribution.
+Artifact sidecars keep the primary narrator in `logical_voice` for backward
+compatibility and list the complete routed cast in `logical_voices`.
+
+Attribution assistance is advisory and never rewrites the manuscript. In
+`warn` mode, `validate` and `plan` report quoted paragraphs that still use the
+narrator, very short routed turns, and adjacent characters that share one
+voice. Use `off` to suppress the findings or `error` to make any finding fail
+validation. A line such as “No.” often sounds abrupt when rendered alone;
+keeping it inside a fuller attributed turn usually gives the model enough
+context for a natural read.
 
 Directives are paired, validated with source locations, and bounded by
 `source.max_pause_ms`. `yakbox validate` and `yakbox plan` perform no model
@@ -119,7 +335,10 @@ notes = "Auditioned in the selected narrator voice."
 
 Only enabled, approved entries are applied. Replacement is deterministic and
 non-recursive. A source or pronunciation change invalidates only dependent
-nodes.
+nodes. Explicit `yakbox audition --text/--text-file` and `yakbox preview`
+samples apply the same manifest lexicon as chapter-derived samples and
+production builds, so a voice comparison does not silently bypass a tested
+pronunciation.
 
 Audit the lexicon before a paid or long local render:
 

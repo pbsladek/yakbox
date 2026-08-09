@@ -3,10 +3,12 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import os
+import platform
 import shutil
 import sys
 import tempfile
 import time
+import wave
 from pathlib import Path
 
 import httpx
@@ -22,6 +24,13 @@ from yakbox.diagnostics.models import (
     DoctorReport,
 )
 from yakbox.errors import ConfigurationError, ValidationError
+from yakbox.local_alignment import MlxWhisperAligner
+from yakbox.speech.short_utterances import ShortUtteranceStrategy
+from yakbox.whisper_models import (
+    DEFAULT_WHISPER_MODEL,
+    DEFAULT_WHISPER_REVISION,
+    model_status,
+)
 
 MIN_FREE_BYTES = 1_000_000_000
 
@@ -33,6 +42,7 @@ async def run_doctor(
     target: str | None = None,
     network: bool = False,
     deep: bool = False,
+    whisper: bool = False,
     api_key: str | None = None,
 ) -> DoctorReport:
     """Inspect installation, workspace, and optional backend readiness."""
@@ -63,7 +73,222 @@ async def run_doctor(
             deep=deep,
         )
     )
+    alignment = _infer_alignment(manifest)
+    if whisper or deep or alignment is not None:
+        model, revision, required = alignment or (
+            DEFAULT_WHISPER_MODEL,
+            DEFAULT_WHISPER_REVISION,
+            False,
+        )
+        checks.extend(
+            await _whisper_checks(
+                model,
+                revision,
+                required=required,
+                deep=deep,
+            )
+        )
     return DoctorReport(schema_version=1, diagnostics=tuple(checks))
+
+
+def _infer_alignment(path: Path | None) -> tuple[str, str | None, bool] | None:
+    if path is None:
+        return None
+    try:
+        policy = load_manifest(path).short_utterances
+    except ValidationError:
+        return None
+    if policy.strategy is not ShortUtteranceStrategy.CONTEXT_EXTRACT:
+        return None
+    return policy.alignment_model, policy.alignment_revision, True
+
+
+async def _whisper_checks(
+    model: str,
+    revision: str | None,
+    *,
+    required: bool,
+    deep: bool,
+) -> list[Diagnostic]:
+    status = model_status(model, revision)
+    failing_status = DiagnosticStatus.FAIL if required else DiagnosticStatus.WARN
+    failing_severity = (
+        DiagnosticSeverity.ERROR if required else DiagnosticSeverity.WARNING
+    )
+    checks = [
+        Diagnostic(
+            id="alignment.whisper.platform",
+            status=(
+                DiagnosticStatus.PASS
+                if sys.platform == "darwin" and platform.machine() == "arm64"
+                else failing_status
+            ),
+            severity=(
+                DiagnosticSeverity.INFO
+                if sys.platform == "darwin" and platform.machine() == "arm64"
+                else failing_severity
+            ),
+            summary=f"Whisper platform is {sys.platform}/{platform.machine()}",
+            action=(
+                None
+                if sys.platform == "darwin" and platform.machine() == "arm64"
+                else "Use Apple Silicon for the supported MLX Whisper runtime"
+            ),
+        ),
+        Diagnostic(
+            id="alignment.whisper.package",
+            status=(
+                DiagnosticStatus.PASS
+                if status.mlx_whisper_available
+                else failing_status
+            ),
+            severity=(
+                DiagnosticSeverity.INFO
+                if status.mlx_whisper_available
+                else failing_severity
+            ),
+            summary=(
+                "MLX Whisper package is available"
+                if status.mlx_whisper_available
+                else "MLX Whisper package is not installed"
+            ),
+            action=(
+                None
+                if status.mlx_whisper_available
+                else "Install alignment support with: uv sync --extra alignment"
+            ),
+        ),
+        Diagnostic(
+            id="alignment.whisper.model",
+            status=DiagnosticStatus.PASS if status.verified else failing_status,
+            severity=DiagnosticSeverity.INFO if status.verified else failing_severity,
+            summary=(
+                "Pinned Whisper model verified "
+                f"({status.size_bytes / (1024**3):.2f} GiB)"
+                if status.verified
+                else "Pinned Whisper model is not ready"
+            ),
+            detail=", ".join(status.issues) or str(status.local_path),
+            action=(None if status.verified else "Run: yakbox whisper models install"),
+            evidence={
+                "model": model,
+                "revision": revision,
+                "path": str(status.local_path) if status.local_path else None,
+                "fingerprint": status.fingerprint,
+                "file_count": status.file_count,
+            },
+        ),
+    ]
+    free_bytes = shutil.disk_usage(Path.cwd()).free
+    checks.append(
+        Diagnostic(
+            id="alignment.whisper.storage",
+            status=(
+                DiagnosticStatus.PASS
+                if free_bytes >= MIN_FREE_BYTES
+                else DiagnosticStatus.WARN
+            ),
+            severity=(
+                DiagnosticSeverity.INFO
+                if free_bytes >= MIN_FREE_BYTES
+                else DiagnosticSeverity.WARNING
+            ),
+            summary=f"{free_bytes / (1024**3):.1f} GiB workspace storage available",
+            evidence={"free_bytes": free_bytes},
+        )
+    )
+    physical_memory = _physical_memory_bytes()
+    required_memory = max(4_000_000_000, status.size_bytes * 2)
+    memory_ready = physical_memory is None or physical_memory >= required_memory
+    checks.append(
+        Diagnostic(
+            id="alignment.whisper.memory",
+            status=DiagnosticStatus.PASS if memory_ready else DiagnosticStatus.WARN,
+            severity=(
+                DiagnosticSeverity.INFO if memory_ready else DiagnosticSeverity.WARNING
+            ),
+            summary=(
+                "Physical memory could not be measured"
+                if physical_memory is None
+                else f"{physical_memory / (1024**3):.1f} GiB physical memory"
+            ),
+            detail=(
+                "The platform does not expose physical page counts"
+                if physical_memory is None
+                else None
+            ),
+            action=(
+                "Close memory-heavy applications before loading Whisper"
+                if not memory_ready
+                else None
+            ),
+            evidence={
+                "physical_bytes": physical_memory,
+                "estimated_required_bytes": required_memory,
+            },
+        )
+    )
+    if deep and status.verified and status.mlx_whisper_available:
+        checks.append(await _whisper_deep(model, revision))
+    else:
+        checks.append(
+            Diagnostic(
+                id="alignment.whisper.runtime",
+                status=DiagnosticStatus.SKIP,
+                severity=DiagnosticSeverity.INFO,
+                summary="Deep Whisper model-load smoke test not requested",
+                action="Run yakbox doctor --whisper --deep",
+                skipped_by_policy=True,
+            )
+        )
+    return checks
+
+
+def _physical_memory_bytes() -> int | None:
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        physical_pages = os.sysconf("SC_PHYS_PAGES")
+    except AttributeError, OSError, ValueError:
+        return None
+    if not isinstance(page_size, int) or not isinstance(physical_pages, int):
+        return None
+    return page_size * physical_pages
+
+
+async def _whisper_deep(model: str, revision: str | None) -> Diagnostic:
+    started = time.monotonic()
+    try:
+        with tempfile.TemporaryDirectory(prefix="yakbox-whisper-doctor-") as raw:
+            audio = Path(raw) / "silence.wav"
+            with wave.open(str(audio), "wb") as writer:
+                writer.setnchannels(1)
+                writer.setsampwidth(2)
+                writer.setframerate(16_000)
+                writer.writeframes(bytes(16_000 // 4 * 2))
+            result = await MlxWhisperAligner(
+                model=model,
+                revision=revision,
+                timeout_seconds=180,
+                prompted_timing=False,
+            ).align(audio, "", language="en")
+        return Diagnostic(
+            id="alignment.whisper.runtime",
+            status=DiagnosticStatus.PASS,
+            severity=DiagnosticSeverity.INFO,
+            summary="Whisper model loaded and accepted word-timestamp mode",
+            elapsed_seconds=time.monotonic() - started,
+            evidence={"backend": result.backend, "parser_issues": list(result.issues)},
+        )
+    except Exception as error:  # noqa: BLE001 - diagnostic must report optional runtime failures.
+        return Diagnostic(
+            id="alignment.whisper.runtime",
+            status=DiagnosticStatus.FAIL,
+            severity=DiagnosticSeverity.ERROR,
+            summary="Whisper deep runtime smoke test failed",
+            detail=_redact(str(error)),
+            action="Run yakbox whisper models verify, then inspect the local runtime",
+            elapsed_seconds=time.monotonic() - started,
+        )
 
 
 def _load_config_check() -> tuple[YakboxConfig | None, Diagnostic]:

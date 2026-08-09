@@ -7,15 +7,14 @@ name = "yakbox"
 version = "0.1.0"
 description = "A local-first, reproducible audiobook build system"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14,<3.15"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [{ name = "yakbox contributors" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
@@ -23,6 +22,7 @@ dependencies = [
     "click>=8.3.1,<9",
     "httpx>=0.28.1,<1",
     "markdown-it-py>=4.0,<5",
+    "regex>=2026.7.19,<2027",
     "rich>=15.0,<16",
 ]
 
@@ -40,6 +40,15 @@ local = [
     "starlette>=1.3.1",
     "torch==2.13.0",
     "torchaudio==2.11.0",
+    "torchcodec>=0.13,<0.14",
+    "transformers>=5.5.0",
+]
+alignment = [
+    "mlx-whisper>=0.4.3,<0.5 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
+phoneme = [
+    "huggingface-hub>=1.4,<2",
+    "torch==2.13.0",
     "transformers>=5.5.0",
 ]
 
@@ -92,6 +101,7 @@ override-dependencies = [
 [tool.uv.build-backend]
 module-name = "yakbox"
 source-include = [
+    "THIRD_PARTY_NOTICES.md",
     "constraints/**",
     "docs/**",
     "examples/**",
@@ -199,7 +209,7 @@ max_stack_depth = 8
 on_dependency_change = "rerun"
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 line-length = 88
 src = ["src", "tests"]
 
@@ -242,7 +252,7 @@ max-positional-args = 5
 "tests/**/*.py" = ["PLR2004", "S101"]
 
 [tool.ty.environment]
-python-version = "3.13"
+python-version = "3.14"
 
 [tool.ty.src]
 include = ["src", "tests"]

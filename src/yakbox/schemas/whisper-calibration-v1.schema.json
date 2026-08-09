@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/whisper-calibration-v1.schema.json",
+  "title": "yakbox Whisper calibration",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "corpus_sha256", "thresholds_fingerprint", "benchmark_fingerprint", "case_count", "false_accepts", "false_rejects", "token_accuracy", "mean_crop_error_ms", "consonant_case_accuracy", "mean_listening_score", "runtime_seconds", "peak_memory_bytes", "cases"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/whisper-calibration-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "corpus_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "thresholds_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "benchmark_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "case_count": {"type": "integer", "minimum": 1},
+    "false_accepts": {"type": "integer", "minimum": 0},
+    "false_rejects": {"type": "integer", "minimum": 0},
+    "token_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+    "mean_crop_error_ms": {"type": "number", "minimum": 0},
+    "consonant_case_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+    "mean_listening_score": {"type": "number", "minimum": 1, "maximum": 5},
+    "runtime_seconds": {"type": "number", "minimum": 0},
+    "peak_memory_bytes": {"type": "integer", "minimum": 0},
+    "cases": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

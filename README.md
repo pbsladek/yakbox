@@ -9,7 +9,7 @@ backends also power direct text-to-speech commands.
 
 ## Install
 
-Yakbox requires Python 3.13 or newer. Install the CLI with
+Yakbox supports Python 3.14 only. Install the CLI with
 [uv](https://docs.astral.sh/uv/):
 
 ```console
@@ -70,6 +70,16 @@ RESEMBLE_API_KEY=... yakbox cloud tts "A hosted test." \
 
 Use only voices and reference audio for which you have the necessary rights
 and consent.
+
+The local Chatterbox example includes four public-domain LibriVox prompts with
+verified provenance and checksums. See the
+[third-party notices](THIRD_PARTY_NOTICES.md) and
+[licensing policy](docs/licensing.md).
+
+For one- to three-word dialogue, Yakbox can generate longer carrier sentences,
+use local Whisper to crop and verify the target, and stop for a hash-bound
+listening review. See [Whisper inspection and short-audio
+QA](docs/whisper-and-short-audio.md).
 
 ## Documentation
 
