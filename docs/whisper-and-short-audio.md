@@ -70,6 +70,40 @@ yakbox whisper reinspect paragraph.wav \
 This uses Whisper's clip-timestamp path. Times in the report remain relative to
 the original audio, so they can be compared directly with an editor timeline.
 
+## Qualify synthesized voice profiles
+
+Voice-reference quality must be measured through the synthesizer. A clear
+source recording can still clone poorly, so `qualify-voices` consumes the WAVs
+and `audition.json` produced by `yakbox audition`, not the source prompts.
+Every profile must synthesize exactly the same sustained passage.
+
+```console
+yakbox audition yakbox.toml \
+  --profile andy-minter --profile ruth-golding \
+  --profile caro-davy --profile nick-whitley \
+  --profile candidate-voice \
+  --text-file voice-quality.txt
+
+yakbox whisper qualify-voices artifacts/auditions/RUN_ID/audition.json \
+  --expected-file voice-quality.txt \
+  --baseline andy-minter --baseline ruth-golding \
+  --baseline caro-davy --baseline nick-whitley \
+  --out artifacts/auditions/RUN_ID/voice-quality.json
+```
+
+The baseline voices must already have passed human listening review. Yakbox
+derives conservative thresholds from that cohort and checks transcript
+accuracy, word confidence, independent-decode agreement, segment log
+probability, compression and no-speech evidence, clipping, boundary jumps, VAD
+disagreement, stationary tones, and leading or trailing silence. Results are
+`baseline`, `high_quality`, `suspect`, or `baseline_invalid`; any suspect voice
+makes the command exit nonzero.
+
+Pitch, accent, timbre, and speaking rate are descriptive only. They are not
+quality gates. Whisper also cannot prove that a performance is pleasant,
+emotionally appropriate, or free of every subtle artifact, so automated
+qualification supplements rather than replaces a short listening review.
+
 ## Verify a complete chapter
 
 ```console
@@ -101,33 +135,29 @@ artifact.
 
 ## Inspect every audio join
 
-Create a JSON join spec from the same timeline or assembly data used to make the
+Create a YAML join specification from the same timeline or assembly data used to make the
 chapter:
 
-```json
-{
-  "joins": [
-    {
-      "at_seconds": 12.48,
-      "boundary": "dialogue",
-      "expected_before": "Wren asked.",
-      "expected_after": "Anyone touch him?"
-    },
-    {
-      "at_seconds": 18.02,
-      "boundary": "sentence"
-    }
-  ]
-}
+```yaml
+joins:
+  - at_seconds: 12.48
+    boundary: dialogue
+    expected_before: Wren asked.
+    expected_after: Anyone touch him?
+  - at_seconds: 18.02
+    boundary: sentence
 ```
 
 Then inspect all joins in one run:
 
 ```console
 yakbox whisper inspect-joins build/mastered/0001-room-609.wav \
-  --spec build/0001-room-609.joins.json \
+  --spec build/0001-room-609.joins.yaml \
   --out build/reports/0001-room-609.joins.json
 ```
+
+Join configuration accepts only `.yaml` or `.yml`. The `--out` file is a
+generated, schema-versioned report and therefore remains JSON.
 
 Each join gets a targeted decode-consensus pass plus a PCM check at the exact
 sample boundary. Yakbox reports transcript mismatches, repeated words or

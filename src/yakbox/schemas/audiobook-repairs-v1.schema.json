@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-repairs-v1.schema.json",
+  "title": "yakbox approved localized audio repairs",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "target", "repairs"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-repairs-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "target": {"type": "string"},
+    "repairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["chunk_id", "text_sha256", "profile", "audio_path", "audio_sha256", "source", "repair_id", "take", "fingerprint"],
+        "properties": {
+          "chunk_id": {"type": "string", "pattern": "^[0-9a-f]{24}$"},
+          "text_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "profile": {"type": "string"},
+          "audio_path": {"type": "string"},
+          "audio_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "source": {"$ref": "#/$defs/sourceLocation"},
+          "repair_id": {"type": "string"},
+          "take": {"type": "integer", "minimum": 1},
+          "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "sourceLocation": {
+      "type": "object",
+      "required": ["path", "start_line", "end_line"],
+      "properties": {
+        "path": {"type": "string"},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

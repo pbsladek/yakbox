@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import tomllib
 from collections.abc import Coroutine
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,6 +54,87 @@ def test_whisper_and_short_review_commands_are_discoverable() -> None:
     assert {"list", "play", "approve", "reject"}.issubset(set(review.output.split()))
 
 
+def test_localized_repair_cli_generates_approves_and_explains(
+    book_workspace: Path,
+) -> None:
+    runner = CliRunner()
+    manifest = book_workspace / "yakbox.toml"
+    built = runner.invoke(
+        main,
+        ["--json", "build", str(manifest), "--through", "synthesize"],
+    )
+    assert built.exit_code == 0, built.output
+    planned = runner.invoke(main, ["--json", "plan", str(manifest)])
+    plan_data = json.loads(planned.output)["data"]
+    synthesis = next(
+        node for node in plan_data["nodes"] if node["stage"] == "synthesize"
+    )
+    chunk_id = synthesis["chunks"][0]["id"]
+
+    generated = runner.invoke(
+        main,
+        [
+            "--json",
+            "repair",
+            "generate",
+            str(manifest),
+            "--chunk-id",
+            chunk_id,
+            "--mode",
+            "target-only",
+            "--takes",
+            "2",
+            "--no-whisper",
+        ],
+    )
+    assert generated.exit_code == 0, generated.output
+    session = json.loads(generated.output)["data"]
+    validate_contract("audiobook-repair-session", session)
+    assert len(session["takes"]) == 2
+
+    approved = runner.invoke(
+        main,
+        [
+            "--json",
+            "repair",
+            "approve",
+            session["repair_id"],
+            str(manifest),
+            "--take",
+            "1",
+            "--no-rebuild",
+        ],
+    )
+    assert approved.exit_code == 0, approved.output
+    explained = runner.invoke(
+        main,
+        [
+            "--json",
+            "artifacts",
+            "cache",
+            "why-miss",
+            chunk_id,
+            str(manifest),
+        ],
+    )
+    assert explained.exit_code == 0, explained.output
+    assert json.loads(explained.output)["data"]["status"] == "approved_repair"
+
+    located = runner.invoke(
+        main,
+        [
+            "--json",
+            "repair",
+            "locate",
+            synthesis["chapter_id"],
+            "0",
+            str(manifest),
+        ],
+    )
+    assert located.exit_code == 0, located.output
+    validate_contract("audiobook-repair-location", json.loads(located.output)["data"])
+
+
 def test_new_whisper_qa_commands_emit_observable_json_contracts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -61,8 +143,8 @@ def test_new_whisper_qa_commands_emit_observable_json_contracts(
     audio.write_bytes(b"placeholder")
     manuscript = tmp_path / "chapter.md"
     manuscript.write_text("# One\n\nWren asked.\n", encoding="utf-8")
-    join_spec = tmp_path / "joins.json"
-    join_spec.write_text('{"joins": [{"at_seconds": 1.0}]}', encoding="utf-8")
+    join_spec = tmp_path / "joins.yaml"
+    join_spec.write_text("joins:\n  - at_seconds: 1.0\n", encoding="utf-8")
 
     async def fake_inspection(*args: object, **kwargs: object) -> object:
         del args, kwargs
@@ -142,6 +224,28 @@ def test_new_whisper_qa_commands_emit_observable_json_contracts(
         payload = json.loads(result.output)
         assert payload["data"]["kind"] == kind
         validate_contract("cli-output", payload)
+
+
+def test_whisper_join_spec_rejects_json_configuration(tmp_path: Path) -> None:
+    audio = tmp_path / "chapter.wav"
+    audio.write_bytes(b"placeholder")
+    join_spec = tmp_path / "joins.json"
+    join_spec.write_text('{"joins": [{"at_seconds": 1.0}]}', encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--json",
+            "whisper",
+            "inspect-joins",
+            str(audio),
+            "--spec",
+            str(join_spec),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "must use .yaml or .yml" in json.loads(result.output)["error"]["message"]
 
 
 def test_json_usage_errors_use_stable_envelope_and_exit_two() -> None:
@@ -256,6 +360,129 @@ def test_validate_and_plan_report_character_routes_and_attribution(
         "narrator",
     ]
     assert chunks[1]["profile"] == "wren"
+
+
+def test_plan_strips_middle_attribution_tag_when_configured(tmp_path: Path) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        "# One\n\n"
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"What could be doing that?" Wren asked. "Some kind of magic?"\n',
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "yakbox.toml"
+    manifest.write_text(
+        '"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"\n'
+        'schema_version = 1\nsources = ["book.md"]\n'
+        '[book]\ntitle = "Stripped Tags"\n'
+        '[voices.narrator]\ndisplay_name = "Narrator"\n'
+        '[voices.wren]\ndisplay_name = "Wren"\n'
+        '[profiles.narrator]\nbackend = "fake"\nvoice = "narrator"\n'
+        '[profiles.wren]\nbackend = "fake"\nvoice = "wren"\n'
+        '[characters.narrator]\nprofile = "narrator"\n'
+        '[characters.wren]\nprofile = "wren"\n'
+        "[dialogue]\nstrip_attribution_tags = true\n"
+        '[targets.default]\nprofile = "narrator"\n',
+        encoding="utf-8",
+    )
+
+    planned = CliRunner().invoke(main, ["--json", "plan", str(manifest)])
+
+    assert planned.exit_code == 0, planned.output
+    chunks = json.loads(planned.output)["data"]["nodes"][0]["chunks"]
+    assert [chunk["speaker"] for chunk in chunks] == ["wren"]
+
+
+def test_dialogue_route_suggestions_require_review_before_use(tmp_path: Path) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        '# One\n\n"Ready?" Wren asked. "Now," Wren snapped.\n\n"No."\n',
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "yakbox.toml"
+    manifest.write_text(
+        '"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"\n'
+        'schema_version = 1\nsources = ["book.md"]\n'
+        '[book]\ntitle = "Route Review"\n'
+        '[voices.narrator]\ndisplay_name = "Narrator"\n'
+        '[voices.wren]\ndisplay_name = "Wren"\n'
+        '[profiles.narrator]\nbackend = "fake"\nvoice = "narrator"\n'
+        '[profiles.wren]\nbackend = "fake"\nvoice = "wren"\n'
+        '[characters.narrator]\nprofile = "narrator"\n'
+        '[characters.wren]\nprofile = "wren"\n'
+        '[targets.default]\nprofile = "narrator"\n',
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    suggested = runner.invoke(
+        main,
+        ["--json", "dialogue", "routes", "suggest", str(manifest)],
+    )
+
+    assert suggested.exit_code == 0, suggested.output
+    suggested_data = json.loads(suggested.output)["data"]
+    assert suggested_data["suggested_routes"] == 1
+    assert suggested_data["unresolved_dialogue_paragraphs"] == 1
+    routes = tmp_path / "dialogue-routes.toml"
+    route_data = tomllib.loads(routes.read_text(encoding="utf-8"))
+    validate_contract("dialogue-routes", route_data)
+    assert route_data["routes"][0]["status"] == "suggested"
+
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + '\n[dialogue]\nroutes = "dialogue-routes.toml"\n'
+        + "strip_attribution_tags = true\n"
+        + 'expressive_tag_handling = "strip"\n',
+        encoding="utf-8",
+    )
+    pending = runner.invoke(
+        main,
+        ["--json", "dialogue", "routes", "check", str(manifest)],
+    )
+    assert pending.exit_code == 1
+    assert "require review" in json.loads(pending.output)["error"]["message"]
+
+    routes.write_text(
+        routes.read_text(encoding="utf-8").replace(
+            'status = "suggested"',
+            'status = "approved"',
+        ),
+        encoding="utf-8",
+    )
+    checked = runner.invoke(
+        main,
+        ["--json", "dialogue", "routes", "check", str(manifest)],
+    )
+    assert checked.exit_code == 0, checked.output
+    assert json.loads(checked.output)["data"]["ready"] is True
+
+    previewed = runner.invoke(
+        main,
+        ["--json", "dialogue", "preview", str(manifest)],
+    )
+    assert previewed.exit_code == 0, previewed.output
+    preview = json.loads((tmp_path / "dialogue-preview.json").read_text())
+    validate_contract("dialogue-transformation", preview)
+    assert preview["paragraph_count"] == 1
+    assert preview["stripped_tag_count"] == 2
+    assert preview["paragraphs"][0]["spans"] == [
+        {"speaker": "wren", "speaker_explicit": True, "spoken": "Ready? Now."}
+    ]
+    assert preview["paragraphs"][0]["stripped_tags"] == [
+        {"kind": "pure", "text": "Wren asked."},
+        {"kind": "expressive", "text": "Wren snapped."},
+    ]
+    refused = runner.invoke(
+        main,
+        ["--json", "dialogue", "preview", str(manifest)],
+    )
+    assert refused.exit_code == 1
+    forced = runner.invoke(
+        main,
+        ["--json", "dialogue", "preview", str(manifest), "--force"],
+    )
+    assert forced.exit_code == 0, forced.output
 
 
 def test_build_dry_run_and_preview_are_audiobook_first(tmp_path: Path) -> None:
@@ -570,6 +797,12 @@ def test_report_failures_publish_the_effective_exit_code(
         sources=(),
         pronunciations=None,
         max_pause_ms=30_000,
+        dialogue=SimpleNamespace(
+            strip_attribution_tags=False,
+            routes=None,
+            expressive_tag_handling="context",
+            retain_first_attribution_per_scene=False,
+        ),
         target=lambda _name: SimpleNamespace(output_root=tmp_path),
     )
     monkeypatch.setattr("yakbox.cli.load_manifest", lambda _path: manifest)

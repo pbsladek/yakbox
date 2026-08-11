@@ -2219,7 +2219,8 @@ output into `BatchRow`. If no parser exists, define:
 - `.txt`: one non-empty line per row; line number is the source index.
 - `.csv`: header required; `text` required; `id`, `voice_uuid`, `title`, and
   `output` optional.
-- `.jsonl`: one JSON object per non-empty line with the same keys.
+- `.yaml` or `.yml`: a sequence of mappings with the same keys; one mapping per
+  YAML document is the streaming form for large inputs.
 - UTF-8 input, with an optional leading BOM accepted.
 - Blank lines are ignored in text files and rejected as malformed records in
   structured formats when a record is otherwise present.

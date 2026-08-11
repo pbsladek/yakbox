@@ -1,7 +1,7 @@
 # Reference voice provenance
 
-These twenty-five prompt clips are derived from LibriVox recordings and are bundled
-for local Chatterbox testing. LibriVox states that all of its recordings are
+These twenty-five qualified prompt clips are derived from LibriVox recordings and
+are bundled for local Chatterbox testing. LibriVox states that all of its recordings are
 public domain in the United States and may be modified or used commercially.
 Copyright status can differ outside the United States.
 

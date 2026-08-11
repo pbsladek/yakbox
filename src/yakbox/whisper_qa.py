@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from difflib import SequenceMatcher
 from enum import StrEnum
+from itertools import product
 from pathlib import Path
 
 from yakbox.audio.crop import wav_duration_seconds
@@ -16,6 +17,7 @@ from yakbox.contracts import runtime_metadata
 from yakbox.errors import ArtifactError, ValidationError
 from yakbox.local_alignment import MlxWhisperAligner
 from yakbox.speech.alignment import (
+    MINIMUM_CONSENSUS_DECODE_PASSES,
     AlignmentResult,
     AlignmentToken,
     WindowSpeechAligner,
@@ -32,6 +34,8 @@ _COMPOUND_PART_COUNT = 2
 _MAXIMUM_IGNORED_INSERT_DURATION_SECONDS = 0.2
 _MAXIMUM_NEAR_ZERO_INSERT_CONFIDENCE = 0.05
 _MAXIMUM_REPEATED_INSERT_CONFIDENCE = 0.35
+_MANUSCRIPT_RECHECK_CONTEXT_TOKENS = 8
+_MANUSCRIPT_RECHECK_GUARD_SECONDS = 0.25
 
 
 class WhisperClipType(StrEnum):
@@ -326,8 +330,11 @@ async def verify_manuscript(
             _expanded_lexical_tokens(token.text), token_aliases
         )
     )
+    expected, comparison_tokens = _coalesce_digit_sequences(expected, comparison_tokens)
     expected, comparison_tokens = _coalesce_compound_equivalents(
-        expected, comparison_tokens
+        expected,
+        comparison_tokens,
+        token_aliases=token_aliases,
     )
     comparison_tokens, ignored_insertions = _remove_decoder_insertions(
         expected, comparison_tokens
@@ -337,11 +344,25 @@ async def verify_manuscript(
     matcher = SequenceMatcher(a=expected, b=recognized, autojunk=False)
     matching = sum(block.size for block in matcher.get_matching_blocks())
     denominator = max(1, len(expected), len(recognized))
-    mismatches = tuple(
+    initial_mismatches = tuple(
         _manuscript_mismatch(expected, comparison_result, opcode)
         for opcode in matcher.get_opcodes()
         if opcode[0] != "equal"
     )
+    mismatches = await _unresolved_manuscript_mismatches(
+        cached_aligner,
+        audio,
+        language=language,
+        expected=expected,
+        recognized=comparison_tokens,
+        mismatches=initial_mismatches,
+        token_aliases=token_aliases,
+    )
+    locally_resolved = len(initial_mismatches) - len(mismatches)
+    if initial_mismatches and not mismatches:
+        matching = len(expected)
+        recognized = expected
+        denominator = max(1, len(expected))
     confidence = evaluate_alignment(
         result,
         clip_type=WhisperClipType.CHAPTER,
@@ -353,6 +374,11 @@ async def verify_manuscript(
     diagnostic_reasons = (*result.issues, *confidence.reason_codes)
     if ignored_insertions:
         diagnostic_reasons = (*diagnostic_reasons, "low_confidence_insert_ignored")
+    if locally_resolved:
+        diagnostic_reasons = (
+            *diagnostic_reasons,
+            "localized_mismatch_recheck_passed",
+        )
     return ManuscriptVerification(
         audio=audio.resolve(),
         manuscript=manuscript.resolve(),
@@ -369,6 +395,120 @@ async def verify_manuscript(
     )
 
 
+async def _unresolved_manuscript_mismatches(
+    aligner: WindowSpeechAligner,
+    audio: Path,
+    *,
+    language: str,
+    expected: tuple[str, ...],
+    recognized: tuple[AlignmentToken, ...],
+    mismatches: tuple[ManuscriptMismatch, ...],
+    token_aliases: Mapping[str, tuple[str, ...]] | None,
+) -> tuple[ManuscriptMismatch, ...]:
+    """Confirm long-form transcript edits in bounded independent decodes."""
+    if not mismatches or not recognized:
+        return mismatches
+    duration = wav_duration_seconds(audio)
+    unresolved: list[ManuscriptMismatch] = []
+    for mismatch in mismatches:
+        expected_start = max(
+            0, mismatch.expected_start - _MANUSCRIPT_RECHECK_CONTEXT_TOKENS
+        )
+        expected_end = min(
+            len(expected),
+            mismatch.expected_end + _MANUSCRIPT_RECHECK_CONTEXT_TOKENS,
+        )
+        recognized_start = max(
+            0, mismatch.recognized_start - _MANUSCRIPT_RECHECK_CONTEXT_TOKENS
+        )
+        recognized_end = min(
+            len(recognized),
+            mismatch.recognized_end + _MANUSCRIPT_RECHECK_CONTEXT_TOKENS,
+        )
+        if expected_start >= expected_end or recognized_start >= recognized_end:
+            unresolved.append(mismatch)
+            continue
+        expected_window = expected[expected_start:expected_end]
+        start_seconds = max(
+            0.0,
+            recognized[recognized_start].start_seconds
+            - _MANUSCRIPT_RECHECK_GUARD_SECONDS,
+        )
+        end_seconds = min(
+            duration,
+            recognized[recognized_end - 1].end_seconds
+            + _MANUSCRIPT_RECHECK_GUARD_SECONDS,
+        )
+        if end_seconds <= start_seconds:
+            unresolved.append(mismatch)
+            continue
+        local = await aligner.align_window(
+            audio,
+            " ".join(expected_window),
+            language=language,
+            start_seconds=start_seconds,
+            end_seconds=end_seconds,
+        )
+        if not _independent_decodes_contain_expected(
+            local,
+            expected_window,
+            token_aliases=token_aliases,
+        ):
+            unresolved.append(mismatch)
+    return tuple(unresolved)
+
+
+def _independent_decodes_contain_expected(
+    result: AlignmentResult,
+    expected: tuple[str, ...],
+    *,
+    token_aliases: Mapping[str, tuple[str, ...]] | None,
+) -> bool:
+    passes = tuple(item for item in result.decode_passes if not item.issues)
+    minimum_confidence = CONFIDENCE_PROFILES[
+        WhisperClipType.CHAPTER
+    ].minimum_word_confidence
+    if result.issues or len(passes) < MINIMUM_CONSENSUS_DECODE_PASSES:
+        return False
+    return not any(
+        item.minimum_confidence is None
+        or item.minimum_confidence < minimum_confidence
+        or not _tokens_contain_expected(
+            item.tokens,
+            expected,
+            token_aliases=token_aliases,
+        )
+        for item in passes
+    )
+
+
+def _tokens_contain_expected(
+    tokens: tuple[str, ...],
+    expected: tuple[str, ...],
+    *,
+    token_aliases: Mapping[str, tuple[str, ...]] | None,
+) -> bool:
+    canonical = canonical_tokens(
+        tuple(part for token in tokens for part in _expanded_lexical_tokens(token)),
+        token_aliases,
+    )
+    canonical = _collapse_expected_digits(canonical)
+    timed = tuple(
+        AlignmentToken(token, float(index), float(index + 1), 1.0)
+        for index, token in enumerate(canonical)
+    )
+    normalized_expected, normalized = _coalesce_compound_equivalents(
+        expected,
+        timed,
+        token_aliases=token_aliases,
+    )
+    values = tuple(token.text for token in normalized)
+    return any(
+        values[index : index + len(normalized_expected)] == normalized_expected
+        for index in range(len(values) - len(normalized_expected) + 1)
+    )
+
+
 def _expanded_lexical_tokens(text: str) -> tuple[str, ...]:
     return tuple(
         part for token in lexical_tokens(text) for part in token.split("-") if part
@@ -378,6 +518,8 @@ def _expanded_lexical_tokens(text: str) -> tuple[str, ...]:
 def _coalesce_compound_equivalents(
     expected: tuple[str, ...],
     recognized: tuple[AlignmentToken, ...],
+    *,
+    token_aliases: Mapping[str, tuple[str, ...]] | None = None,
 ) -> tuple[tuple[str, ...], tuple[AlignmentToken, ...]]:
     """Treat joined and split spellings as the same chapter transcript token."""
     normalized_expected = expected
@@ -397,7 +539,14 @@ def _coalesce_compound_equivalents(
             if (
                 len(expected_span) == _COMPOUND_PART_COUNT
                 and len(recognized_span) == 1
-                and "".join(expected_span) == recognized_span[0].text
+                and (
+                    "".join(expected_span) == recognized_span[0].text
+                    or _joined_aliases_match(
+                        expected_span,
+                        recognized_span[0].text,
+                        token_aliases,
+                    )
+                )
             ):
                 normalized_expected = (
                     *normalized_expected[:start_a],
@@ -429,6 +578,94 @@ def _coalesce_compound_equivalents(
                 break
         if not changed:
             return normalized_expected, normalized_recognized
+
+
+def _joined_aliases_match(
+    expected: tuple[str, ...],
+    recognized: str,
+    aliases: Mapping[str, tuple[str, ...]] | None,
+) -> bool:
+    if not aliases:
+        return False
+    choices = tuple((token, *aliases.get(token, ())) for token in expected)
+    return any("".join(parts) == recognized for parts in product(*choices))
+
+
+_SPOKEN_DIGITS = {
+    "zero": "0",
+    "oh": "0",
+    "o": "0",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+}
+
+
+def _coalesce_digit_sequences(
+    expected: tuple[str, ...],
+    recognized: tuple[AlignmentToken, ...],
+) -> tuple[tuple[str, ...], tuple[AlignmentToken, ...]]:
+    """Normalize Whisper's written and spoken forms of digit sequences."""
+    return _collapse_expected_digits(expected), _collapse_recognized_digits(recognized)
+
+
+def _collapse_expected_digits(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    collapsed: list[str] = []
+    digits: list[str] = []
+    for token in (*tokens, ""):
+        digit = _spoken_digit(token)
+        if digit is not None:
+            digits.append(digit)
+            continue
+        if digits:
+            collapsed.append("".join(digits))
+            digits.clear()
+        if token:
+            collapsed.append(token)
+    return tuple(collapsed)
+
+
+def _collapse_recognized_digits(
+    tokens: tuple[AlignmentToken, ...],
+) -> tuple[AlignmentToken, ...]:
+    collapsed: list[AlignmentToken] = []
+    sequence: list[AlignmentToken] = []
+    for token in (*tokens, None):
+        digit = _spoken_digit(token.text) if token is not None else None
+        if digit is not None and token is not None:
+            sequence.append(replace(token, text=digit))
+            continue
+        if sequence:
+            first, last = sequence[0], sequence[-1]
+            collapsed.append(
+                replace(
+                    first,
+                    text="".join(item.text for item in sequence),
+                    end_seconds=last.end_seconds,
+                    confidence=_minimum_confidences(sequence),
+                )
+            )
+            sequence.clear()
+        if token is not None:
+            collapsed.append(token)
+    return tuple(collapsed)
+
+
+def _spoken_digit(token: str) -> str | None:
+    if token.isdigit():
+        return token
+    return _SPOKEN_DIGITS.get(token)
+
+
+def _minimum_confidences(tokens: list[AlignmentToken]) -> float | None:
+    values = tuple(token.confidence for token in tokens if token.confidence is not None)
+    return min(values) if values else None
 
 
 def _minimum_optional_confidence(

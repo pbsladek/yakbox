@@ -91,24 +91,6 @@ channels = 1
 pcm_bits = 16
 filters = []
 
-[voices.stuart-bell]
-file = "stuart-bell.wav"
-sha256 = "1696056d3442551d6f80879298f9b8a5c7d845df65b5d477f848683d3453f89b"
-reader = "Stuart Bell"
-reader_url = "https://librivox.org/reader/1870"
-source_work = "Celebration of Dialects and Accents, Vol 1: English accent, neutral, southern"
-catalog_url = "https://librivox.org/celebration-of-dialects-and-accents-vol-1/"
-source_url = "https://archive.org/download/dialect_accent_0909_librivox/dialectaccent_vol_01_26sjb_64kb.mp3"
-source_sha256 = "b81a4d01b01c5ed2cf1f39b185fdaa91c5be352de80dafe237dcfa3f9dad9d4e"
-license_id = "LicenseRef-LibriVox-Public-Domain-US"
-rights_url = "https://librivox.org/pages/public-domain/"
-source_start_seconds = 31.1
-duration_seconds = 20
-sample_rate_hz = 24000
-channels = 1
-pcm_bits = 16
-filters = []
-
 [voices.karen-savage]
 file = "karen-savage.wav"
 sha256 = "53a28e3a51b02caced838587de154209ac19904f53ccd351da1eeceb7eea0c30"
@@ -118,24 +100,6 @@ source_work = "Anne of Green Gables (version 3): Mrs. Rachel Lynde Is Surprised 
 catalog_url = "https://librivox.org/anne-of-green-gables-by-lucy-maud-montgomery-3/"
 source_url = "https://archive.org/download/anne_greengables_librivox/anne_of_green_gables_01_montgomery_64kb.mp3"
 source_sha256 = "5f4847632ea6a29eba2c3a71fd5d89ffa66daeb3c2ece66ef5dd1c4b357f866f"
-license_id = "LicenseRef-LibriVox-Public-Domain-US"
-rights_url = "https://librivox.org/pages/public-domain/"
-source_start_seconds = 60
-duration_seconds = 20
-sample_rate_hz = 24000
-channels = 1
-pcm_bits = 16
-filters = []
-
-[voices.elizabeth-klett]
-file = "elizabeth-klett.wav"
-sha256 = "91adc9fc153ec7f16a53a4e3c06c76967b37dab4122af838a530d718fdf3df7c"
-reader = "Elizabeth Klett"
-reader_url = "https://librivox.org/reader/1259"
-source_work = "Jane Eyre (version 3): Chapter 1 by Charlotte Brontë"
-catalog_url = "https://librivox.org/jane-eyre-version-3-by-charlotte-bronte/"
-source_url = "https://archive.org/download/jane_eyre_ver03_0809_librivox/janeeyre_01_bronte_64kb.mp3"
-source_sha256 = "aa71b5c7c5a9bae54a083e1a1b11b8d9c0543602ed64aa993e7e514427de1110"
 license_id = "LicenseRef-LibriVox-Public-Domain-US"
 rights_url = "https://librivox.org/pages/public-domain/"
 source_start_seconds = 60
@@ -271,24 +235,6 @@ channels = 1
 pcm_bits = 16
 filters = []
 
-[voices.adrian-praetzellis]
-file = "adrian-praetzellis.wav"
-sha256 = "7d391441252d9e759b0c0eec062978eb1785232bcbc35f3585fe819f8a099bf8"
-reader = "Adrian Praetzellis"
-reader_url = "https://librivox.org/reader/1331"
-source_work = "The Thirty-Nine Steps: Chapter 1 by John Buchan"
-catalog_url = "https://librivox.org/the-thirty-nine-steps-by-john-buchan/"
-source_url = "https://archive.org/download/39_steps_0807_librivox/thirtyninesteps_01_buchan_64kb.mp3"
-source_sha256 = "8cb9c013a21fb7a2e27b8dada6ae99bc1d22318ba096681de6a26d5ae9f83e07"
-license_id = "LicenseRef-LibriVox-Public-Domain-US"
-rights_url = "https://librivox.org/pages/public-domain/"
-source_start_seconds = 60
-duration_seconds = 20
-sample_rate_hz = 24000
-channels = 1
-pcm_bits = 16
-filters = []
-
 [voices.gregg-margarite]
 file = "gregg-margarite.wav"
 sha256 = "af9f890451f2cf73b284a183288150c727d77dc9ab9d480b8a01bacddbc833bd"
@@ -298,24 +244,6 @@ source_work = "Make Mine Homogenized: Section 1 by Rick Raphael"
 catalog_url = "https://librivox.org/make-mine-homogenized-by-rick-raphael/"
 source_url = "https://www.archive.org/download/make_mine_homogenized_1101_librivox/makeminehomogenized_1_raphael_64kb.mp3"
 source_sha256 = "186148c7134a9fa2011bbdc7829d10226f2d084ed95a3db677373f237eeefc07"
-license_id = "LicenseRef-LibriVox-Public-Domain-US"
-rights_url = "https://librivox.org/pages/public-domain/"
-source_start_seconds = 60
-duration_seconds = 20
-sample_rate_hz = 24000
-channels = 1
-pcm_bits = 16
-filters = []
-
-[voices.david-clarke]
-file = "david-clarke.wav"
-sha256 = "f7a2403d0c989ddb9777686f6d38dbcadb2823e29ae7417e6ced9c9a48bcc022"
-reader = "David Clarke"
-reader_url = "https://librivox.org/reader/7408"
-source_work = "The Count of Monte Cristo (version 3): Marseilles - The Arrival by Alexandre Dumas"
-catalog_url = "https://librivox.org/the-count-of-monte-cristo-version-3-by-alexandre-dumas/"
-source_url = "https://www.archive.org/download/count_montecristo_1308_librivox/countofmontecristo_001_dumas_64kb.mp3"
-source_sha256 = "25dce3bf23752365a345e73fec58bb8b32e1078bc1b61f3edee0f4e072925af8"
 license_id = "LicenseRef-LibriVox-Public-Domain-US"
 rights_url = "https://librivox.org/pages/public-domain/"
 source_start_seconds = 60
@@ -379,24 +307,6 @@ channels = 1
 pcm_bits = 16
 filters = []
 
-[voices.kara-shallenberg]
-file = "kara-shallenberg.wav"
-sha256 = "f4e8bf29121fdd745db33a88791667ea2891c026fa67ac62f119c596c3eb76ce"
-reader = "Kara Shallenberg (1969-2023)"
-reader_url = "https://librivox.org/reader/19"
-source_work = "Treasure Island (version 5): The Old Sea-dog at the Admiral Benbow by Robert Louis Stevenson"
-catalog_url = "https://librivox.org/treasure-island-by-robert-louis-stevenson-5/"
-source_url = "https://www.archive.org/download/treasureisland_ks_1510_librivox/treasureisland_01_stevenson_64kb.mp3"
-source_sha256 = "a8b0b0a4b41e767bbcf424d5aba241e35a364c4df17c5cbdc19a55e6e6db20de"
-license_id = "LicenseRef-LibriVox-Public-Domain-US"
-rights_url = "https://librivox.org/pages/public-domain/"
-source_start_seconds = 100
-duration_seconds = 20
-sample_rate_hz = 24000
-channels = 1
-pcm_bits = 16
-filters = []
-
 [voices.kirsten-ferreri]
 file = "kirsten-ferreri.wav"
 sha256 = "e3f61ad287fd4f70651b4a9422e596a29ab7e938271951fe4f427d2aba59446a"
@@ -445,6 +355,96 @@ source_sha256 = "0103a14e0d41f95f0187a18511e906ae132daae64a13ddcf5d864eb5f3d8f31
 license_id = "LicenseRef-LibriVox-Public-Domain-US"
 rights_url = "https://librivox.org/pages/public-domain/"
 source_start_seconds = 60
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.john-greenman]
+file = "john-greenman.wav"
+sha256 = "26558bab213823e30c55ed1c877d91023f51e55a558f194305e1cd29d92f1a47"
+reader = "John Greenman"
+reader_url = "https://librivox.org/reader/107"
+source_work = "The Tragedy of Pudd'nhead Wilson (Version 2): Pudd'nhead Wins his Name by Mark Twain"
+catalog_url = "https://librivox.org/2136"
+source_url = "https://www.archive.org/download/tragedy_wilson_jg_0807_librivox/tragedy_01_twain.mp3"
+source_sha256 = "971a7b7d585c4658ce5c3388080a7dd069a49d4971b20a1adad32c3669765239"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 69.05
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.simon-evers]
+file = "simon-evers.wav"
+sha256 = "ead6eb56c99508be89a4c457031b7e2c0f180e27065ab783352050ab65c496eb"
+reader = "Simon Evers"
+reader_url = "https://librivox.org/reader/1255"
+source_work = "Simon the Jester: Chapter 1 by William John Locke"
+catalog_url = "https://librivox.org/simon-the-jester-by-william-john-locke/"
+source_url = "https://www.archive.org/download/simonthejester_1609_librivox/simonthejester_01_locke_128kb.mp3"
+source_sha256 = "cae7ca3fadf9122a52a1d391133cd857aa68cd0801f333da72b0b820cb799f22"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 56.8
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.tony-foster]
+file = "tony-foster.wav"
+sha256 = "c6f008b1e4b5f7b55820c4a31008e0ce7a87d34467a8bb1b97af10bbd99be044"
+reader = "Tony Foster"
+reader_url = "https://librivox.org/reader/9625"
+source_work = "Havelok the Dane: Chapter I, Grim the Fisher and His Sons by Charles W. Whistler"
+catalog_url = "https://librivox.org/havelok-the-dane-a-legend-of-old-grimsby-and-lincoln-by-charles-watts-whistler/"
+source_url = "https://www.archive.org/download/havelokthedane_1507_librivox/havelokthedane_01_whistler_128kb.mp3"
+source_sha256 = "c9bf12ea6c420a6cee08b5495e5d9d5698bb30353a320b76dd2556c056f7a5ad"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 59.2
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.amanda-friday]
+file = "amanda-friday.wav"
+sha256 = "f4319082091dbc100a8318d3a06ca2e20a2a30756c5f84f82cb45d144215c7b6"
+reader = "Amanda Friday"
+reader_url = "https://librivox.org/reader/6544"
+source_work = "Screen Acting: The Universal Impulse by Mae Marsh"
+catalog_url = "https://librivox.org/screen-acting-by-mae-marsh/"
+source_url = "https://www.archive.org/download/screenacting_1607_librivox/screenacting_01_marsh_128kb.mp3"
+source_sha256 = "19dcaa9ca3f2de63dc1c001899f586c00ddfa0191655c8821a7f815e161483d4"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 53.5
+duration_seconds = 20
+sample_rate_hz = 24000
+channels = 1
+pcm_bits = 16
+filters = []
+
+[voices.john-burlinson]
+file = "john-burlinson.wav"
+sha256 = "6ad8e7b79b39a1e4cb01d08e5a1b6072e57c6de12dea6f9de114f3231e387571"
+reader = "John Burlinson (1950-2024)"
+reader_url = "https://librivox.org/reader/10396"
+source_work = "Parallel Lives of the Noble Greeks and Romans, Volume 4: Alcibiades, Part 1 by Plutarch"
+catalog_url = "https://librivox.org/parallel-lives-of-the-noble-greeks-and-romans-vol-4-by-lucius-mestrius-plutarchus/"
+source_url = "https://www.archive.org/download/parallellivesvol4_1602_librivox/parallellivesvol4_01_plutarchus_128kb.mp3"
+source_sha256 = "6ceeb770e2bfb5623e8ecfff64e0fd2936cdbb303953faf3250e7d6f57e349df"
+license_id = "LicenseRef-LibriVox-Public-Domain-US"
+rights_url = "https://librivox.org/pages/public-domain/"
+source_start_seconds = 51
 duration_seconds = 20
 sample_rate_hz = 24000
 channels = 1

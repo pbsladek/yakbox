@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-assembly-v1.schema.json",
+  "title": "yakbox raw chapter assembly timeline",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "target", "chapter_id", "synthesis_fingerprint", "raw_audio", "raw_sha256", "sample_rate", "channels", "sample_width", "total_frames", "chunks"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-assembly-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "target": {"type": "string"},
+    "chapter_id": {"type": "string"},
+    "synthesis_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "raw_audio": {"type": "string"},
+    "raw_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sample_rate": {"type": "integer", "minimum": 1},
+    "channels": {"type": "integer", "minimum": 1},
+    "sample_width": {"type": "integer", "minimum": 1},
+    "total_frames": {"type": "integer", "minimum": 1},
+    "chunks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "index", "kind", "text_sha256", "characters", "speaker", "profile", "source", "boundary", "cache_fingerprint", "audio_sha256", "sample_rate", "start_frame", "end_frame", "inserted_pause_after_frames"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{24}$"},
+          "index": {"type": "integer", "minimum": 1},
+          "kind": {"enum": ["speech", "explicit_pause"]},
+          "text_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "characters": {"type": "integer", "minimum": 0},
+          "speaker": {"type": ["string", "null"]},
+          "profile": {"type": ["string", "null"]},
+          "source": {"$ref": "#/$defs/sourceLocation"},
+          "boundary": {"enum": ["paragraph", "sentence", "clause", "word", "hard", "end", "explicit_pause"]},
+          "cache_fingerprint": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "audio_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "sample_rate": {"type": "integer", "minimum": 1},
+          "start_frame": {"type": "integer", "minimum": 0},
+          "end_frame": {"type": "integer", "minimum": 1},
+          "inserted_pause_after_frames": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "sourceLocation": {
+      "type": "object",
+      "required": ["path", "start_line", "end_line"],
+      "properties": {
+        "path": {"type": "string"},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

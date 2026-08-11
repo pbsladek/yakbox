@@ -10,7 +10,9 @@ ROOT = Path(__file__).parents[2]
 
 EXPECTED_LEAF_COMMANDS = {
     "artifacts cache clean",
+    "artifacts cache inspect",
     "artifacts cache list",
+    "artifacts cache why-miss",
     "artifacts clean",
     "artifacts list",
     "artifacts trash list",
@@ -35,6 +37,9 @@ EXPECTED_LEAF_COMMANDS = {
     "config auth logout",
     "config auth status",
     "doctor",
+    "dialogue preview",
+    "dialogue routes check",
+    "dialogue routes suggest",
     "explain",
     "init",
     "inspect",
@@ -44,6 +49,10 @@ EXPECTED_LEAF_COMMANDS = {
     "pronunciations audit",
     "release check",
     "release diff",
+    "repair approve",
+    "repair generate",
+    "repair locate",
+    "repair plan",
     "shards export",
     "shards verify",
     "short-review approve",
@@ -66,6 +75,7 @@ EXPECTED_LEAF_COMMANDS = {
     "whisper models verify",
     "whisper phoneme-models install",
     "whisper phoneme-models status",
+    "whisper qualify-voices",
     "whisper reinspect",
     "whisper verify-manuscript",
 }

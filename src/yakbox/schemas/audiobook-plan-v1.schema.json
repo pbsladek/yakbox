@@ -42,6 +42,7 @@
             "items": {
               "type": "object",
               "properties": {
+                "id": {"type": "string", "pattern": "^[0-9a-f]{24}$"},
                 "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "characters": {"type": "integer", "minimum": 0},
                 "boundary": {
@@ -81,6 +82,23 @@
                       "additionalProperties": false
                     }
                   ]
+                },
+                "repair_fingerprint": {
+                  "type": ["string", "null"],
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "attribution_context": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["kind", "position", "sha256"],
+                    "properties": {
+                      "kind": {"enum": ["pure", "expressive"]},
+                      "position": {"enum": ["before", "after"]},
+                      "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                    },
+                    "additionalProperties": false
+                  }
                 },
                 "source": {"$ref": "#/$defs/sourceLocation"}
               },

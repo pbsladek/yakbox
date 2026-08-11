@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import cast
 
@@ -10,6 +11,8 @@ from hypothesis import strategies as st
 from yakbox.audiobook.manifest import load_manifest
 from yakbox.audiobook.planner import plan_audiobook, shard_plan
 from yakbox.audiobook.sources import (
+    AttributionContextPosition,
+    AttributionTagKind,
     ChunkBoundary,
     Pause,
     SpeechSegment,
@@ -306,6 +309,341 @@ def test_routed_dialogue_splits_action_tags_and_multiple_quotes(
     ]
     assert speech[4].speaker_explicit
     assert speech[5].speaker_explicit
+
+
+def test_routed_dialogue_can_strip_tags_and_keep_action_prose(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        "# One\n\n"
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        "Wren crossed the room. “No,” Wren said. "
+        "“What could be doing that?” Wren asked. He tapped the panel. "
+        "“Some kind of magic?”\n\n"
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        "Wren asked, “Ready?” He tapped the panel.\n",
+        encoding="utf-8",
+    )
+
+    retained = normalize_sources((source,))
+    stripped = normalize_sources(
+        (source,),
+        strip_attribution_tags=True,
+    )
+    speech = tuple(
+        item
+        for item in stripped.chapters[0].segments
+        if isinstance(item, SpeechSegment)
+    )
+
+    assert [item.speaker for item in speech] == [
+        "narrator",
+        "wren",
+        "narrator",
+        "wren",
+        "wren",
+        "narrator",
+    ]
+    assert [item.text for item in speech] == [
+        "Wren crossed the room.",
+        "No. What could be doing that?",
+        "He tapped the panel.",
+        "Some kind of magic?",
+        "Ready?",
+        "He tapped the panel.",
+    ]
+    assert all("asked" not in item.text and "said" not in item.text for item in speech)
+    assert stripped.sha256 != retained.sha256
+
+
+def test_tag_stripping_does_not_rewrite_narrator_dialogue(tmp_path: Path) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        '# One\n\n"What happened?" Wren asked.\n',
+        encoding="utf-8",
+    )
+
+    speech = tuple(
+        item
+        for item in normalize_sources(
+            (source,),
+            strip_attribution_tags=True,
+        )
+        .chapters[0]
+        .segments
+        if isinstance(item, SpeechSegment)
+    )
+
+    assert [(item.speaker, item.text) for item in speech] == [
+        ("narrator", '"What happened?" Wren asked.')
+    ]
+
+
+def test_expressive_attribution_tags_preserve_silent_context_or_narration(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        "# One\n\n"
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"Leave," Wren snapped. "Now."\n',
+        encoding="utf-8",
+    )
+
+    contextual = tuple(
+        item
+        for item in normalize_sources(
+            (source,),
+            strip_attribution_tags=True,
+        )
+        .chapters[0]
+        .segments
+        if isinstance(item, SpeechSegment)
+    )
+    narrated = tuple(
+        item
+        for item in normalize_sources(
+            (source,),
+            strip_attribution_tags=True,
+            expressive_tag_handling="narrate",
+        )
+        .chapters[0]
+        .segments
+        if isinstance(item, SpeechSegment)
+    )
+    discarded = tuple(
+        item
+        for item in normalize_sources(
+            (source,),
+            strip_attribution_tags=True,
+            expressive_tag_handling="strip",
+        )
+        .chapters[0]
+        .segments
+        if isinstance(item, SpeechSegment)
+    )
+
+    assert [(item.speaker, item.text) for item in contextual] == [
+        ("wren", "Leave. Now.")
+    ]
+    assert contextual[0].attribution_context[0].text == "Wren snapped."
+    assert contextual[0].attribution_context[0].kind is AttributionTagKind.EXPRESSIVE
+    assert [(item.speaker, item.text) for item in narrated] == [
+        ("wren", "Leave,"),
+        ("narrator", "Wren snapped."),
+        ("wren", "Now."),
+    ]
+    assert discarded[0].attribution_context == ()
+
+
+def test_pure_attribution_is_retained_as_hidden_context(tmp_path: Path) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        '# One\n\n<!-- yakbox:speech:speaker name=wren -->\n\n"No," Wren said.\n',
+        encoding="utf-8",
+    )
+
+    speech = next(
+        item
+        for item in normalize_sources(
+            (source,),
+            strip_attribution_tags=True,
+        )
+        .chapters[0]
+        .segments
+        if isinstance(item, SpeechSegment)
+    )
+
+    assert speech.text == "No."
+    assert speech.attribution_context[0].kind is AttributionTagKind.PURE
+    assert speech.attribution_context[0].text == "Wren said."
+    assert speech.attribution_context[0].position is AttributionContextPosition.AFTER
+
+
+def test_hidden_attribution_context_is_planned_without_exposing_text(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_routed_workspace(
+        tmp_path,
+        '# One\n\n<!-- yakbox:speech:speaker name=wren -->\n\n"No," Wren said.\n',
+    )
+    manifest = load_manifest(manifest_path)
+    document = normalize_sources(
+        manifest.sources,
+        strip_attribution_tags=True,
+    )
+
+    plan = plan_audiobook(manifest, document)
+    synthesis = next(node for node in plan.nodes if node.stage.value == "synthesize")
+    short_index = synthesis.chunks.index("No.")
+    context = synthesis.chunk_attribution_contexts[short_index][0]
+    serialized = plan.to_dict(root=tmp_path)
+
+    assert context.text == "Wren said."
+    assert context.position is AttributionContextPosition.AFTER
+    assert "Wren said." not in json.dumps(serialized)
+    chunk = cast(
+        list[dict[str, object]],
+        cast(list[dict[str, object]], serialized["nodes"])[0]["chunks"],
+    )[short_index]
+    assert (
+        cast(list[dict[str, object]], chunk["attribution_context"])[0]["position"]
+        == "after"
+    )
+
+
+def test_interrupted_dialogue_tag_preserves_single_sentence_punctuation(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        "# One\n\n<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"If you think," Wren said, "that I am leaving, you are wrong."\n',
+        encoding="utf-8",
+    )
+
+    speech = tuple(
+        item
+        for item in normalize_sources((source,), strip_attribution_tags=True)
+        .chapters[0]
+        .segments
+        if isinstance(item, SpeechSegment)
+    )
+
+    assert [(item.speaker, item.text) for item in speech] == [
+        ("wren", "If you think that I am leaving, you are wrong.")
+    ]
+    assert speech[0].attribution_context[0].text == "Wren said,"
+
+
+def test_first_attribution_can_be_retained_for_each_speaker_and_scene(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        "# One\n\n"
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"No," Wren said.\n\n'
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"Stay," Wren said.\n\n'
+        "---\n\n"
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"Again," Wren said.\n',
+        encoding="utf-8",
+    )
+
+    speech = tuple(
+        item
+        for item in normalize_sources(
+            (source,),
+            strip_attribution_tags=True,
+            retain_first_attribution_per_scene=True,
+        )
+        .chapters[0]
+        .segments
+        if isinstance(item, SpeechSegment)
+    )
+
+    assert [(item.speaker, item.text) for item in speech] == [
+        ("wren", "No,"),
+        ("narrator", "Wren said."),
+        ("wren", "Stay."),
+        ("wren", "Again,"),
+        ("narrator", "Wren said."),
+    ]
+
+
+def test_untagged_turn_does_not_consume_first_attribution_retention(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        "# One\n\n"
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"No."\n\n'
+        "<!-- yakbox:speech:speaker name=wren -->\n\n"
+        '"Stay," Wren said.\n',
+        encoding="utf-8",
+    )
+
+    speech = tuple(
+        item
+        for item in normalize_sources(
+            (source,),
+            strip_attribution_tags=True,
+            retain_first_attribution_per_scene=True,
+        )
+        .chapters[0]
+        .segments
+        if isinstance(item, SpeechSegment)
+    )
+
+    assert [(item.speaker, item.text) for item in speech] == [
+        ("wren", "No."),
+        ("wren", "Stay,"),
+        ("narrator", "Wren said."),
+    ]
+
+
+def test_reviewed_dialogue_routes_assign_sidecar_speakers(tmp_path: Path) -> None:
+    source = tmp_path / "book.md"
+    source.write_text(
+        '# One\n\n"What could be doing that?" Wren asked. "Magic?"\n',
+        encoding="utf-8",
+    )
+    routes = tmp_path / "dialogue-routes.toml"
+    routes.write_text(
+        '"$schema" = "https://yakbox.dev/schemas/dialogue-routes-v1.schema.json"\n'
+        "schema_version = 1\n\n"
+        "[[routes]]\n"
+        'source = "book.md"\n'
+        "line = 3\n"
+        'speaker = "wren"\n'
+        'status = "approved"\n',
+        encoding="utf-8",
+    )
+
+    speech = tuple(
+        item
+        for item in normalize_sources(
+            (source,),
+            strip_attribution_tags=True,
+            dialogue_routes=routes,
+        )
+        .chapters[0]
+        .segments
+        if isinstance(item, SpeechSegment)
+    )
+
+    assert [(item.speaker, item.text) for item in speech] == [
+        ("wren", "What could be doing that? Magic?")
+    ]
+
+
+def test_dialogue_routes_must_be_reviewed_and_match_a_paragraph(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.md"
+    source.write_text('# One\n\n"Ready?" Wren asked.\n', encoding="utf-8")
+    routes = tmp_path / "dialogue-routes.toml"
+    template = (
+        '"$schema" = "https://yakbox.dev/schemas/dialogue-routes-v1.schema.json"\n'
+        "schema_version = 1\n\n"
+        "[[routes]]\n"
+        'source = "book.md"\n'
+        "line = {line}\n"
+        'speaker = "wren"\n'
+        'status = "{status}"\n'
+    )
+    routes.write_text(template.format(line=3, status="suggested"), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="require review"):
+        normalize_sources((source,), dialogue_routes=routes)
+
+    routes.write_text(template.format(line=99, status="approved"), encoding="utf-8")
+    with pytest.raises(ValidationError, match="does not match a spoken paragraph"):
+        normalize_sources((source,), dialogue_routes=routes)
 
 
 def test_routed_dialogue_preserves_internal_clause_and_sentence_boundaries(

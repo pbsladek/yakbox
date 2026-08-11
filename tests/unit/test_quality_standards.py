@@ -80,3 +80,22 @@ def test_inline_lint_exemptions_are_narrow_and_explained() -> None:
                 invalid.append(f"{path.relative_to(ROOT)}:{line_number}")
 
     assert invalid == []
+
+
+def test_repository_configuration_is_toml_or_yaml() -> None:
+    checked_roots = (
+        ROOT / ".github",
+        ROOT / "examples",
+        ROOT / "src",
+        ROOT / "tests",
+    )
+    json_files = {
+        path.relative_to(ROOT)
+        for directory in checked_roots
+        for path in directory.rglob("*.json")
+        if not {"build", ".yakbox"} & set(path.relative_to(ROOT).parts)
+    }
+
+    assert json_files
+    assert all(path.parts[:3] == ("src", "yakbox", "schemas") for path in json_files)
+    assert "pyyaml>=6.0.3,<7" in PYPROJECT["project"]["dependencies"]

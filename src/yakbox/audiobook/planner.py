@@ -14,8 +14,10 @@ from yakbox.audiobook.manifest import (
     BuildTarget,
     ChatterboxOptions,
 )
+from yakbox.audiobook.repairs import repair_fingerprint
 from yakbox.audiobook.sources import (
     CHATTERBOX_CHUNK_CHARACTERS,
+    AttributionContext,
     Chapter,
     ChunkBoundary,
     NormalizedDocument,
@@ -115,10 +117,26 @@ class PlanNode:
     dependencies: tuple[str, ...]
     output: Path
     chunks: tuple[str, ...] = ()
+    chunk_ids: tuple[str, ...] = ()
     chunk_sources: tuple[SourceLocation, ...] = ()
     chunk_boundaries: tuple[str, ...] = ()
     chunk_routes: tuple[ChunkRoute, ...] = ()
     chunk_short_utterances: tuple[ShortUtteranceMarker | None, ...] = ()
+    chunk_attribution_contexts: tuple[tuple[AttributionContext, ...], ...] = ()
+    chunk_repair_fingerprints: tuple[str | None, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _PlannedSpeechChunks:
+    texts: tuple[str, ...]
+    ids: tuple[str, ...]
+    sources: tuple[SourceLocation, ...]
+    boundaries: tuple[str, ...]
+    routes: tuple[ChunkRoute, ...]
+    short_utterances: tuple[ShortUtteranceMarker | None, ...]
+    attribution_contexts: tuple[tuple[AttributionContext, ...], ...]
+    profile: BackendProfile
+    chunk_limit: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +181,7 @@ class BuildPlan:
                     "chunks": [
                         {
                             "sha256": hashlib.sha256(chunk.encode()).hexdigest(),
+                            "id": chunk_id,
                             "characters": len(chunk),
                             "boundary": boundary,
                             "speaker": route.speaker,
@@ -181,18 +200,41 @@ class BuildPlan:
                                 if short_utterance is not None
                                 else None
                             ),
+                            "repair_fingerprint": repair,
+                            "attribution_context": [
+                                {
+                                    "kind": context.kind.value,
+                                    "position": context.position.value,
+                                    "sha256": hashlib.sha256(
+                                        context.text.encode()
+                                    ).hexdigest(),
+                                }
+                                for context in attribution_context
+                            ],
                             "source": {
                                 "path": path_value(source.path),
                                 "start_line": source.start_line,
                                 "end_line": source.end_line,
                             },
                         }
-                        for chunk, source, boundary, route, short_utterance in zip(
+                        for (
+                            chunk,
+                            chunk_id,
+                            source,
+                            boundary,
+                            route,
+                            short_utterance,
+                            attribution_context,
+                            repair,
+                        ) in zip(
                             node.chunks,
+                            _chunk_ids(node),
                             node.chunk_sources,
                             _chunk_boundaries(node),
                             _chunk_routes(node),
                             _chunk_short_utterances(node),
+                            _chunk_attribution_contexts(node),
+                            _chunk_repairs(node),
                             strict=True,
                         )
                     ],
@@ -213,7 +255,10 @@ def plan_audiobook(
     """Create a deterministic build graph without model, network, or file writes."""
     target = manifest.target(target_name)
     profile = _primary_profile(manifest, target.profile, profile_override)
-    chapters = _select_chapters(document.chapters, chapter_selector)
+    chapters, chapter_keys = (
+        _select_chapters(document.chapters, chapter_selector),
+        _stable_chapter_keys(document, workspace=manifest.root),
+    )
     attribution_findings = _attribution_findings(manifest, chapters)
     _validate_attribution_policy(manifest, attribution_findings)
     media_runtime = media_tool_fingerprint()
@@ -242,61 +287,66 @@ def plan_audiobook(
     nodes: list[PlanNode] = []
     for chapter in chapters:
         chunk_items: list[str] = []
+        chunk_ids: list[str] = []
+        chunk_id_occurrences: dict[str, int] = {}
         chunk_sources: list[SourceLocation] = []
         chunk_boundaries: list[str] = []
         chunk_routes: list[ChunkRoute] = []
         chunk_short_utterances: list[ShortUtteranceMarker | None] = []
+        chunk_attribution_contexts: list[tuple[AttributionContext, ...]] = []
         routed_profiles: list[BackendProfile] = []
         routed_chunk_limits: list[int] = []
         for item in chapter.segments:
             if isinstance(item, SpeechSegment):
-                routed_profile = (
-                    manifest.profile(item.profile_override)
-                    if item.profile_override is not None
-                    else _speaker_profile(manifest, item.speaker, profile)
+                speech = _plan_speech_chunks(
+                    manifest,
+                    target,
+                    profile,
+                    item,
+                    chapter_key=chapter_keys[chapter.id],
                 )
-                _validate_routed_profile(profile, routed_profile, item.speaker)
-                routed_profiles.append(routed_profile)
-                route = ChunkRoute.from_profile(item.speaker, routed_profile)
-                chunk_limit = _synthesis_chunk_limit(
-                    routed_profile.backend, target.chunk_chars
+                chunk_items.extend(speech.texts)
+                chunk_ids.extend(
+                    _unique_chunk_ids(speech.ids, occurrences=chunk_id_occurrences)
                 )
-                routed_chunk_limits.append(chunk_limit)
-                segment_chunks = plan_text_chunks(item.text, chunk_limit)
-                chunk_items.extend(chunk.text for chunk in segment_chunks)
-                chunk_sources.extend(item.source for _ in segment_chunks)
-                chunk_routes.extend(route for _ in segment_chunks)
-                chunk_short_utterances.extend(
-                    _short_utterance_marker(chunk.text, manifest)
-                    for chunk in segment_chunks
-                )
-                chunk_boundaries.extend(
-                    (
-                        item.boundary_after.value
-                        if index == len(segment_chunks) - 1
-                        else chunk.boundary.value
-                    )
-                    for index, chunk in enumerate(segment_chunks)
-                )
+                chunk_sources.extend(speech.sources)
+                chunk_boundaries.extend(speech.boundaries)
+                chunk_routes.extend(speech.routes)
+                chunk_short_utterances.extend(speech.short_utterances)
+                chunk_attribution_contexts.extend(speech.attribution_contexts)
+                routed_profiles.append(speech.profile)
+                routed_chunk_limits.append(speech.chunk_limit)
             elif isinstance(item, Pause):
                 _append_pause_chunk(
                     chunk_items,
+                    chunk_ids,
                     chunk_sources,
                     chunk_boundaries,
                     chunk_routes,
                     short_utterances=chunk_short_utterances,
+                    attribution_contexts=chunk_attribution_contexts,
                     pause=item,
                 )
-        chunks = tuple(chunk_items)
-        boundaries = tuple(chunk_boundaries)
-        routes = tuple(chunk_routes)
-        short_utterances = tuple(chunk_short_utterances)
+        chunks, ids, boundaries = (
+            tuple(chunk_items),
+            tuple(chunk_ids),
+            tuple(chunk_boundaries),
+        )
+        routes, short_utterances, attribution_contexts = (
+            tuple(chunk_routes),
+            tuple(chunk_short_utterances),
+            tuple(chunk_attribution_contexts),
+        )
+        repairs = _planned_repairs(manifest, target, ids, chunks, routes)
         synthesis_fingerprint = _synthesis_fingerprint(
             chapter.id,
             chunks=chunks,
+            chunk_ids=ids,
             boundaries=boundaries,
             routes=routes,
             short_utterances=short_utterances,
+            attribution_contexts=attribution_contexts,
+            repairs=repairs,
             profiles=tuple(routed_profiles),
             configured_chunk_limit=target.chunk_chars,
             routed_chunk_limits=tuple(routed_chunk_limits),
@@ -317,10 +367,13 @@ def plan_audiobook(
                 dependencies=(),
                 output=raw_output,
                 chunks=chunks,
+                chunk_ids=ids,
                 chunk_sources=tuple(chunk_sources),
                 chunk_boundaries=boundaries,
                 chunk_routes=routes,
                 chunk_short_utterances=short_utterances,
+                chunk_attribution_contexts=attribution_contexts,
+                chunk_repair_fingerprints=repairs,
             )
         )
         master_fingerprint = _fingerprint(
@@ -449,9 +502,12 @@ def _synthesis_fingerprint(
     chapter_id: str,
     *,
     chunks: tuple[str, ...],
+    chunk_ids: tuple[str, ...],
     boundaries: tuple[str, ...],
     routes: tuple[ChunkRoute, ...],
     short_utterances: tuple[ShortUtteranceMarker | None, ...],
+    attribution_contexts: tuple[tuple[AttributionContext, ...], ...],
+    repairs: tuple[str | None, ...],
     profiles: tuple[BackendProfile, ...],
     configured_chunk_limit: int,
     routed_chunk_limits: tuple[int, ...],
@@ -459,9 +515,32 @@ def _synthesis_fingerprint(
 ) -> str:
     routing_payload = json.dumps(
         tuple(
-            (chunk, boundary, asdict(route), asdict(short) if short else None)
-            for chunk, boundary, route, short in zip(
-                chunks, boundaries, routes, short_utterances, strict=True
+            (
+                chunk_id,
+                chunk,
+                boundary,
+                asdict(route),
+                asdict(short) if short else None,
+                tuple(asdict(context) for context in context_items),
+                repair,
+            )
+            for (
+                chunk_id,
+                chunk,
+                boundary,
+                route,
+                short,
+                context_items,
+                repair,
+            ) in zip(
+                chunk_ids,
+                chunks,
+                boundaries,
+                routes,
+                short_utterances,
+                attribution_contexts,
+                repairs,
+                strict=True,
             )
         ),
         sort_keys=True,
@@ -475,7 +554,7 @@ def _synthesis_fingerprint(
         sorted({backend_fingerprint(item) for item in profiles})
     )
     return _fingerprint(
-        "synthesis-v3",
+        "synthesis-v4",
         chapter_id,
         routing_payload,
         profile_payload,
@@ -486,20 +565,154 @@ def _synthesis_fingerprint(
     )
 
 
+def _plan_speech_chunks(
+    manifest: AudiobookManifest,
+    target: BuildTarget,
+    default_profile: BackendProfile,
+    item: SpeechSegment,
+    *,
+    chapter_key: str,
+) -> _PlannedSpeechChunks:
+    routed_profile = (
+        manifest.profile(item.profile_override)
+        if item.profile_override is not None
+        else _speaker_profile(manifest, item.speaker, default_profile)
+    )
+    _validate_routed_profile(default_profile, routed_profile, item.speaker)
+    route = ChunkRoute.from_profile(item.speaker, routed_profile)
+    chunk_limit = _synthesis_chunk_limit(routed_profile.backend, target.chunk_chars)
+    chunks = plan_text_chunks(item.text, chunk_limit)
+    return _PlannedSpeechChunks(
+        texts=tuple(chunk.text for chunk in chunks),
+        ids=tuple(
+            _stable_chunk_id(item, chunk.text, index, chapter_key=chapter_key)
+            for index, chunk in enumerate(chunks, start=1)
+        ),
+        sources=tuple(item.source for _ in chunks),
+        boundaries=tuple(
+            (
+                item.boundary_after.value
+                if index == len(chunks) - 1
+                else chunk.boundary.value
+            )
+            for index, chunk in enumerate(chunks)
+        ),
+        routes=tuple(route for _ in chunks),
+        short_utterances=tuple(
+            _short_utterance_marker(chunk.text, manifest) for chunk in chunks
+        ),
+        attribution_contexts=tuple(item.attribution_context for _ in chunks),
+        profile=routed_profile,
+        chunk_limit=chunk_limit,
+    )
+
+
+def _stable_chunk_id(
+    item: SpeechSegment,
+    text: str,
+    part_index: int,
+    *,
+    chapter_key: str,
+) -> str:
+    """Identify synthesized content without depending on its chapter position."""
+    return _fingerprint(
+        "speech-chunk-v1",
+        chapter_key,
+        item.speaker,
+        item.profile_override or "",
+        str(part_index),
+        hashlib.sha256(text.encode()).hexdigest(),
+    )[:24]
+
+
+def _stable_chapter_keys(
+    document: NormalizedDocument,
+    *,
+    workspace: Path,
+) -> dict[str, str]:
+    occurrences: dict[tuple[str, str], int] = {}
+    result: dict[str, str] = {}
+    for chapter in document.chapters:
+        path = chapter.source_path.relative_to(workspace).as_posix()
+        base = (path, chapter.title.strip().casefold())
+        occurrence = occurrences.get(base, 0) + 1
+        occurrences[base] = occurrence
+        result[chapter.id] = _fingerprint(
+            "chapter-content-scope-v1",
+            path,
+            base[1],
+            str(occurrence),
+        )[:24]
+    return result
+
+
+def _unique_chunk_ids(
+    values: tuple[str, ...],
+    *,
+    occurrences: dict[str, int],
+) -> tuple[str, ...]:
+    result: list[str] = []
+    for value in values:
+        occurrence = occurrences.get(value, 0) + 1
+        occurrences[value] = occurrence
+        result.append(
+            value
+            if occurrence == 1
+            else _fingerprint("duplicate-chunk-v1", value, str(occurrence))[:24]
+        )
+    return tuple(result)
+
+
+def _planned_repairs(
+    manifest: AudiobookManifest,
+    target: BuildTarget,
+    chunk_ids: tuple[str, ...],
+    chunks: tuple[str, ...],
+    routes: tuple[ChunkRoute, ...],
+) -> tuple[str | None, ...]:
+    return tuple(
+        repair_fingerprint(
+            manifest.root,
+            target.name,
+            chunk_id=chunk_id,
+            text_sha256=hashlib.sha256(chunk.encode()).hexdigest(),
+            profile=route.profile,
+        )
+        for chunk_id, chunk, route in zip(
+            chunk_ids,
+            chunks,
+            routes,
+            strict=True,
+        )
+    )
+
+
 def _append_pause_chunk(
     chunks: list[str],
+    chunk_ids: list[str],
     sources: list[SourceLocation],
     boundaries: list[str],
     routes: list[ChunkRoute],
     *,
     short_utterances: list[ShortUtteranceMarker | None],
+    attribution_contexts: list[tuple[AttributionContext, ...]],
     pause: Pause,
 ) -> None:
     chunks.append(f"__YAKBOX_PAUSE_MS={pause.milliseconds}__")
+    chunk_ids.append(
+        _fingerprint(
+            "pause-chunk-v1",
+            pause.chapter_id,
+            str(pause.milliseconds),
+            pause.source.path.as_posix(),
+            str(pause.source.start_line),
+        )[:24]
+    )
     sources.append(pause.source)
     boundaries.append(ChunkBoundary.EXPLICIT_PAUSE.value)
     routes.append(ChunkRoute(None, None))
     short_utterances.append(None)
+    attribution_contexts.append(())
 
 
 def _synthesis_chunk_limit(backend: str, configured: int) -> int:
@@ -525,6 +738,33 @@ def _chunk_short_utterances(
 ) -> tuple[ShortUtteranceMarker | None, ...]:
     if node.chunk_short_utterances:
         return node.chunk_short_utterances
+    return tuple(None for _ in node.chunks)
+
+
+def _chunk_ids(node: PlanNode) -> tuple[str, ...]:
+    if node.chunk_ids:
+        return node.chunk_ids
+    return tuple(
+        _fingerprint(
+            "legacy-speech-chunk-v1",
+            node.chapter_id,
+            hashlib.sha256(chunk.encode()).hexdigest(),
+        )[:24]
+        for chunk in node.chunks
+    )
+
+
+def _chunk_attribution_contexts(
+    node: PlanNode,
+) -> tuple[tuple[AttributionContext, ...], ...]:
+    if node.chunk_attribution_contexts:
+        return node.chunk_attribution_contexts
+    return tuple(() for _ in node.chunks)
+
+
+def _chunk_repairs(node: PlanNode) -> tuple[str | None, ...]:
+    if node.chunk_repair_fingerprints:
+        return node.chunk_repair_fingerprints
     return tuple(None for _ in node.chunks)
 
 

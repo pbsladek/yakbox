@@ -23,7 +23,14 @@
       "type": "object",
       "properties": {
         "attribution_assistance": {"enum": ["off", "warn", "error"]},
-        "short_utterance_words": {"type": "integer", "minimum": 1}
+        "short_utterance_words": {"type": "integer", "minimum": 1},
+        "strip_attribution_tags": {"type": "boolean", "default": false},
+        "routes": {"type": "string", "minLength": 1},
+        "expressive_tag_handling": {
+          "enum": ["context", "narrate", "strip"],
+          "default": "context"
+        },
+        "retain_first_attribution_per_scene": {"type": "boolean", "default": false}
       },
       "additionalProperties": false
     },
@@ -164,6 +171,16 @@
       "additionalProperties": false
     },
     "targets": {"type": "object"},
+    "repairs": {
+      "type": "object",
+      "properties": {
+        "mode": {"enum": ["target-only", "context", "neighbors", "paragraph", "scene"]},
+        "takes": {"type": "integer", "minimum": 1, "maximum": 20},
+        "whisper_qa": {"type": "boolean"},
+        "rebuild_on_approval": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "retention": {"type": "object"}
   },
   "$defs": {

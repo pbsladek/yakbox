@@ -32,6 +32,7 @@ from yakbox.speech.alignment import (
     AlignmentResult,
     AlignmentSegment,
     AlignmentToken,
+    DecodePassEvidence,
     alignment_quality_reason_codes,
 )
 from yakbox.speech.phonemes import (
@@ -95,8 +96,14 @@ def _write_join_wav(path: Path, *, click: bool = False) -> None:
 
 
 class _FakeQaAligner:
-    def __init__(self, result: AlignmentResult) -> None:
+    def __init__(
+        self,
+        result: AlignmentResult,
+        *,
+        window_result: AlignmentResult | None = None,
+    ) -> None:
         self.result = result
+        self.window_result = window_result or result
         self.windows: list[tuple[float, float, str]] = []
         self.align_calls = 0
 
@@ -122,7 +129,7 @@ class _FakeQaAligner:
     ) -> AlignmentResult:
         del audio, language
         self.windows.append((start_seconds, end_seconds, expected_text))
-        return self.result
+        return self.window_result
 
 
 def test_local_whisper_model_status_verifies_required_files(tmp_path: Path) -> None:
@@ -275,6 +282,100 @@ async def test_manuscript_verification_accepts_compound_tokenization_variants(
 
 
 @pytest.mark.asyncio
+async def test_manuscript_verification_accepts_joined_alias_compounds(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "chapter.wav"
+    manuscript = tmp_path / "chapter.md"
+    _write_join_wav(audio)
+    expected = "Me ha okhel."
+    manuscript.write_text(expected, encoding="utf-8")
+
+    report = await verify_manuscript(
+        audio,
+        manuscript,
+        expected,
+        language="en",
+        model="fake",
+        revision=None,
+        aligner=cast(
+            MlxWhisperAligner,
+            _FakeQaAligner(_alignment("mihah", "okeh")),
+        ),
+        token_aliases={
+            "me": ("mih",),
+            "ha": ("ah",),
+            "okhel": ("okeh",),
+        },
+    )
+
+    assert report.accepted
+    assert report.token_accuracy == 1.0
+    assert report.mismatches == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("expected", "recognized"),
+    [
+        ("Room six oh nine.", ("room", "609")),
+        ("Room 609.", ("room", "six", "oh", "nine")),
+    ],
+)
+async def test_manuscript_verification_accepts_digit_sequence_variants(
+    tmp_path: Path,
+    expected: str,
+    recognized: tuple[str, ...],
+) -> None:
+    audio = tmp_path / "chapter.wav"
+    manuscript = tmp_path / "chapter.md"
+    _write_join_wav(audio)
+    manuscript.write_text(expected, encoding="utf-8")
+
+    report = await verify_manuscript(
+        audio,
+        manuscript,
+        expected,
+        language="en",
+        model="fake",
+        revision=None,
+        aligner=cast(MlxWhisperAligner, _FakeQaAligner(_alignment(*recognized))),
+    )
+
+    assert report.accepted
+    assert report.token_accuracy == 1.0
+    assert report.mismatches == ()
+
+
+@pytest.mark.asyncio
+async def test_digit_normalization_allows_adjacent_compound_coalescing(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "chapter.wav"
+    manuscript = tmp_path / "chapter.md"
+    _write_join_wav(audio)
+    expected = "Outside six oh nine, Liora waited."
+    manuscript.write_text(expected, encoding="utf-8")
+
+    report = await verify_manuscript(
+        audio,
+        manuscript,
+        expected,
+        language="en",
+        model="fake",
+        revision=None,
+        aligner=cast(
+            MlxWhisperAligner,
+            _FakeQaAligner(_alignment("outside", "609", "lio", "ra", "waited")),
+        ),
+    )
+
+    assert report.accepted
+    assert report.token_accuracy == 1.0
+    assert report.mismatches == ()
+
+
+@pytest.mark.asyncio
 async def test_manuscript_verification_keeps_decoder_issues_diagnostic(
     tmp_path: Path,
 ) -> None:
@@ -371,6 +472,101 @@ async def test_manuscript_verification_rejects_credible_extra_speech(
 
     assert not report.accepted
     assert report.mismatches[0].operation == "insert"
+
+
+@pytest.mark.asyncio
+async def test_manuscript_verification_rechecks_long_form_mismatch_locally(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "chapter.wav"
+    manuscript = tmp_path / "chapter.md"
+    _write_join_wav(audio)
+    expected = "Window. The window looked."
+    manuscript.write_text(expected, encoding="utf-8")
+    local = replace(
+        _alignment("window", "the", "window", "looked"),
+        decode_passes=(
+            DecodePassEvidence(
+                "authority",
+                "",
+                ("window", "the", "window", "looked"),
+                (),
+                0.9,
+                True,
+            ),
+            DecodePassEvidence(
+                "sampled_consensus",
+                "",
+                ("window", "the", "window", "looked"),
+                (),
+                0.8,
+                True,
+            ),
+        ),
+    )
+    aligner = _FakeQaAligner(
+        _alignment("window", "window", "the", "window", "looked"),
+        window_result=local,
+    )
+
+    report = await verify_manuscript(
+        audio,
+        manuscript,
+        expected,
+        language="en",
+        model="fake",
+        revision=None,
+        aligner=cast(MlxWhisperAligner, aligner),
+    )
+
+    assert report.accepted
+    assert report.token_accuracy == 1.0
+    assert report.mismatches == ()
+    assert aligner.windows
+    assert "localized_mismatch_recheck_passed" in report.diagnostic_reason_codes
+
+
+@pytest.mark.asyncio
+async def test_manuscript_verification_requires_two_clean_local_decodes(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "chapter.wav"
+    manuscript = tmp_path / "chapter.md"
+    _write_join_wav(audio)
+    expected = "At the mirror."
+    manuscript.write_text(expected, encoding="utf-8")
+    local = replace(
+        _alignment("at", "the", "mirror"),
+        decode_passes=(
+            DecodePassEvidence(
+                "authority",
+                "",
+                ("at", "the", "mirror"),
+                (),
+                0.9,
+                True,
+            ),
+        ),
+    )
+
+    report = await verify_manuscript(
+        audio,
+        manuscript,
+        expected,
+        language="en",
+        model="fake",
+        revision=None,
+        aligner=cast(
+            MlxWhisperAligner,
+            _FakeQaAligner(
+                _alignment("at", "the", "broken", "mirror"),
+                window_result=local,
+            ),
+        ),
+    )
+
+    assert not report.accepted
+    assert report.mismatches
 
 
 @pytest.mark.asyncio

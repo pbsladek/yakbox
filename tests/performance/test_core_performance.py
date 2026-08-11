@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 import time
 import tracemalloc
 from pathlib import Path
 from typing import cast
 
 import pytest
+import yaml
 
 from yakbox.audiobook import load_manifest, normalize_sources, plan_audiobook
 from yakbox.textutils import iter_batch_rows
@@ -15,7 +15,9 @@ pytestmark = pytest.mark.performance
 
 _BASELINES = cast(
     dict[str, dict[str, float]],
-    json.loads((Path(__file__).parent / "baselines.json").read_text(encoding="utf-8")),
+    yaml.safe_load(
+        (Path(__file__).parent / "baselines.yaml").read_text(encoding="utf-8")
+    ),
 )
 
 

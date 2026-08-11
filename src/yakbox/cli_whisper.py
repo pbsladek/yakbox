@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, Protocol, cast
@@ -26,6 +25,7 @@ from yakbox.short_testing import (
     run_short_test,
     write_short_review,
 )
+from yakbox.voice_quality import qualify_audition_voices
 from yakbox.whisper_calibration import (
     DEFAULT_CALIBRATION_CORPUS,
     calibrate_frozen_corpus,
@@ -43,6 +43,7 @@ from yakbox.whisper_qa import (
     inspect_joins,
     verify_manuscript,
 )
+from yakbox.yaml_config import load_yaml
 
 
 class _Emit(Protocol):
@@ -357,7 +358,7 @@ def whisper_verify_manuscript_command(  # noqa: PLR0917 - Click boundary.
     "--spec",
     required=True,
     type=click.Path(path_type=Path, exists=True, dir_okay=False, readable=True),
-    help="JSON file declaring every join timestamp and optional local context.",
+    help="YAML file declaring every join timestamp and optional local context.",
 )
 @click.option(
     "--window",
@@ -431,7 +432,7 @@ def whisper_inspect_joins_command(  # noqa: PLR0917 - Click boundary.
         data = report.to_dict()
         if out is not None:
             atomic_write_json(out, data)
-    except (YakboxError, OSError, json.JSONDecodeError) as error:
+    except (YakboxError, OSError) as error:
         _fail(error)
     failed = sum(not item.accepted for item in report.joins)
     _emit(
@@ -446,7 +447,7 @@ def whisper_inspect_joins_command(  # noqa: PLR0917 - Click boundary.
 
 
 def _load_join_spec(path: Path) -> tuple[JoinSpecification, ...]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = load_yaml(path, description="Join specification")
     values = raw.get("joins") if isinstance(raw, dict) else raw
     if not isinstance(values, list):
         raise ValidationError("Join spec must be an array or an object with joins")
@@ -589,6 +590,95 @@ def whisper_calibrate_command(corpus: Path, out: Path | None) -> None:
         exit_code=1 if failed else 0,
     )
     if failed:
+        raise click.exceptions.Exit(1)
+
+
+@whisper_group.command("qualify-voices")
+@click.argument(
+    "audition_report",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False, readable=True),
+)
+@click.option(
+    "--expected-file",
+    required=True,
+    type=click.Path(path_type=Path, exists=True, dir_okay=False, readable=True),
+    help="Exact fixed text synthesized by every auditioned voice.",
+)
+@click.option(
+    "--baseline",
+    "baselines",
+    multiple=True,
+    required=True,
+    help="Human-approved audition variant used to derive quality thresholds.",
+)
+@click.option(
+    "--language", default="en", show_default=True, help="Spoken language code."
+)
+@click.option(
+    "--model",
+    default=DEFAULT_WHISPER_MODEL,
+    show_default=True,
+    help="Pinned local Whisper model.",
+)
+@click.option(
+    "--revision",
+    default=DEFAULT_WHISPER_REVISION,
+    show_default=True,
+    help="Immutable model revision.",
+)
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    help="Write the versioned voice-quality report.",
+)
+@click.option(
+    "--cache-dir",
+    type=click.Path(path_type=Path),
+    default=Path(".yakbox/cache/whisper"),
+    show_default=True,
+    help="Content-addressed local Whisper cache.",
+)
+@click.option("--no-cache", is_flag=True, help="Bypass the local Whisper cache.")
+def whisper_qualify_voices_command(  # noqa: PLR0917 - Click boundary.
+    audition_report: Path,
+    expected_file: Path,
+    baselines: tuple[str, ...],
+    language: str,
+    model: str,
+    revision: str | None,
+    out: Path | None,
+    cache_dir: Path,
+    no_cache: bool,
+) -> None:
+    """Qualify fixed-text voice auditions against approved baseline voices."""
+    try:
+        expected = expected_file.read_text(encoding="utf-8")
+        report = asyncio.run(
+            qualify_audition_voices(
+                audition_report,
+                expected,
+                baseline_voices=baselines,
+                language=language,
+                model=model,
+                revision=revision,
+                cache_root=None if no_cache else cache_dir,
+            )
+        )
+        data = report.to_dict()
+        if out is not None:
+            atomic_write_json(out, data)
+    except (YakboxError, OSError, UnicodeDecodeError) as error:
+        _fail(error)
+    suspect = tuple(item.voice for item in report.voices if not item.accepted)
+    _emit(
+        data,
+        f"{'PASS' if report.accepted else 'SUSPECT'}: "
+        f"{len(report.voices) - len(suspect)}/{len(report.voices)} voices qualify; "
+        f"suspect={', '.join(suspect) or 'none'}",
+        status="ok" if report.accepted else "partial_failure",
+        exit_code=0 if report.accepted else 1,
+    )
+    if not report.accepted:
         raise click.exceptions.Exit(1)
 
 

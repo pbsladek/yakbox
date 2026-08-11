@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import importlib
 import inspect
-import json
 import re
 from contextlib import suppress
 from dataclasses import is_dataclass
 from enum import Enum
 from pathlib import Path
 from typing import cast
+
+import yaml
 
 import yakbox.cloud
 import yakbox.speech
@@ -69,8 +70,8 @@ def _public_api() -> dict[str, object]:
 
 
 def test_public_api_matches_reviewed_manifest() -> None:
-    expected = json.loads(
-        (ROOT / "tests" / "public-api-v1.json").read_text(encoding="utf-8")
+    expected = yaml.safe_load(
+        (ROOT / "tests" / "public-api-v1.yaml").read_text(encoding="utf-8")
     )
 
     assert _public_api() == expected

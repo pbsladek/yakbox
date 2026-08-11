@@ -528,9 +528,17 @@ def _audition_contexts(
 
 
 def _spoken_word_count(workspace: Path) -> int:
+    manifest = load_manifest(workspace / "yakbox.toml")
     document = normalize_sources(
-        (workspace / "source" / "book.md",),
-        pronunciations=workspace / "pronunciations.toml",
+        manifest.sources,
+        pronunciations=manifest.pronunciations,
+        max_pause_ms=manifest.max_pause_ms,
+        strip_attribution_tags=manifest.dialogue.strip_attribution_tags,
+        dialogue_routes=manifest.dialogue.routes,
+        expressive_tag_handling=manifest.dialogue.expressive_tag_handling,
+        retain_first_attribution_per_scene=(
+            manifest.dialogue.retain_first_attribution_per_scene
+        ),
     )
     return sum(
         len(item.text.split())
@@ -603,6 +611,12 @@ def _chunk_timeline(
         manifest.sources,
         pronunciations=manifest.pronunciations,
         max_pause_ms=manifest.max_pause_ms,
+        strip_attribution_tags=manifest.dialogue.strip_attribution_tags,
+        dialogue_routes=manifest.dialogue.routes,
+        expressive_tag_handling=manifest.dialogue.expressive_tag_handling,
+        retain_first_attribution_per_scene=(
+            manifest.dialogue.retain_first_attribution_per_scene
+        ),
     )
     plan = plan_audiobook(manifest, document)
     node = next(item for item in plan.nodes if item.stage == "synthesize")

@@ -88,7 +88,7 @@ Interface coverage is enforced separately from statement coverage:
   `cli_help.py`; new command families should move into cohesive modules rather
   than raising the cap;
 - the public SDK's exports, signatures, enum members, and exception codes match
-  `tests/public-api-v1.json`;
+  `tests/public-api-v1.yaml`;
 - every public callable and public method has a docstring, and every export is
   named in `docs/python-api.md`;
 - the built wheel is installed into an isolated virtual environment, then

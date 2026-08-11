@@ -317,6 +317,25 @@ def crop_aligned_wav(
     )
 
 
+def pad_wav_silence(
+    source: Path,
+    destination: Path,
+    *,
+    leading_ms: float = 0,
+    trailing_ms: float = 0,
+    overwrite: bool = False,
+) -> None:
+    """Add exact PCM silence without resampling or changing existing frames."""
+    if leading_ms < 0 or trailing_ms < 0:
+        raise ArtifactError("WAV edge padding cannot be negative")
+    audio = _read_pcm_wave(source)
+    leading_frames = round(audio.sample_rate * leading_ms / 1_000)
+    trailing_frames = round(audio.sample_rate * trailing_ms / 1_000)
+    silence = (0,) * audio.channels
+    frames = (silence,) * leading_frames + audio.frames + (silence,) * trailing_frames
+    _write_pcm_wave(destination, audio, frames, overwrite=overwrite)
+
+
 def wav_duration_seconds(path: Path) -> float:
     """Return the duration of a readable PCM WAV."""
     audio = _read_pcm_wave(path)

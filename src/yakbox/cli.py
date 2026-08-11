@@ -34,6 +34,7 @@ from yakbox.audiobook import (
     build_audiobook,
     check_release,
     diff_releases,
+    explain_synthesis_chunk,
     export_shard_manifests,
     inventory_artifacts,
     inventory_synthesis_cache,
@@ -52,6 +53,7 @@ from yakbox.audiobook import (
 )
 from yakbox.audiobook.artifacts import verify_artifact
 from yakbox.audiobook.manifest import AudiobookManifest, BuildTarget
+from yakbox.cli_dialogue import register_dialogue_commands
 from yakbox.cli_help import configure_cli_help
 from yakbox.cli_options import (
     audio_output_options,
@@ -60,6 +62,7 @@ from yakbox.cli_options import (
     hosted_budget_options,
     text_file_option,
 )
+from yakbox.cli_repair import register_repair_commands
 from yakbox.cli_whisper import register_whisper_commands
 from yakbox.cloud import (
     AudioFormat as CloudAudioFormat,
@@ -299,6 +302,12 @@ quality_max_true_peak_dbfs = -1.0
 quality_max_leading_silence_seconds = 2.0
 quality_max_trailing_silence_seconds = 2.0
 
+[repairs]
+mode = "context"
+takes = 4
+whisper_qa = true
+rebuild_on_approval = true
+
 [retention]
 keep_successful_runs = 3
 audition_days = 30
@@ -337,6 +346,12 @@ def validate_command(manifest: Path) -> None:
             loaded.sources,
             pronunciations=loaded.pronunciations,
             max_pause_ms=loaded.max_pause_ms,
+            strip_attribution_tags=loaded.dialogue.strip_attribution_tags,
+            dialogue_routes=loaded.dialogue.routes,
+            expressive_tag_handling=loaded.dialogue.expressive_tag_handling,
+            retain_first_attribution_per_scene=(
+                loaded.dialogue.retain_first_attribution_per_scene
+            ),
         )
         attribution_findings: dict[str, dict[str, object]] = {}
         for target in loaded.targets:
@@ -372,6 +387,12 @@ def plan_command(manifest: Path, target: str, chapter: str | None) -> None:
             loaded.sources,
             pronunciations=loaded.pronunciations,
             max_pause_ms=loaded.max_pause_ms,
+            strip_attribution_tags=loaded.dialogue.strip_attribution_tags,
+            dialogue_routes=loaded.dialogue.routes,
+            expressive_tag_handling=loaded.dialogue.expressive_tag_handling,
+            retain_first_attribution_per_scene=(
+                loaded.dialogue.retain_first_attribution_per_scene
+            ),
         )
         plan = plan_audiobook(
             loaded, document, target_name=target, chapter_selector=chapter
@@ -389,7 +410,10 @@ def plan_command(manifest: Path, target: str, chapter: str | None) -> None:
             "change_summary": preflight.change_summary.to_dict(),
             "preflight": preflight.to_dict(),
         },
-        f"{len(plan.nodes)} nodes; plan {plan.fingerprint[:12]}",
+        f"{len(plan.nodes)} nodes; plan {plan.fingerprint[:12]}; "
+        f"synthesize {preflight.pending_synthesis_chunks}/"
+        f"{preflight.synthesis_chunks} chunk(s), "
+        f"inspect {preflight.affected_join_count} affected join(s)",
     )
 
 
@@ -413,6 +437,12 @@ def pronunciations_audit_command(manifest: Path, fail_unused: bool) -> None:
             loaded.sources,
             loaded.pronunciations,
             max_pause_ms=loaded.max_pause_ms,
+            strip_attribution_tags=loaded.dialogue.strip_attribution_tags,
+            dialogue_routes=loaded.dialogue.routes,
+            expressive_tag_handling=loaded.dialogue.expressive_tag_handling,
+            retain_first_attribution_per_scene=(
+                loaded.dialogue.retain_first_attribution_per_scene
+            ),
         )
     except (YakboxError, OSError) as error:
         _fail(error)
@@ -781,7 +811,9 @@ def _emit_build_result(result: BuildResult) -> None:
             "resumed": result.resumed,
         },
         f"Build {result.status}: {len(result.artifacts)} artifact(s), "
-        f"{len(result.reused_nodes)} reused",
+        f"{len(result.reused_nodes)} reused; synthesize "
+        f"{result.preflight.pending_synthesis_chunks}/"
+        f"{result.preflight.synthesis_chunks} chunk(s)",
     )
 
 
@@ -1026,6 +1058,12 @@ def explain_command(
             loaded.sources,
             pronunciations=loaded.pronunciations,
             max_pause_ms=loaded.max_pause_ms,
+            strip_attribution_tags=loaded.dialogue.strip_attribution_tags,
+            dialogue_routes=loaded.dialogue.routes,
+            expressive_tag_handling=loaded.dialogue.expressive_tag_handling,
+            retain_first_attribution_per_scene=(
+                loaded.dialogue.retain_first_attribution_per_scene
+            ),
         )
         plan = plan_audiobook(
             loaded, document, target_name=target, chapter_selector=chapter
@@ -1189,6 +1227,51 @@ def artifacts_cache_list_command(manifest: Path) -> None:
     )
 
 
+@artifacts_cache_group.command("inspect")
+@click.argument("fingerprint")
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+def artifacts_cache_inspect_command(fingerprint: str, manifest: Path) -> None:
+    """Show privacy-safe request metadata for one cache entry."""
+    loaded = _manifest(manifest)
+    entry = next(
+        (
+            item
+            for item in inventory_synthesis_cache(loaded.root).entries
+            if item.fingerprint == fingerprint
+        ),
+        None,
+    )
+    if entry is None:
+        _fail(ValidationError(f"Unknown synthesis cache fingerprint: {fingerprint}"))
+    value = entry.to_dict(root=loaded.root)
+    _emit(value, f"{fingerprint}: {'valid' if entry.valid else 'invalid'}")
+
+
+@artifacts_cache_group.command("why-miss")
+@click.argument("chunk_id")
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+@click.option("--target", default="default", show_default=True)
+def artifacts_cache_why_miss_command(
+    chunk_id: str,
+    manifest: Path,
+    target: str,
+) -> None:
+    """Explain the exact settings that caused a chunk cache miss."""
+    try:
+        value = explain_synthesis_chunk(
+            load_manifest(manifest),
+            chunk_id=chunk_id,
+            target_name=target,
+        )
+    except (YakboxError, OSError, ValueError) as error:
+        _fail(error)
+    reasons = value.get("reasons")
+    detail = (
+        ", ".join(str(item) for item in reasons) if isinstance(reasons, list) else ""
+    )
+    _emit(value, f"{chunk_id}: {value['status']}" + (f" ({detail})" if detail else ""))
+
+
 @artifacts_cache_group.command("clean")
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--max-age-days", type=click.IntRange(min=0))
@@ -1299,6 +1382,12 @@ def artifacts_clean_command(  # noqa: PLR0917 - Click injects CLI parameters.
                 loaded.sources,
                 pronunciations=loaded.pronunciations,
                 max_pause_ms=loaded.max_pause_ms,
+                strip_attribution_tags=loaded.dialogue.strip_attribution_tags,
+                dialogue_routes=loaded.dialogue.routes,
+                expressive_tag_handling=loaded.dialogue.expressive_tag_handling,
+                retain_first_attribution_per_scene=(
+                    loaded.dialogue.retain_first_attribution_per_scene
+                ),
             ),
             target_name=target,
         )
@@ -1654,6 +1743,12 @@ def shards_export_command(
             loaded.sources,
             pronunciations=loaded.pronunciations,
             max_pause_ms=loaded.max_pause_ms,
+            strip_attribution_tags=loaded.dialogue.strip_attribution_tags,
+            dialogue_routes=loaded.dialogue.routes,
+            expressive_tag_handling=loaded.dialogue.expressive_tag_handling,
+            retain_first_attribution_per_scene=(
+                loaded.dialogue.retain_first_attribution_per_scene
+            ),
         )
         plan = plan_audiobook(loaded, document, target_name=target)
         directory = (
@@ -2872,5 +2967,7 @@ def _keyring_password(profile: str) -> str | None:
         return None
 
 
+register_dialogue_commands(main, emit=_emit, fail=_fail)
+register_repair_commands(main, emit=_emit, fail=_fail)
 register_whisper_commands(main, emit=_emit, fail=_fail)
 configure_cli_help(main)

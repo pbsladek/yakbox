@@ -118,12 +118,16 @@ gender = "male"
 
 [characters.character-5]
 display_name = "Character 5"
-profile = "stuart-bell"
+profile = "john-greenman"
 gender = "male"
 
 [dialogue]
 attribution_assistance = "warn"
 short_utterance_words = 3
+strip_attribution_tags = true
+expressive_tag_handling = "context"
+retain_first_attribution_per_scene = false
+# routes = "dialogue-routes.toml"
 
 [whisper_qa]
 chapter_verification = true
@@ -176,12 +180,13 @@ keep_candidates = true
 ```
 
 The bundled local example continues the generic mapping through
-`character-24`: Karen Savage, Elizabeth Klett, Cori Samuel, Mil Nicholson, and
+`character-24`: Karen Savage, Amanda Friday, Cori Samuel, Mil Nicholson, and
 Lucy Burgoyne occupy female slots 6–10; Mark F. Smith, Bob Neufeld, Mark
-Nelson, David Barnes, Adrian Praetzellis, Gregg Margarite, David Clarke, Martin
-Geeson, Phil Chenevert, and Peter Yearsley occupy male slots 11–20; Kara
-Shallenberg, Kirsten Ferreri, Sibella Denton, and Laurie Anne Walden occupy
-female slots 21–24. These are editable defaults, not inferred casting rules.
+Nelson, David Barnes, Simon Evers, Gregg Margarite, Tony Foster, Martin
+Geeson, Phil Chenevert, and Peter Yearsley occupy male slots 11–20; Kirsten
+Ferreri, Sibella Denton, and Laurie Anne Walden occupy female slots 21–23.
+John Burlinson occupies male slot 24. These are editable defaults, not inferred
+casting rules.
 
 The settings under a character override that character's Chatterbox profile.
 They don't change the profile used by anyone else. All routed profiles must use
@@ -267,9 +272,39 @@ The signal sharpened. Every unmarked paragraph returns to the narrator.
 A speaker directive applies to exactly the next spoken paragraph. Within a
 routed paragraph, paired straight, curly, or guillemet double quotation marks
 identify the character's spoken text. Yakbox routes the quoted spans to the
-character and surrounding action or attribution such as `Wren said` back to the
-narrator. The paired quote delimiters identify the route but are not submitted
-to speech synthesis; punctuation inside them is preserved. A routed paragraph
+character and surrounding action back to the narrator. With
+`strip_attribution_tags = true`, common speech tags are omitted—including
+`Wren said`, `she replied`, and `asked Wren`—because the routed voice already
+identifies the speaker. Action beats without a speech-attribution verb remain
+on the narrator route. Set the field to `false` (the compatibility default) to
+have the narrator read every tag.
+
+Tag stripping also handles an attribution between two quoted spans. For
+example, `“What could be doing that?” Wren asked. “Some kind of magic?”`
+becomes one Wren turn: `What could be doing that? Some kind of magic?`. If a
+quote ends in a comma solely because a tag follows it, Yakbox closes it with a
+period when the tag is removed. An interrupted sentence such as `“If you
+think,” Wren said, “that I am leaving...”` instead becomes `If you think that I
+am leaving...`; removing the tag does not split the sentence. Unmarked narrator
+dialogue is never rewritten.
+
+Yakbox classifies recognized tags as pure (`said`, `asked`, `replied`) or
+expressive (`snapped`, `whispered`, `with contempt`).
+`expressive_tag_handling = "context"` is the default: expressive tags are not
+spoken, but they are available as hidden carrier context when a short line is
+synthesized and cropped. Use `"narrate"` to keep expressive tags on the
+narrator route, or `"strip"` to discard that performance context. Pure stripped
+tags are also available to short-utterance synthesis. Build plans contain only
+their kind, position, and SHA-256 digest—not their text.
+
+Set `retain_first_attribution_per_scene = true` to have the narrator speak the
+first recognized tag for each routed character after a level-one or level-two
+heading and after each Markdown thematic break (`---`, `***`, or `___`). Later
+tags for that character are stripped normally. An untagged first turn does not
+consume the retained introduction.
+
+The paired quote delimiters identify the route but are not submitted to speech
+synthesis; punctuation inside them is otherwise preserved. A routed paragraph
 without paired double quotation marks remains one character turn. The directive
 does not remain active and cannot be placed inline. `yakbox plan --json` records
 the resolved speaker, profile, and performance settings for every speech chunk.
@@ -301,6 +336,47 @@ sentence pause, and only the final routed span uses the paragraph pause. This
 avoids inserting a full paragraph break between a line and its attribution.
 Artifact sidecars keep the primary narrator in `logical_voice` for backward
 compatibility and list the complete routed cast in `logical_voices`.
+
+### Reviewed dialogue route sidecars
+
+For manuscripts without inline speaker directives, configure a reviewed route
+file and generate conservative suggestions:
+
+```toml
+[dialogue]
+routes = "dialogue-routes.toml"
+strip_attribution_tags = true
+expressive_tag_handling = "context"
+retain_first_attribution_per_scene = false
+```
+
+```console
+yakbox dialogue routes suggest yakbox.toml
+```
+
+The generated TOML records the source-relative path, paragraph start line,
+speaker, reason, and `status = "suggested"`. Review each entry and change its
+status to `approved` or `rejected`; suggested routes deliberately fail builds.
+Then validate exact line matching and declared speakers:
+
+```console
+yakbox dialogue routes check yakbox.toml
+```
+
+Approved routes behave like one-shot inline speaker directives. Yakbox rejects
+duplicate, stale, out-of-workspace, undeclared, and inline-conflicting entries
+instead of guessing. Regenerate and review the sidecar after moving manuscript
+paragraphs.
+
+Before synthesis, write a local, explicit-text transformation report:
+
+```console
+yakbox dialogue preview yakbox.toml --output dialogue-preview.json
+```
+
+The versioned report shows every routed paragraph, final spoken spans, speakers,
+and stripped tags. It intentionally contains manuscript text, stays inside the
+workspace, and will not overwrite an existing file unless `--force` is passed.
 
 Attribution assistance is advisory and never rewrites the manuscript. In
 `warn` mode, `validate` and `plan` report quoted paragraphs that still use the
@@ -353,3 +429,18 @@ matches, and manuscript line locations.
 Use UTF-8 `.md` or `.txt` sources. Keep manuscript files, the pronunciation
 sidecar, and licensed reference audio under normal project backup/versioning;
 they are never cleanup candidates.
+# Localized repair defaults
+
+The optional `[repairs]` table controls the normal editing loop without tying
+the build engine to a particular book:
+
+```toml
+[repairs]
+mode = "context"
+takes = 4
+whisper_qa = true
+rebuild_on_approval = true
+```
+
+See [Localized regeneration and repair](localized-repair.md) for the selection,
+audition, approval, and rebuild commands.

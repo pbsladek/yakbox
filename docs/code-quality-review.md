@@ -112,7 +112,7 @@ source-aware migration warnings.
 The Python SDK now has explicit facade exports, typed request objects, shared
 audio enums, validated hosted-pricing identifiers, stable exception codes, and
 semantic public docstrings. Its exports, signatures, enum members, and error
-codes are reviewed in `tests/public-api-v1.json`. CI installs the built wheel
+codes are reviewed in `tests/public-api-v1.yaml`. CI installs the built wheel
 into an isolated environment, imports every public export, and type-checks a
 representative consumer without resolving the source tree.
 

@@ -50,7 +50,16 @@ The batch formats match local batch:
 
 - `.txt`: one non-empty row per line;
 - `.csv`: header plus required `text`; optional `id`, `voice_uuid`, `title`;
-- `.jsonl`: one object per line using the same fields.
+- `.yaml` or `.yml`: a sequence of mappings using the same fields. For very
+  large batches, use one mapping per YAML document (`---`) for streaming.
+
+```yaml
+- text: First line to synthesize.
+  id: opening
+  title: Opening
+- text: Second line to synthesize.
+  id: follow-up
+```
 
 ```console
 yakbox cloud batch lines.csv \

@@ -101,6 +101,24 @@ def test_manifest_parses_hosted_confirmation_and_storage_limits(
     assert manifest.retention.raw_until_release
 
 
+def test_manifest_parses_localized_repair_defaults(tmp_path: Path) -> None:
+    manifest = load_manifest(
+        _write_manifest(
+            tmp_path,
+            "\n[repairs]\n"
+            'mode = "paragraph"\n'
+            "takes = 6\n"
+            "whisper_qa = false\n"
+            "rebuild_on_approval = false\n",
+        )
+    )
+
+    assert manifest.repairs.mode == "paragraph"
+    assert manifest.repairs.takes == 6
+    assert not manifest.repairs.whisper_qa
+    assert not manifest.repairs.rebuild_on_approval
+
+
 def test_local_chatterbox_defaults_to_cpu(tmp_path: Path) -> None:
     path = _write_manifest(tmp_path)
     content = path.read_text(encoding="utf-8").replace(
@@ -113,6 +131,7 @@ def test_local_chatterbox_defaults_to_cpu(tmp_path: Path) -> None:
     assert isinstance(options, ChatterboxOptions)
     assert options.device == "cpu"
     assert options.seed == 0
+    assert not load_manifest(path).dialogue.strip_attribution_tags
 
 
 def test_whisper_qa_policy_is_configurable_and_workspace_scoped(
@@ -143,6 +162,15 @@ def test_whisper_qa_policy_is_configurable_and_workspace_scoped(
 def test_character_profiles_and_performance_overrides_are_resolved(
     tmp_path: Path,
 ) -> None:
+    routes = tmp_path / "dialogue-routes.toml"
+    routes.write_text(
+        '"$schema" = "https://yakbox.dev/schemas/dialogue-routes-v1.schema.json"\n'
+        "schema_version = 1\n"
+        "[[routes]]\n"
+        'source = "book.md"\nline = 3\nspeaker = "mara"\n'
+        'status = "approved"\n',
+        encoding="utf-8",
+    )
     manifest = load_manifest(
         _write_character_manifest(
             tmp_path,
@@ -162,6 +190,9 @@ def test_character_profiles_and_performance_overrides_are_resolved(
                 "[dialogue]\n"
                 'attribution_assistance = "warn"\n'
                 "short_utterance_words = 4\n"
+                "strip_attribution_tags = true\n"
+                "retain_first_attribution_per_scene = true\n"
+                'routes = "dialogue-routes.toml"\n'
             ),
         )
     )
@@ -177,6 +208,9 @@ def test_character_profiles_and_performance_overrides_are_resolved(
     assert manifest.character("wren").gender == "male"
     assert manifest.character("narrator").gender == "unspecified"
     assert manifest.dialogue.short_utterance_words == 4
+    assert manifest.dialogue.strip_attribution_tags
+    assert manifest.dialogue.retain_first_attribution_per_scene
+    assert manifest.dialogue.routes == routes
 
 
 @pytest.mark.parametrize(
@@ -200,6 +234,12 @@ def test_character_profiles_and_performance_overrides_are_resolved(
             '[characters.narrator]\nprofile = "narrator"\n'
             '[characters.mara]\nprofile = "mara"\ngender = "robot"\n',
             "must be female, male, or unspecified",
+        ),
+        (
+            '[characters.narrator]\nprofile = "narrator"\n'
+            '[characters.mara]\nprofile = "mara"\n'
+            '[dialogue]\nstrip_attribution_tags = "yes"\n',
+            "dialogue.strip_attribution_tags must be boolean",
         ),
     ],
 )

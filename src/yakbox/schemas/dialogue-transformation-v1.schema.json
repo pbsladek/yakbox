@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/dialogue-transformation-v1.schema.json",
+  "title": "yakbox dialogue transformation preview",
+  "type": "object",
+  "required": [
+    "$schema",
+    "schema_version",
+    "yakbox_version",
+    "timestamp",
+    "manifest",
+    "strip_attribution_tags",
+    "expressive_tag_handling",
+    "retain_first_attribution_per_scene",
+    "paragraph_count",
+    "stripped_tag_count",
+    "paragraphs"
+  ],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/dialogue-transformation-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "manifest": {"type": "string", "minLength": 1},
+    "strip_attribution_tags": {"type": "boolean"},
+    "expressive_tag_handling": {"enum": ["context", "narrate", "strip"]},
+    "retain_first_attribution_per_scene": {"type": "boolean"},
+    "paragraph_count": {"type": "integer", "minimum": 0},
+    "stripped_tag_count": {"type": "integer", "minimum": 0},
+    "paragraphs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "spans", "stripped_tags"],
+        "properties": {
+          "source": {
+            "type": "object",
+            "required": ["path", "start_line", "end_line"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "start_line": {"type": "integer", "minimum": 1},
+              "end_line": {"type": "integer", "minimum": 1}
+            },
+            "additionalProperties": false
+          },
+          "spans": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["speaker", "spoken", "speaker_explicit"],
+              "properties": {
+                "speaker": {"type": "string", "minLength": 1},
+                "spoken": {"type": "string", "minLength": 1},
+                "speaker_explicit": {"type": "boolean"}
+              },
+              "additionalProperties": false
+            }
+          },
+          "stripped_tags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["text", "kind"],
+              "properties": {
+                "text": {"type": "string", "minLength": 1},
+                "kind": {"enum": ["pure", "expressive"]}
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

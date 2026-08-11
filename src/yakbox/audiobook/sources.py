@@ -5,12 +5,14 @@ import re
 import tomllib
 import unicodedata
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
+from yakbox.contracts import schema_uri
 from yakbox.errors import ValidationError
 from yakbox.speech.chunking import (
     CHATTERBOX_CHUNK_CHARACTERS,
@@ -48,6 +50,131 @@ _SPEAKER_PATTERN = re.compile(
     rf"(?:\s*-->)?"
 )
 _DIALOGUE_QUOTE_PATTERN = re.compile(r'"[^"\n]+"|“[^”\n]+”|«[^»\n]+»')
+_ATTRIBUTION_VERBS = frozenset(
+    {
+        "added",
+        "adds",
+        "admitted",
+        "admits",
+        "agreed",
+        "agrees",
+        "announced",
+        "announces",
+        "answered",
+        "answers",
+        "asked",
+        "asks",
+        "begged",
+        "begs",
+        "called",
+        "calls",
+        "confessed",
+        "confesses",
+        "continued",
+        "continues",
+        "countered",
+        "counters",
+        "cried",
+        "cries",
+        "declared",
+        "declares",
+        "demanded",
+        "demands",
+        "explained",
+        "explains",
+        "growled",
+        "growls",
+        "hissed",
+        "hisses",
+        "insisted",
+        "insists",
+        "interrupted",
+        "interrupts",
+        "joked",
+        "jokes",
+        "murmured",
+        "murmurs",
+        "muttered",
+        "mutters",
+        "noted",
+        "notes",
+        "objected",
+        "objects",
+        "observed",
+        "observes",
+        "pleaded",
+        "pleads",
+        "protested",
+        "protests",
+        "quipped",
+        "quips",
+        "remarked",
+        "remarks",
+        "repeated",
+        "repeats",
+        "replied",
+        "replies",
+        "responded",
+        "responds",
+        "said",
+        "says",
+        "shouted",
+        "shouts",
+        "snapped",
+        "snaps",
+        "stammered",
+        "stammers",
+        "stated",
+        "states",
+        "stuttered",
+        "stutters",
+        "suggested",
+        "suggests",
+        "warned",
+        "warns",
+        "whispered",
+        "whispers",
+        "yelled",
+        "yells",
+        "sounded",
+        "sounds",
+    }
+)
+_EXPRESSIVE_ATTRIBUTION_VERBS = frozenset(
+    {
+        "cried",
+        "cries",
+        "growled",
+        "growls",
+        "hissed",
+        "hisses",
+        "murmured",
+        "murmurs",
+        "muttered",
+        "mutters",
+        "shouted",
+        "shouts",
+        "snapped",
+        "snaps",
+        "sounded",
+        "sounds",
+        "stammered",
+        "stammers",
+        "stuttered",
+        "stutters",
+        "whispered",
+        "whispers",
+        "yelled",
+        "yells",
+    }
+)
+_EXPRESSIVE_TAG_PATTERN = re.compile(
+    r"\b(?:with|flat|flatly|amused|angrily|bitterly|cheerfully|coldly|"
+    r"contempt|disgust|dryly|gently|harshly|quietly|sharply|softly)\b",
+    re.IGNORECASE,
+)
+_WORD_PATTERN = re.compile(r"[^\W\d_]+(?:['\u2019][^\W\d_]+)?", re.UNICODE)
+_SENTENCE_GAP_PATTERN = re.compile(r"(?<=[.!?])\s+")
 _DIRECTIVE_GAP = "\ue000"
 
 
@@ -58,6 +185,29 @@ class SourceLocation:
     path: Path
     start_line: int
     end_line: int
+
+
+class AttributionTagKind(StrEnum):
+    """Semantic class of a recognized dialogue attribution tag."""
+
+    PURE = "pure"
+    EXPRESSIVE = "expressive"
+
+
+class AttributionContextPosition(StrEnum):
+    """Position of a stripped attribution relative to its dialogue."""
+
+    BEFORE = "before"
+    AFTER = "after"
+
+
+@dataclass(frozen=True, slots=True)
+class AttributionContext:
+    """A stripped tag retained as non-spoken synthesis context."""
+
+    text: str
+    kind: AttributionTagKind
+    position: AttributionContextPosition
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +223,7 @@ class SpeechSegment:
     speaker_explicit: bool = False
     profile_override: str | None = None
     boundary_after: ChunkBoundary = ChunkBoundary.PARAGRAPH
+    attribution_context: tuple[AttributionContext, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +237,7 @@ class _SourceEvent:
     profile_override: str | None = None
     narrator_profile_override: str | None = None
     boundary_after: ChunkBoundary = ChunkBoundary.PARAGRAPH
+    attribution_context: tuple[AttributionContext, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +246,22 @@ class _PendingSpeaker:
     profile: str | None
     narrator_profile: str | None
     line: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ReviewedDialogueRoute:
+    source: Path
+    line: int
+    speaker: str
+
+
+@dataclass(frozen=True, slots=True)
+class _DialogueRouteEntry:
+    source: Path
+    source_value: str
+    line: int
+    speaker: str
+    status: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,9 +380,19 @@ def normalize_sources(
     *,
     pronunciations: Path | None = None,
     max_pause_ms: int = 30_000,
+    strip_attribution_tags: bool = False,
+    dialogue_routes: Path | None = None,
+    expressive_tag_handling: str = "context",
+    retain_first_attribution_per_scene: bool = False,
 ) -> NormalizedDocument:
     """Parse source files into deterministic chapters, speech, and pause events."""
+    if expressive_tag_handling not in {"context", "narrate", "strip"}:
+        raise ValidationError(
+            "expressive_tag_handling must be context, narrate, or strip"
+        )
     rules = _load_pronunciations(pronunciations)
+    routes = _load_dialogue_routes(dialogue_routes, paths)
+    used_routes: set[tuple[Path, int]] = set()
     chapters: list[Chapter] = []
     for path in paths:
         chapters.extend(
@@ -223,7 +401,18 @@ def normalize_sources(
                 start_order=len(chapters) + 1,
                 rules=rules,
                 max_pause_ms=max_pause_ms,
+                strip_attribution_tags=strip_attribution_tags,
+                dialogue_routes=routes,
+                used_dialogue_routes=used_routes,
+                expressive_tag_handling=expressive_tag_handling,
+                retain_first_attribution_per_scene=retain_first_attribution_per_scene,
             )
+        )
+    unused_routes = set(routes) - used_routes
+    if unused_routes:
+        source, line = min(unused_routes, key=lambda item: (str(item[0]), item[1]))
+        raise ValidationError(
+            f"Dialogue route does not match a spoken paragraph: {source}:{line}"
         )
     if not chapters:
         raise ValidationError("No speakable content was found")
@@ -248,10 +437,21 @@ def audit_pronunciations(
     pronunciations: Path | None,
     *,
     max_pause_ms: int = 30_000,
+    strip_attribution_tags: bool = False,
+    dialogue_routes: Path | None = None,
+    expressive_tag_handling: str = "context",
+    retain_first_attribution_per_scene: bool = False,
 ) -> PronunciationAudit:
     """Report which approved pronunciation rules affect speakable source text."""
     rules = _load_pronunciations(pronunciations)
-    document = normalize_sources(paths, max_pause_ms=max_pause_ms)
+    document = normalize_sources(
+        paths,
+        max_pause_ms=max_pause_ms,
+        strip_attribution_tags=strip_attribution_tags,
+        dialogue_routes=dialogue_routes,
+        expressive_tag_handling=expressive_tag_handling,
+        retain_first_attribution_per_scene=retain_first_attribution_per_scene,
+    )
     matches = [0] * len(rules)
     applied = [0] * len(rules)
     locations: list[list[SourceLocation]] = [[] for _rule in rules]
@@ -294,13 +494,27 @@ def _normalize_one(
     start_order: int,
     rules: tuple[Pronunciation, ...],
     max_pause_ms: int,
+    strip_attribution_tags: bool,
+    dialogue_routes: dict[tuple[Path, int], _ReviewedDialogueRoute],
+    used_dialogue_routes: set[tuple[Path, int]],
+    expressive_tag_handling: str,
+    retain_first_attribution_per_scene: bool,
 ) -> list[Chapter]:
     source = _read_source(path)
     prepared = _apply_directives(source, path=path, max_pause_ms=max_pause_ms)
     tokens = MarkdownIt("commonmark", {"html": True}).parse(prepared)
     chapters: list[Chapter] = []
     order = start_order
-    for title, blocks in _chapter_blocks(tokens, _default_chapter_title(path), path):
+    for title, blocks in _chapter_blocks(
+        tokens,
+        _default_chapter_title(path),
+        path,
+        strip_attribution_tags=strip_attribution_tags,
+        dialogue_routes=dialogue_routes,
+        used_dialogue_routes=used_dialogue_routes,
+        expressive_tag_handling=expressive_tag_handling,
+        retain_first_attribution_per_scene=retain_first_attribution_per_scene,
+    ):
         chapter = _build_chapter(path, title, order, blocks, rules)
         if chapter is not None:
             chapters.append(chapter)
@@ -325,11 +539,25 @@ def _chapter_blocks(
     tokens: list[Token],
     default_title: str,
     path: Path,
+    *,
+    strip_attribution_tags: bool,
+    dialogue_routes: dict[tuple[Path, int], _ReviewedDialogueRoute],
+    used_dialogue_routes: set[tuple[Path, int]],
+    expressive_tag_handling: str,
+    retain_first_attribution_per_scene: bool,
 ) -> list[tuple[str, tuple[_SourceEvent, ...]]]:
     chapters: list[tuple[str, tuple[_SourceEvent, ...]]] = []
     current_title = default_title
     current: list[_SourceEvent] = []
-    for event in _source_events(tokens, path):
+    for event in _source_events(
+        tokens,
+        path,
+        strip_attribution_tags=strip_attribution_tags,
+        dialogue_routes=dialogue_routes,
+        used_dialogue_routes=used_dialogue_routes,
+        expressive_tag_handling=expressive_tag_handling,
+        retain_first_attribution_per_scene=retain_first_attribution_per_scene,
+    ):
         if event.kind == "heading":
             if current:
                 chapters.append((current_title, tuple(current)))
@@ -343,23 +571,64 @@ def _chapter_blocks(
     return chapters
 
 
-def _source_events(tokens: list[Token], path: Path) -> list[_SourceEvent]:
+def _source_events(
+    tokens: list[Token],
+    path: Path,
+    *,
+    strip_attribution_tags: bool,
+    dialogue_routes: dict[tuple[Path, int], _ReviewedDialogueRoute],
+    used_dialogue_routes: set[tuple[Path, int]],
+    expressive_tag_handling: str,
+    retain_first_attribution_per_scene: bool,
+) -> list[_SourceEvent]:
     events: list[_SourceEvent] = []
     pending_speaker: _PendingSpeaker | None = None
+    attributed_speakers: set[str] = set()
     index = 0
     while index < len(tokens):
         token = tokens[index]
         if token.type == "heading_open" and token.tag in {"h1", "h2"}:
             _require_used_speaker(pending_speaker, path)
+            attributed_speakers.clear()
             inline = tokens[index + 1] if index + 1 < len(tokens) else None
             heading = _inline_text(inline.children or []) if inline else ""
             events.append(_SourceEvent("heading", heading, 0, 0))
             index += 3
             continue
+        if token.type == "hr":
+            _require_used_speaker(pending_speaker, path)
+            attributed_speakers.clear()
+            index += 1
+            continue
         if token.type == "paragraph_open":
             event = _paragraph_source_event(tokens, index, pending_speaker)
             if event is not None:
-                events.extend(_split_routed_dialogue(event))
+                event = _apply_dialogue_route(
+                    event,
+                    pending_speaker=pending_speaker,
+                    path=path,
+                    dialogue_routes=dialogue_routes,
+                    used_dialogue_routes=used_dialogue_routes,
+                )
+                retain_attribution = (
+                    retain_first_attribution_per_scene
+                    and strip_attribution_tags
+                    and event.speaker_explicit
+                    and event.speaker != "narrator"
+                    and event.speaker not in attributed_speakers
+                    and _contains_dialogue_attribution(event.text)
+                )
+                events.extend(
+                    _split_routed_dialogue(
+                        event,
+                        strip_attribution_tags=(
+                            strip_attribution_tags and not retain_attribution
+                        ),
+                        expressive_tag_handling=expressive_tag_handling,
+                    )
+                )
+                if retain_attribution:
+                    attributed_speakers.add(event.speaker)
                 pending_speaker = None
         elif token.type == "html_block":
             event, pending_speaker = _html_source_event(token, pending_speaker, path)
@@ -368,6 +637,36 @@ def _source_events(tokens: list[Token], path: Path) -> list[_SourceEvent]:
         index += 1
     _require_used_speaker(pending_speaker, path)
     return events
+
+
+def _apply_dialogue_route(
+    event: _SourceEvent,
+    *,
+    pending_speaker: _PendingSpeaker | None,
+    path: Path,
+    dialogue_routes: dict[tuple[Path, int], _ReviewedDialogueRoute],
+    used_dialogue_routes: set[tuple[Path, int]],
+) -> _SourceEvent:
+    route_key = (path.resolve(), event.start)
+    route = dialogue_routes.get(route_key)
+    if route is None:
+        return event
+    if pending_speaker is not None:
+        raise ValidationError(
+            f"{path}:{event.start}: dialogue route conflicts with a speaker directive"
+        )
+    used_dialogue_routes.add(route_key)
+    return replace(event, speaker=route.speaker, speaker_explicit=True)
+
+
+def _contains_dialogue_attribution(text: str) -> bool:
+    """Return whether prose outside quote delimiters contains a known tag."""
+    cursor = 0
+    for match in _DIALOGUE_QUOTE_PATTERN.finditer(text):
+        if _dialogue_attribution_kind(text[cursor : match.start()]) is not None:
+            return True
+        cursor = match.end()
+    return _dialogue_attribution_kind(text[cursor:]) is not None
 
 
 def _paragraph_source_event(
@@ -397,7 +696,12 @@ def _paragraph_source_event(
     )
 
 
-def _split_routed_dialogue(event: _SourceEvent) -> tuple[_SourceEvent, ...]:
+def _split_routed_dialogue(
+    event: _SourceEvent,
+    *,
+    strip_attribution_tags: bool,
+    expressive_tag_handling: str,
+) -> tuple[_SourceEvent, ...]:
     """Route quoted speech to a character and surrounding prose to narration."""
     if not event.speaker_explicit or event.speaker == "narrator":
         return (event,)
@@ -407,11 +711,32 @@ def _split_routed_dialogue(event: _SourceEvent) -> tuple[_SourceEvent, ...]:
 
     result: list[_SourceEvent] = []
     cursor = 0
+    pending_context: tuple[AttributionContext, ...] = ()
     for match in matches:
-        _append_dialogue_event(result, event, event.text[cursor : match.start()], False)
-        _append_dialogue_event(result, event, match.group()[1:-1], True)
+        surrounding = event.text[cursor : match.start()]
+        pending_context = _append_routed_surrounding(
+            result,
+            event,
+            surrounding,
+            strip_attribution_tags=strip_attribution_tags,
+            expressive_tag_handling=expressive_tag_handling,
+        )
+        _append_dialogue_event(
+            result,
+            event,
+            match.group()[1:-1],
+            True,
+            attribution_context=pending_context,
+        )
         cursor = match.end()
-    _append_dialogue_event(result, event, event.text[cursor:], False)
+    surrounding = event.text[cursor:]
+    _append_routed_surrounding(
+        result,
+        event,
+        surrounding,
+        strip_attribution_tags=strip_attribution_tags,
+        expressive_tag_handling=expressive_tag_handling,
+    )
     if not result:
         return (event,)
     return tuple(
@@ -427,6 +752,118 @@ def _split_routed_dialogue(event: _SourceEvent) -> tuple[_SourceEvent, ...]:
     )
 
 
+def _append_routed_surrounding(
+    result: list[_SourceEvent],
+    event: _SourceEvent,
+    text: str,
+    *,
+    strip_attribution_tags: bool,
+    expressive_tag_handling: str,
+) -> tuple[AttributionContext, ...]:
+    """Append narrator prose while optionally removing attribution sentences."""
+    if not strip_attribution_tags:
+        _append_dialogue_event(result, event, text, False)
+        return ()
+    remaining, stripped_contexts = transform_dialogue_attributions(
+        text,
+        expressive_tag_handling=expressive_tag_handling,
+    )
+    contexts = tuple(
+        context
+        for context in stripped_contexts
+        if not (
+            context.kind is AttributionTagKind.EXPRESSIVE
+            and expressive_tag_handling == "strip"
+        )
+    )
+    if stripped_contexts:
+        _close_dialogue_before_stripped_attribution(
+            result,
+            continues_sentence=stripped_contexts[-1].text.rstrip().endswith(","),
+        )
+        if result and result[-1].speaker_explicit:
+            previous = result[-1]
+            result[-1] = replace(
+                previous,
+                attribution_context=_unique_attribution_context(
+                    (
+                        *previous.attribution_context,
+                        *(
+                            replace(
+                                context,
+                                position=AttributionContextPosition.AFTER,
+                            )
+                            for context in contexts
+                        ),
+                    )
+                ),
+            )
+    _append_dialogue_event(result, event, remaining, False)
+    return tuple(
+        replace(context, position=AttributionContextPosition.BEFORE)
+        for context in contexts
+    )
+
+
+def transform_dialogue_attributions(
+    text: str,
+    *,
+    expressive_tag_handling: str,
+) -> tuple[str, tuple[AttributionContext, ...]]:
+    """Remove canonical attribution sentences and retain adjacent action prose."""
+    fragments = _SENTENCE_GAP_PATTERN.split(text.strip())
+    remaining: list[str] = []
+    contexts: list[AttributionContext] = []
+    for fragment in fragments:
+        kind = _dialogue_attribution_kind(fragment)
+        if kind is None or (
+            kind is AttributionTagKind.EXPRESSIVE
+            and expressive_tag_handling == "narrate"
+        ):
+            remaining.append(fragment)
+            continue
+        contexts.append(
+            AttributionContext(
+                fragment.strip(),
+                kind,
+                AttributionContextPosition.AFTER,
+            )
+        )
+    return " ".join(remaining), tuple(contexts)
+
+
+def _dialogue_attribution_kind(text: str) -> AttributionTagKind | None:
+    """Classify an unquoted routed fragment as pure or expressive attribution."""
+    words = {match.group().casefold() for match in _WORD_PATTERN.finditer(text)}
+    verbs = words & _ATTRIBUTION_VERBS
+    if not verbs:
+        return None
+    if verbs & _EXPRESSIVE_ATTRIBUTION_VERBS or _EXPRESSIVE_TAG_PATTERN.search(text):
+        return AttributionTagKind.EXPRESSIVE
+    return AttributionTagKind.PURE
+
+
+def _unique_attribution_context(
+    values: tuple[AttributionContext, ...],
+) -> tuple[AttributionContext, ...]:
+    return tuple(dict.fromkeys(values))
+
+
+def _close_dialogue_before_stripped_attribution(
+    result: list[_SourceEvent],
+    *,
+    continues_sentence: bool,
+) -> None:
+    """Make comma-ended dialogue grammatical after its attribution is removed."""
+    if not result or not result[-1].speaker_explicit:
+        return
+    previous = result[-1]
+    replacement = "" if continues_sentence else "."
+    closed = re.sub(r"[,;:]\s*$", replacement, previous.text)
+    if closed != previous.text:
+        result[-1] = replace(previous, text=closed)
+
+
 def _internal_dialogue_boundary(text: str) -> ChunkBoundary:
     """Infer the pause at an intra-paragraph speaker handoff."""
     tail = text.rstrip().rstrip("\"”'\u2019»)]}")
@@ -440,6 +877,8 @@ def _append_dialogue_event(
     event: _SourceEvent,
     text: str,
     character_speech: bool,
+    *,
+    attribution_context: tuple[AttributionContext, ...] = (),
 ) -> None:
     spoken = text.strip()
     if not spoken:
@@ -458,6 +897,7 @@ def _append_dialogue_event(
             if character_speech
             else event.narrator_profile_override
         ),
+        attribution_context=attribution_context,
     )
     if result and (
         result[-1].speaker,
@@ -473,6 +913,9 @@ def _append_dialogue_event(
             speaker=speaker,
             speaker_explicit=speaker_explicit,
             profile_override=candidate.profile_override,
+            attribution_context=_unique_attribution_context(
+                (*previous.attribution_context, *candidate.attribution_context)
+            ),
         )
         return
     result.append(candidate)
@@ -558,9 +1001,14 @@ def _build_chapter_item(
     spoken = _apply_pronunciations(text, rules).strip()
     if not spoken:
         return None
+    context_identity = [
+        (item.kind.value, item.position.value, item.text)
+        for item in block.attribution_context
+    ]
     digest = hashlib.sha256(
         f"{block.speaker}\0{block.profile_override or ''}\0"
-        f"{block.boundary_after.value}\0{spoken}".encode()
+        f"{block.boundary_after.value}\0{spoken}\0"
+        f"{context_identity}".encode()
     ).hexdigest()
     return SpeechSegment(
         id=f"{chapter_id}-{item_index:04d}-{digest[:10]}",
@@ -572,6 +1020,7 @@ def _build_chapter_item(
         speaker_explicit=block.speaker_explicit,
         profile_override=block.profile_override,
         boundary_after=block.boundary_after,
+        attribution_context=block.attribution_context,
     )
 
 
@@ -795,6 +1244,115 @@ def _load_pronunciations(path: Path | None) -> tuple[Pronunciation, ...]:
         result.append(parsed)
     result.sort(key=lambda item: (-item.priority, -len(item.written), item.written))
     return tuple(result)
+
+
+def _load_dialogue_routes(
+    path: Path | None,
+    sources: tuple[Path, ...],
+) -> dict[tuple[Path, int], _ReviewedDialogueRoute]:
+    if path is None:
+        return {}
+    raw = _read_dialogue_routes(path)
+    entries = raw.get("routes")
+    if not isinstance(entries, list) or not entries:
+        raise ValidationError("Dialogue routes require [[routes]] records")
+    allowed_sources = {source.resolve() for source in sources}
+    parsed = tuple(
+        _parse_dialogue_route(value, index, path, allowed_sources)
+        for index, value in enumerate(entries, 1)
+    )
+    pending = [
+        f"{item.source_value}:{item.line}"
+        for item in parsed
+        if item.status == "suggested"
+    ]
+    if pending:
+        raise ValidationError(
+            "Dialogue routes require review before use; change status to approved "
+            "or rejected: " + ", ".join(pending)
+        )
+    result: dict[tuple[Path, int], _ReviewedDialogueRoute] = {}
+    for index, item in enumerate(parsed, 1):
+        if item.status == "rejected":
+            continue
+        key = (item.source, item.line)
+        if key in result:
+            raise ValidationError(
+                f"Dialogue route {index} duplicates {item.source_value}:{item.line}"
+            )
+        result[key] = _ReviewedDialogueRoute(
+            item.source,
+            item.line,
+            item.speaker,
+        )
+    return result
+
+
+def _read_dialogue_routes(path: Path) -> dict[str, object]:
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        raise ValidationError(f"Cannot read dialogue routes {path}: {error}") from error
+    if raw.get("$schema") != schema_uri("dialogue-routes"):
+        raise ValidationError(
+            f'dialogue routes require "$schema" = "{schema_uri("dialogue-routes")}"'
+        )
+    if raw.get("schema_version") != 1:
+        raise ValidationError("Dialogue routes require schema_version = 1")
+    unknown = set(raw) - {"$schema", "schema_version", "routes"}
+    if unknown:
+        raise ValidationError(
+            f"Unknown dialogue route keys: {', '.join(sorted(unknown))}"
+        )
+    return raw
+
+
+def _parse_dialogue_route(
+    value: object,
+    index: int,
+    path: Path,
+    allowed_sources: set[Path],
+) -> _DialogueRouteEntry:
+    if not isinstance(value, dict):
+        raise ValidationError(f"Dialogue route {index} must be a table")
+    item = cast(dict[str, object], value)
+    unknown = set(item) - {
+        "source",
+        "line",
+        "speaker",
+        "status",
+        "enabled",
+        "notes",
+    }
+    if unknown:
+        raise ValidationError(
+            f"Unknown dialogue route {index} keys: {', '.join(sorted(unknown))}"
+        )
+    enabled = item.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ValidationError(f"Dialogue route {index} enabled must be boolean")
+    status = item.get("status") if enabled else "rejected"
+    if status not in {"suggested", "approved", "rejected"}:
+        raise ValidationError(f"Dialogue route {index} has invalid status")
+    source_value = item.get("source")
+    line = item.get("line")
+    speaker = item.get("speaker")
+    if not isinstance(source_value, str) or not source_value.strip():
+        raise ValidationError(f"Dialogue route {index} needs source")
+    if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+        raise ValidationError(f"Dialogue route {index} line must be positive")
+    if (
+        not isinstance(speaker, str)
+        or re.fullmatch(r"[a-z][a-z0-9_-]*", speaker) is None
+    ):
+        raise ValidationError(f"Dialogue route {index} has invalid speaker")
+    source = (path.parent / source_value).resolve()
+    if source not in allowed_sources:
+        raise ValidationError(
+            f"Dialogue route {index} source is not declared in the manifest: "
+            f"{source_value}"
+        )
+    return _DialogueRouteEntry(source, source_value, line, speaker, str(status))
 
 
 def _parse_pronunciation(value: object, index: int) -> Pronunciation | None:

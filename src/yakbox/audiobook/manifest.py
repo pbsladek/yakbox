@@ -19,6 +19,8 @@ from yakbox.speech.short_utterances import (
     ShortUtteranceStrategy,
 )
 
+_MAXIMUM_REPAIR_TAKES = 20
+
 
 @dataclass(frozen=True, slots=True)
 class BookMetadata:
@@ -111,10 +113,14 @@ class CharacterRole:
 
 @dataclass(frozen=True, slots=True)
 class DialoguePolicy:
-    """Controls non-mutating assistance for ambiguous spoken attribution."""
+    """Controls routed dialogue, tags, and ambiguous-attribution assistance."""
 
     attribution_assistance: str = "warn"
     short_utterance_words: int = 3
+    strip_attribution_tags: bool = False
+    routes: Path | None = None
+    expressive_tag_handling: str = "context"
+    retain_first_attribution_per_scene: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +202,16 @@ class RetentionPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class RepairPolicy:
+    """Configurable defaults for localized regeneration and approval."""
+
+    mode: str = "context"
+    takes: int = 4
+    whisper_qa: bool = True
+    rebuild_on_approval: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class AudiobookManifest:
     """Validated, path-resolved configuration for an audiobook workspace."""
 
@@ -212,6 +228,7 @@ class AudiobookManifest:
     short_utterances: ShortUtterancePolicy
     targets: tuple[BuildTarget, ...]
     retention: RetentionPolicy
+    repairs: RepairPolicy = RepairPolicy()
     max_pause_ms: int = 30_000
 
     @property
@@ -302,6 +319,7 @@ _ROOT_KEYS = {
     "dialogue",
     "whisper_qa",
     "short_utterances",
+    "repairs",
     "targets",
     "source",
     "retention",
@@ -320,7 +338,7 @@ def load_manifest(path: Path) -> AudiobookManifest:
     voices = _parse_voices(raw.get("voices"), root)
     profiles = _parse_profiles(raw.get("profiles"))
     characters = _parse_characters(raw.get("characters"))
-    dialogue = _parse_dialogue(raw.get("dialogue"))
+    dialogue = _parse_dialogue(raw.get("dialogue"), root)
     whisper_qa = _parse_whisper_qa(raw.get("whisper_qa"), root)
     short_utterances = _parse_short_utterances(raw.get("short_utterances"))
     _validate_whisper_configuration(whisper_qa, short_utterances)
@@ -341,6 +359,7 @@ def load_manifest(path: Path) -> AudiobookManifest:
         short_utterances=short_utterances,
         targets=targets,
         retention=_parse_retention(raw.get("retention")),
+        repairs=_parse_repairs(raw.get("repairs")),
         max_pause_ms=_parse_source_options(raw),
     )
 
@@ -774,7 +793,7 @@ def _parse_characters(value: object) -> tuple[CharacterRole, ...]:
     return tuple(result)
 
 
-def _parse_dialogue(value: object) -> DialoguePolicy:
+def _parse_dialogue(value: object, root: Path) -> DialoguePolicy:
     if value is None:
         return DialoguePolicy()
     if not isinstance(value, dict):
@@ -782,7 +801,14 @@ def _parse_dialogue(value: object) -> DialoguePolicy:
     table = cast(dict[str, object], value)
     _reject_unknown(
         table,
-        {"attribution_assistance", "short_utterance_words"},
+        {
+            "attribution_assistance",
+            "short_utterance_words",
+            "strip_attribution_tags",
+            "routes",
+            "expressive_tag_handling",
+            "retain_first_attribution_per_scene",
+        },
         "dialogue",
     )
     assistance = _string_or_default(
@@ -794,12 +820,44 @@ def _parse_dialogue(value: object) -> DialoguePolicy:
         raise ValidationError(
             "dialogue.attribution_assistance must be off, warn, or error"
         )
+    expressive_tag_handling = _string_or_default(
+        table.get("expressive_tag_handling"),
+        "dialogue.expressive_tag_handling",
+        "context",
+    )
+    if expressive_tag_handling not in {"context", "narrate", "strip"}:
+        raise ValidationError(
+            "dialogue.expressive_tag_handling must be context, narrate, or strip"
+        )
     return DialoguePolicy(
         attribution_assistance=assistance,
         short_utterance_words=_positive_int(
             table.get("short_utterance_words", 3),
             "dialogue.short_utterance_words",
         ),
+        strip_attribution_tags=_boolean(
+            table.get("strip_attribution_tags", False),
+            "dialogue.strip_attribution_tags",
+        ),
+        routes=_dialogue_routes_path(table.get("routes"), root),
+        expressive_tag_handling=expressive_tag_handling,
+        retain_first_attribution_per_scene=_boolean(
+            table.get("retain_first_attribution_per_scene", False),
+            "dialogue.retain_first_attribution_per_scene",
+        ),
+    )
+
+
+def _dialogue_routes_path(value: object, root: Path) -> Path | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValidationError("dialogue.routes must be a relative path string")
+    return _workspace_path(
+        root,
+        value,
+        "dialogue.routes",
+        must_exist=True,
     )
 
 
@@ -1485,6 +1543,36 @@ def _parse_retention(value: object) -> RetentionPolicy:
         raw_until_release=_boolean(
             table.get("raw_until_release", True),
             "retention.raw_until_release",
+        ),
+    )
+
+
+def _parse_repairs(value: object) -> RepairPolicy:
+    if value is None:
+        return RepairPolicy()
+    if not isinstance(value, dict):
+        raise ValidationError("repairs must be a TOML table")
+    table = cast(dict[str, object], value)
+    _reject_unknown(
+        table,
+        {"mode", "takes", "whisper_qa", "rebuild_on_approval"},
+        "repairs",
+    )
+    mode = _string_or_default(table.get("mode"), "repairs.mode", "context")
+    if mode not in {"target-only", "context", "neighbors", "paragraph", "scene"}:
+        raise ValidationError(
+            "repairs.mode must be target-only, context, neighbors, paragraph, or scene"
+        )
+    takes = _positive_int(table.get("takes", 4), "repairs.takes")
+    if takes > _MAXIMUM_REPAIR_TAKES:
+        raise ValidationError("repairs.takes must not exceed 20")
+    return RepairPolicy(
+        mode=mode,
+        takes=takes,
+        whisper_qa=_boolean(table.get("whisper_qa", True), "repairs.whisper_qa"),
+        rebuild_on_approval=_boolean(
+            table.get("rebuild_on_approval", True),
+            "repairs.rebuild_on_approval",
         ),
     )
 

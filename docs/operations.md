@@ -1,5 +1,18 @@
 # Doctor, configuration, security, and troubleshooting
 
+## Configuration formats
+
+Yakbox user-authored configuration uses TOML or YAML only. Existing project,
+voice, pronunciation, dialogue-route, QA-review, and global configuration files
+remain TOML. Structured batch inputs and Whisper join specifications use YAML;
+JSON configuration files are rejected.
+
+JSON remains in generated reports, journals, CLI `--json` output, JSON Schema
+documents, SBOMs, and upstream model files such as `config.json`. Those files
+are machine protocols or evidence rather than user configuration. A `$schema`
+URI ending in `.schema.json` identifies the standard JSON Schema document and
+does not change the TOML or YAML format of the file that references it.
+
 ## Doctor
 
 ```console

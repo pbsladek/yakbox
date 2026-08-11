@@ -17,6 +17,7 @@ from yakbox.audio.crop import (
     crop_aligned_wav,
     detect_speech_regions,
     inspect_speech_islands,
+    pad_wav_silence,
     wav_duration_seconds,
 )
 from yakbox.errors import ArtifactError, BuildError
@@ -600,6 +601,22 @@ def test_crop_retains_padding_refines_edges_and_applies_fades(tmp_path: Path) ->
     last = struct.unpack("<h", content[-2:])[0]
     assert abs(first) < 500
     assert abs(last) < 500
+
+
+def test_pcm_edge_padding_supplies_only_the_missing_silence(tmp_path: Path) -> None:
+    source = tmp_path / "source.wav"
+    target = tmp_path / "target.wav"
+    _write_tone_with_silence(source)
+    before = wav_duration_seconds(source)
+
+    pad_wav_silence(
+        source,
+        target,
+        leading_ms=3.25,
+        trailing_ms=7.75,
+    )
+
+    assert wav_duration_seconds(target) == pytest.approx(before + 0.011, abs=0.0001)
 
 
 def test_crop_refuses_padding_that_reaches_separate_speech(tmp_path: Path) -> None:

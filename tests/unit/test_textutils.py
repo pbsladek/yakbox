@@ -58,15 +58,18 @@ def test_csv_marks_extra_columns_as_a_row_error(tmp_path: Path) -> None:
     )
 
 
-def test_jsonl_reads_fields_and_preserves_row_local_errors(tmp_path: Path) -> None:
+def test_yaml_reads_fields_and_preserves_row_local_errors(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
-        "script.jsonl",
-        '{"text":" Hello ","id":"opening","voice_uuid":"voice-1",'
-        '"title":"Opening","output":"opening.mp3"}\n'
-        "not-json\n"
-        '["not", "an", "object"]\n'
-        '{"text":"World","speaker":"Narrator"}\n',
+        "script.yaml",
+        "- text: ' Hello '\n"
+        "  id: opening\n"
+        "  voice_uuid: voice-1\n"
+        "  title: Opening\n"
+        "  output: opening.mp3\n"
+        "- [not, a, mapping]\n"
+        "- text: World\n"
+        "  speaker: Narrator\n",
     )
 
     rows = read_batch_rows(path)
@@ -79,16 +82,36 @@ def test_jsonl_reads_fields_and_preserves_row_local_errors(tmp_path: Path) -> No
         title="Opening",
         output="opening.mp3",
     )
-    assert rows[1].validation_error == "invalid JSON: Expecting value"
-    assert rows[2].validation_error == "record must be an object"
-    assert rows[3].validation_error == "unknown keys: speaker"
+    assert rows[1].validation_error == "record must be a mapping"
+    assert rows[2].validation_error == "unknown keys: speaker"
 
 
-@pytest.mark.parametrize("name", ["script.yaml", "script"])
+def test_yaml_stream_accepts_one_mapping_per_document(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "script.yml",
+        "---\ntext: First\nid: one\n---\ntext: Second\nid: two\n",
+    )
+
+    assert read_batch_rows(path) == (
+        BatchRow(index=1, text="First", row_id="one"),
+        BatchRow(index=2, text="Second", row_id="two"),
+    )
+
+
+def test_malformed_yaml_is_rejected(tmp_path: Path) -> None:
+    path = _write(tmp_path, "script.yaml", "- text: [unterminated\n")
+
+    with pytest.raises(ValidationError, match="Invalid YAML batch input"):
+        read_batch_rows(path)
+
+
+@pytest.mark.parametrize("name", ["script.jsonl", "script"])
 def test_unsupported_batch_extension_is_rejected(tmp_path: Path, name: str) -> None:
     path = _write(tmp_path, name, "Hello")
 
     with pytest.raises(
-        ValidationError, match=r"Batch input must use \.txt, \.csv, or \.jsonl"
+        ValidationError,
+        match=r"Batch input must use \.txt, \.csv, \.yaml, or \.yml",
     ):
         read_batch_rows(path)

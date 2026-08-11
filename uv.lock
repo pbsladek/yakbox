@@ -2719,6 +2719,7 @@ dependencies = [
     { name = "click" },
     { name = "httpx" },
     { name = "markdown-it-py" },
+    { name = "pyyaml" },
     { name = "regex" },
     { name = "rich" },
 ]
@@ -2796,6 +2797,7 @@ requires-dist = [
     { name = "numba", marker = "extra == 'local'", specifier = ">=0.66.0" },
     { name = "numpy", marker = "extra == 'local'", specifier = ">=2,<2.5" },
     { name = "onnx", marker = "extra == 'local'", specifier = ">=1.22.0" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "regex", specifier = ">=2026.7.19,<2027" },
     { name = "rich", specifier = ">=15.0,<16" },
     { name = "safetensors", marker = "extra == 'local'", specifier = ">=0.8.0" },

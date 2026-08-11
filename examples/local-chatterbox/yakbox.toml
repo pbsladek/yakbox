@@ -33,20 +33,10 @@ display_name = "Bill Boerst"
 rights_basis = "public_domain"
 reference_audio = "voices/bill-boerst.wav"
 
-[voices.stuart-bell]
-display_name = "Stuart Bell"
-rights_basis = "public_domain"
-reference_audio = "voices/stuart-bell.wav"
-
 [voices.karen-savage]
 display_name = "Karen Savage"
 rights_basis = "public_domain"
 reference_audio = "voices/karen-savage.wav"
-
-[voices.elizabeth-klett]
-display_name = "Elizabeth Klett"
-rights_basis = "public_domain"
-reference_audio = "voices/elizabeth-klett.wav"
 
 [voices.cori-samuel]
 display_name = "Cori Samuel"
@@ -83,20 +73,10 @@ display_name = "David Barnes"
 rights_basis = "public_domain"
 reference_audio = "voices/david-barnes.wav"
 
-[voices.adrian-praetzellis]
-display_name = "Adrian Praetzellis"
-rights_basis = "public_domain"
-reference_audio = "voices/adrian-praetzellis.wav"
-
 [voices.gregg-margarite]
 display_name = "Gregg Margarite"
 rights_basis = "public_domain"
 reference_audio = "voices/gregg-margarite.wav"
-
-[voices.david-clarke]
-display_name = "David Clarke"
-rights_basis = "public_domain"
-reference_audio = "voices/david-clarke.wav"
 
 [voices.martin-geeson]
 display_name = "Martin Geeson"
@@ -113,11 +93,6 @@ display_name = "Peter Yearsley"
 rights_basis = "public_domain"
 reference_audio = "voices/peter-yearsley.wav"
 
-[voices.kara-shallenberg]
-display_name = "Kara Shallenberg"
-rights_basis = "public_domain"
-reference_audio = "voices/kara-shallenberg.wav"
-
 [voices.kirsten-ferreri]
 display_name = "Kirsten Ferreri"
 rights_basis = "public_domain"
@@ -132,6 +107,31 @@ reference_audio = "voices/sibella-denton.wav"
 display_name = "Laurie Anne Walden"
 rights_basis = "public_domain"
 reference_audio = "voices/laurie-anne-walden.wav"
+
+[voices.john-greenman]
+display_name = "John Greenman"
+rights_basis = "public_domain"
+reference_audio = "voices/john-greenman.wav"
+
+[voices.simon-evers]
+display_name = "Simon Evers"
+rights_basis = "public_domain"
+reference_audio = "voices/simon-evers.wav"
+
+[voices.tony-foster]
+display_name = "Tony Foster"
+rights_basis = "public_domain"
+reference_audio = "voices/tony-foster.wav"
+
+[voices.amanda-friday]
+display_name = "Amanda Friday"
+rights_basis = "public_domain"
+reference_audio = "voices/amanda-friday.wav"
+
+[voices.john-burlinson]
+display_name = "John Burlinson"
+rights_basis = "public_domain"
+reference_audio = "voices/john-burlinson.wav"
 
 [profiles.caro-davy]
 backend = "chatterbox-local"
@@ -188,31 +188,9 @@ max_processes = 1
 threads_per_process = 1
 worker_timeout_seconds = 600
 
-[profiles.stuart-bell]
-backend = "chatterbox-local"
-voice = "stuart-bell"
-device = "cpu"
-cfg_weight = 0.2
-exaggeration = 0.44
-seed = 42
-max_processes = 1
-threads_per_process = 1
-worker_timeout_seconds = 600
-
 [profiles.karen-savage]
 backend = "chatterbox-local"
 voice = "karen-savage"
-device = "cpu"
-cfg_weight = 0.2
-exaggeration = 0.44
-seed = 42
-max_processes = 1
-threads_per_process = 1
-worker_timeout_seconds = 600
-
-[profiles.elizabeth-klett]
-backend = "chatterbox-local"
-voice = "elizabeth-klett"
 device = "cpu"
 cfg_weight = 0.2
 exaggeration = 0.44
@@ -298,31 +276,9 @@ max_processes = 1
 threads_per_process = 1
 worker_timeout_seconds = 600
 
-[profiles.adrian-praetzellis]
-backend = "chatterbox-local"
-voice = "adrian-praetzellis"
-device = "cpu"
-cfg_weight = 0.2
-exaggeration = 0.44
-seed = 42
-max_processes = 1
-threads_per_process = 1
-worker_timeout_seconds = 600
-
 [profiles.gregg-margarite]
 backend = "chatterbox-local"
 voice = "gregg-margarite"
-device = "cpu"
-cfg_weight = 0.2
-exaggeration = 0.44
-seed = 42
-max_processes = 1
-threads_per_process = 1
-worker_timeout_seconds = 600
-
-[profiles.david-clarke]
-backend = "chatterbox-local"
-voice = "david-clarke"
 device = "cpu"
 cfg_weight = 0.2
 exaggeration = 0.44
@@ -364,17 +320,6 @@ max_processes = 1
 threads_per_process = 1
 worker_timeout_seconds = 600
 
-[profiles.kara-shallenberg]
-backend = "chatterbox-local"
-voice = "kara-shallenberg"
-device = "cpu"
-cfg_weight = 0.2
-exaggeration = 0.44
-seed = 42
-max_processes = 1
-threads_per_process = 1
-worker_timeout_seconds = 600
-
 [profiles.kirsten-ferreri]
 backend = "chatterbox-local"
 voice = "kirsten-ferreri"
@@ -400,6 +345,61 @@ worker_timeout_seconds = 600
 [profiles.laurie-anne-walden]
 backend = "chatterbox-local"
 voice = "laurie-anne-walden"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.john-greenman]
+backend = "chatterbox-local"
+voice = "john-greenman"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.simon-evers]
+backend = "chatterbox-local"
+voice = "simon-evers"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.tony-foster]
+backend = "chatterbox-local"
+voice = "tony-foster"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.amanda-friday]
+backend = "chatterbox-local"
+voice = "amanda-friday"
+device = "cpu"
+cfg_weight = 0.2
+exaggeration = 0.44
+seed = 42
+max_processes = 1
+threads_per_process = 1
+worker_timeout_seconds = 600
+
+[profiles.john-burlinson]
+backend = "chatterbox-local"
+voice = "john-burlinson"
 device = "cpu"
 cfg_weight = 0.2
 exaggeration = 0.44
@@ -447,7 +447,7 @@ seed = 42
 
 [characters.character-5]
 display_name = "Character 5"
-profile = "stuart-bell"
+profile = "john-greenman"
 gender = "male"
 cfg_weight = 0.2
 exaggeration = 0.44
@@ -460,7 +460,7 @@ gender = "female"
 
 [characters.character-7]
 display_name = "Character 7"
-profile = "elizabeth-klett"
+profile = "amanda-friday"
 gender = "female"
 
 [characters.character-8]
@@ -500,7 +500,7 @@ gender = "male"
 
 [characters.character-15]
 display_name = "Character 15"
-profile = "adrian-praetzellis"
+profile = "simon-evers"
 gender = "male"
 
 [characters.character-16]
@@ -510,7 +510,7 @@ gender = "male"
 
 [characters.character-17]
 display_name = "Character 17"
-profile = "david-clarke"
+profile = "tony-foster"
 gender = "male"
 
 [characters.character-18]
@@ -530,27 +530,30 @@ gender = "male"
 
 [characters.character-21]
 display_name = "Character 21"
-profile = "kara-shallenberg"
+profile = "kirsten-ferreri"
 gender = "female"
 
 [characters.character-22]
 display_name = "Character 22"
-profile = "kirsten-ferreri"
+profile = "sibella-denton"
 gender = "female"
 
 [characters.character-23]
 display_name = "Character 23"
-profile = "sibella-denton"
+profile = "laurie-anne-walden"
 gender = "female"
 
 [characters.character-24]
 display_name = "Character 24"
-profile = "laurie-anne-walden"
-gender = "female"
+profile = "john-burlinson"
+gender = "male"
 
 [dialogue]
 attribution_assistance = "warn"
 short_utterance_words = 3
+strip_attribution_tags = true
+expressive_tag_handling = "context"
+retain_first_attribution_per_scene = false
 
 [whisper_qa]
 # Enable after installing the pinned Whisper model. A passing managed report
@@ -617,6 +620,12 @@ fade_ms = 8
 failure = "error"
 require_review_for_one_word = true
 keep_candidates = false
+
+[repairs]
+mode = "context"
+takes = 4
+whisper_qa = true
+rebuild_on_approval = true
 
 [targets.default]
 profile = "andy-minter"

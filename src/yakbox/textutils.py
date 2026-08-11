@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import csv
-import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO, cast
 
 from yakbox.errors import ValidationError
+from yakbox.yaml_config import iter_yaml_documents
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,8 +31,8 @@ def read_batch_rows(path: Path) -> tuple[BatchRow, ...]:
 
 def iter_batch_rows(path: Path) -> Iterator[BatchRow]:
     suffix = path.suffix.casefold()
-    if suffix not in {".txt", ".csv", ".jsonl"}:
-        raise ValidationError("Batch input must use .txt, .csv, or .jsonl")
+    if suffix not in {".txt", ".csv", ".yaml", ".yml"}:
+        raise ValidationError("Batch input must use .txt, .csv, .yaml, or .yml")
     try:
         with path.open(encoding="utf-8-sig", newline="") as stream:
             if suffix == ".txt":
@@ -44,7 +44,7 @@ def iter_batch_rows(path: Path) -> Iterator[BatchRow]:
             elif suffix == ".csv":
                 yield from _iter_csv(stream)
             else:
-                yield from _iter_jsonl(stream)
+                yield from _iter_yaml(stream)
     except (OSError, UnicodeDecodeError) as error:
         raise ValidationError(f"Cannot read batch input {path}: {error}") from error
 
@@ -71,42 +71,40 @@ def _iter_csv(stream: TextIO) -> Iterator[BatchRow]:
         )
 
 
-def _iter_jsonl(stream: TextIO) -> Iterator[BatchRow]:
-    allowed = {"text", "id", "voice_uuid", "title", "output"}
-    for index, line in enumerate(stream, 1):
-        if not line.strip():
-            continue
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError as error:
-            yield BatchRow(
-                index=index,
-                text="",
-                validation_error=f"invalid JSON: {error.msg}",
-            )
-            continue
-        if not isinstance(item, dict):
-            yield BatchRow(
-                index=index, text="", validation_error="record must be an object"
-            )
-            continue
-        item = cast(dict[str, object], item)
-        unknown = set(item) - allowed
-        if unknown:
-            yield BatchRow(
-                index=index,
-                text="",
-                validation_error=f"unknown keys: {', '.join(sorted(unknown))}",
-            )
-            continue
-        yield BatchRow(
+def _iter_yaml(stream: TextIO) -> Iterator[BatchRow]:
+    index = 0
+    for document in iter_yaml_documents(stream, description="YAML batch input"):
+        values = document if isinstance(document, list) else [document]
+        for value in values:
+            index += 1
+            yield _structured_batch_row(value, index)
+
+
+def _structured_batch_row(value: object, index: int) -> BatchRow:
+    if not isinstance(value, dict):
+        return BatchRow(
             index=index,
-            text=str(item.get("text", "")).strip(),
-            row_id=_value(item.get("id")),
-            voice_uuid=_value(item.get("voice_uuid")),
-            title=_value(item.get("title")),
-            output=_value(item.get("output")),
+            text="",
+            validation_error="record must be a mapping",
         )
+    item = cast(dict[object, object], value)
+    allowed = {"text", "id", "voice_uuid", "title", "output"}
+    unknown = set(item) - allowed
+    if unknown:
+        names = ", ".join(sorted((str(key) for key in unknown), key=str.casefold))
+        return BatchRow(
+            index=index,
+            text="",
+            validation_error=f"unknown keys: {names}",
+        )
+    return BatchRow(
+        index=index,
+        text=str(item.get("text", "")).strip(),
+        row_id=_value(item.get("id")),
+        voice_uuid=_value(item.get("voice_uuid")),
+        title=_value(item.get("title")),
+        output=_value(item.get("output")),
+    )
 
 
 def _none(value: str | None) -> str | None:

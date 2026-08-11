@@ -3,10 +3,18 @@
 Yakbox's source code is licensed under the root MIT License. The following
 bundled media comes from third parties and retains its own stated rights basis.
 
+## YAML configuration parser
+
+Yakbox uses PyYAML to safely parse user-authored YAML configuration. PyYAML is
+distributed under the MIT License. Yakbox uses safe loaders and does not enable
+arbitrary Python object construction.
+
+- PyYAML license: <https://github.com/yaml/pyyaml/blob/main/LICENSE>
+
 ## LibriVox reference voice prompts
 
 The files under `examples/local-chatterbox/voices/` are 20-second derivatives
-of recordings by the twenty-five LibriVox readers listed in the adjacent
+of recordings by the twenty-five qualified LibriVox readers listed in the adjacent
 `voices.toml` registry. LibriVox states that its recordings are public domain
 in the United States and may be used, modified, and sold without permission.
 Copyright status may differ outside the United States.

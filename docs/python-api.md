@@ -7,7 +7,7 @@ public type explicitly names them.
 
 The wheel includes `py.typed`. Public signatures, enum members, exception
 codes, and `__all__` exports are checked against
-`tests/public-api-v1.json`. During the 0.x series, an incompatible change may
+`tests/public-api-v1.yaml`. During the 0.x series, an incompatible change may
 ship only in a minor release. A deprecated public name remains functional for
 at least two minor releases and 90 days. Patch releases preserve these
 contracts.
@@ -97,11 +97,14 @@ artifacts into quarantine; `purge_trash` permanently deletes them.
 Manifest and backend models: `AudiobookManifest`, `BookMetadata`,
 `LogicalVoice`, `BackendOptions`, `BackendProfile`, `FakeOptions`,
 `ChatterboxOptions`, `ResembleOptions`, `CharacterRole`, `DialoguePolicy`,
-`BuildTarget`, and `RetentionPolicy`.
+`BuildTarget`, `RetentionPolicy`, and `RepairPolicy`.
 
 Normalized source and planning models: `Chapter`, `Pause`, `SpeechSegment`,
 `SourceLocation`, `NormalizedDocument`, `BuildStage`, `PlanNode`, `BuildPlan`,
 `ChunkRoute`, `AttributionFinding`, `BuildChangeSummary`, and `BuildPreflight`.
+
+Localized repair models: `RepairMode`, `RepairChunk`, `RepairPlan`, `RepairTake`,
+`RepairSession`, and `RepairApproval`.
 
 Build models and callbacks: `BuildRequest`, `BuildResult`, `BuildStatus`,
 `BuildProgress`, `BuildProgressEvent`, and `BuildProgressCallback`.
@@ -120,7 +123,9 @@ Application functions: `load_manifest`, `normalize_sources`,
 `repair_artifact_metadata`, `inventory_synthesis_cache`,
 `plan_cache_cleanup`, `apply_cache_cleanup`, `plan_cleanup`, `apply_cleanup`,
 `restore_trash`, `purge_trash`, `assemble_release`, `check_release`,
-`diff_releases`, `export_shard_manifests`, and `verify_shard_manifests`.
+`diff_releases`, `export_shard_manifests`, `verify_shard_manifests`,
+`plan_repair`, `generate_repair_session`, `approve_repair_session`, and
+`explain_synthesis_chunk`.
 
 ## Direct speech services
 

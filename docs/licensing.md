@@ -15,6 +15,8 @@ proprietary license.
 The lockfile, vulnerability audit, generated CycloneDX SBOM, and release
 attestations cover the resolved software supply chain. A dependency update must
 also include a license review; a vulnerability result is not a license result.
+The required PyYAML configuration parser is MIT-licensed and is invoked only
+through its safe loaders.
 
 ## Media, reference voices, and documentation assets
 
@@ -39,7 +41,8 @@ is allowed. Generated build outputs, auditions, and caches remain unversioned.
 
 ## Included LibriVox prompts
 
-The local Chatterbox example contains twenty-five 20-second prompts. LibriVox
+The local Chatterbox example contains twenty-five qualified 20-second prompts.
+LibriVox
 states that its recordings are public domain in the United States and can be
 modified or used commercially. Copyright status may differ outside the United
 States. The complete reader list and per-file record are in

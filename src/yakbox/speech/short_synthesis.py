@@ -19,6 +19,7 @@ from yakbox.audio.crop import (
     crop_aligned_wav,
     inspect_signal_quality,
     inspect_speech_islands,
+    pad_wav_silence,
     wav_duration_seconds,
 )
 from yakbox.contracts import runtime_metadata
@@ -452,6 +453,13 @@ async def _evaluate_extracted_audio(
             policy=policy,
             reasons=(*decision.reason_codes, "acoustic_inspection_failed"),
         )
+    initial_audio, acoustic = _pad_edge_deficits(
+        initial_audio,
+        acoustic,
+        policy=policy,
+        directory=directory,
+        candidate_index=recipe.candidate_index,
+    )
     acoustic_reasons = _acoustic_reason_codes(acoustic, policy)
     can_refine = (
         bool(acoustic_reasons)
@@ -499,6 +507,13 @@ async def _evaluate_extracted_audio(
                 threshold_dbfs=policy.acoustic_threshold_dbfs,
                 island_gap_ms=_speech_island_gap_ms(target_text, policy),
             )
+            refined, refined_acoustic = _pad_edge_deficits(
+                refined,
+                refined_acoustic,
+                policy=policy,
+                directory=directory,
+                candidate_index=recipe.candidate_index,
+            )
         except ArtifactError:
             return _acoustic_evaluation(
                 recipe=recipe,
@@ -539,6 +554,43 @@ async def _evaluate_extracted_audio(
         acoustic=acoustic,
         policy=policy,
         reasons=(*decision.reason_codes, *acoustic_reasons),
+    )
+
+
+def _pad_edge_deficits(
+    audio: Path,
+    evidence: SpeechIslandEvidence,
+    *,
+    policy: ShortUtterancePolicy,
+    directory: Path,
+    candidate_index: int,
+) -> tuple[Path, SpeechIslandEvidence]:
+    """Pad verified speech when a crop misses the configured quiet edge floor."""
+    if (
+        evidence.primary_island is None
+        or evidence.detached_prefix
+        or evidence.detached_suffix
+    ):
+        return audio, evidence
+    leading_ms = max(0.0, policy.minimum_edge_silence_ms - evidence.leading_silence_ms)
+    trailing_ms = max(
+        0.0,
+        policy.minimum_edge_silence_ms - evidence.trailing_silence_ms,
+    )
+    if leading_ms == 0 and trailing_ms == 0:
+        return audio, evidence
+    padded = directory / f"candidate-{candidate_index:03d}-edge-padded.wav"
+    pad_wav_silence(
+        audio,
+        padded,
+        leading_ms=leading_ms,
+        trailing_ms=trailing_ms,
+        overwrite=True,
+    )
+    return padded, inspect_speech_islands(
+        padded,
+        threshold_dbfs=policy.acoustic_threshold_dbfs,
+        island_gap_ms=policy.speech_island_gap_ms,
     )
 
 

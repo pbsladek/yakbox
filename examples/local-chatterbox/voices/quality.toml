@@ -1,0 +1,183 @@
+schema_version = 1
+method = "yakbox-whisper-voice-quality-v1"
+scope = "automated_intelligibility_and_signal_quality"
+evaluated_at = "2026-08-11"
+corpus = "../voice-quality.txt"
+corpus_sha256 = "efb209b72a55c44555078d4a90b165a501dd7863ee1acf2167d74458bc0e1a6b"
+baseline_voices = ["andy-minter", "ruth-golding", "caro-davy", "nick-whitley"]
+high_quality_voices = [
+  "bill-boerst",
+  "karen-savage",
+  "cori-samuel",
+  "mil-nicholson",
+  "lucy-burgoyne",
+  "mark-f-smith",
+  "bob-neufeld",
+  "mark-nelson",
+  "david-barnes",
+  "gregg-margarite",
+  "martin-geeson",
+  "phil-chenevert",
+  "peter-yearsley",
+  "kirsten-ferreri",
+  "sibella-denton",
+  "laurie-anne-walden",
+  "john-greenman",
+  "simon-evers",
+  "tony-foster",
+  "amanda-friday",
+  "john-burlinson",
+]
+suspect_voices = []
+removed_voice_names = [
+  "stuart-bell",
+  "elizabeth-klett",
+  "adrian-praetzellis",
+  "david-clarke",
+  "kara-shallenberg",
+  "lee-ann-howlett",
+]
+
+[[qualification_runs]]
+purpose = "original_catalog"
+audition_report_sha256 = "14889d62ce53807cab0c0cf041d49b5ae65c127f252d7963522fc1d6d796ffe2"
+quality_report = "../build/yakbox/auditions/20260811T065933Z-534e1224/voice-quality.json"
+quality_report_sha256 = "3ff5453d05db6c3150e5360a834f131148d9333bfd8e301eb2e6b7fee1133ff8"
+
+[[qualification_runs]]
+purpose = "quarantined_voice_replacements"
+audition_report_sha256 = "982c8dc9900c7fda15cd8269ff22fd2233da26c95cbdb939ef9a7747ba08964e"
+quality_report = "../build/yakbox/auditions/20260811T194300Z-replacements/voice-quality.json"
+quality_report_sha256 = "7dcb69225a8d02a950370548151ee4a4bab065ab1fcdb423255344a96d8d02df"
+
+[[qualification_runs]]
+purpose = "male_catalog_expansion"
+audition_report_sha256 = "59d9644e8dbb92109f4f69da8e8f441200ee8cece23048aa04157e9cacc21b61"
+quality_report = "../build/yakbox/auditions/20260811T203326Z-f008d042/voice-quality.json"
+quality_report_sha256 = "62ee5030cefc9ba0d5dde2b30d7b5be460c52b1e6c888ea7dfbd48fcaa6ce4ec"
+
+[voices.andy-minter]
+status = "baseline"
+reason_codes = []
+
+[voices.ruth-golding]
+status = "baseline"
+reason_codes = []
+
+[voices.caro-davy]
+status = "baseline"
+reason_codes = []
+
+[voices.nick-whitley]
+status = "baseline"
+reason_codes = []
+
+[voices.bill-boerst]
+status = "high_quality"
+reason_codes = []
+
+[voices.karen-savage]
+status = "high_quality"
+reason_codes = []
+
+[voices.cori-samuel]
+status = "high_quality"
+reason_codes = []
+
+[voices.mil-nicholson]
+status = "high_quality"
+reason_codes = []
+
+[voices.lucy-burgoyne]
+status = "high_quality"
+reason_codes = []
+
+[voices.mark-f-smith]
+status = "high_quality"
+reason_codes = []
+
+[voices.bob-neufeld]
+status = "high_quality"
+reason_codes = []
+
+[voices.mark-nelson]
+status = "high_quality"
+reason_codes = []
+
+[voices.david-barnes]
+status = "high_quality"
+reason_codes = []
+
+[voices.gregg-margarite]
+status = "high_quality"
+reason_codes = []
+
+[voices.martin-geeson]
+status = "high_quality"
+reason_codes = []
+
+[voices.phil-chenevert]
+status = "high_quality"
+reason_codes = []
+
+[voices.peter-yearsley]
+status = "high_quality"
+reason_codes = []
+
+[voices.kirsten-ferreri]
+status = "high_quality"
+reason_codes = []
+
+[voices.sibella-denton]
+status = "high_quality"
+reason_codes = []
+
+[voices.laurie-anne-walden]
+status = "high_quality"
+reason_codes = []
+
+[voices.john-greenman]
+status = "high_quality"
+reason_codes = []
+
+[voices.simon-evers]
+status = "high_quality"
+reason_codes = []
+
+[voices.tony-foster]
+status = "high_quality"
+reason_codes = []
+
+[voices.amanda-friday]
+status = "high_quality"
+reason_codes = []
+
+[voices.john-burlinson]
+status = "high_quality"
+reason_codes = []
+
+[removed_voices.stuart-bell]
+replacement = "john-greenman"
+reason_codes = ["clipping_above_baseline"]
+
+[removed_voices.elizabeth-klett]
+replacement = "amanda-friday"
+reason_codes = ["decode_consensus_below_baseline"]
+
+[removed_voices.adrian-praetzellis]
+replacement = "simon-evers"
+reason_codes = ["clipping_above_baseline"]
+
+[removed_voices.david-clarke]
+replacement = "tony-foster"
+reason_codes = ["boundary_jump_above_baseline"]
+
+[removed_voices.kara-shallenberg]
+replacement = "lee-ann-howlett"
+reason_codes = [
+  "decode_consensus_below_baseline",
+  "segment_log_probability_below_baseline",
+]
+
+[removed_voices.lee-ann-howlett]
+reason_codes = ["failed_manual_listening_review"]

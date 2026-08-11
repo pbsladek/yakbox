@@ -15,18 +15,18 @@ ROOT = Path(__file__).parents[2]
 EXAMPLE = ROOT / "examples" / "local-chatterbox"
 VOICE_DIR = EXAMPLE / "voices"
 REGISTRY = tomllib.loads((VOICE_DIR / "voices.toml").read_text(encoding="utf-8"))
+QUALITY = tomllib.loads((VOICE_DIR / "quality.toml").read_text(encoding="utf-8"))
 EXPECTED_VOICES = {
-    "adrian-praetzellis",
+    "amanda-friday",
     "andy-minter",
     "bill-boerst",
     "bob-neufeld",
     "caro-davy",
     "cori-samuel",
     "david-barnes",
-    "david-clarke",
-    "elizabeth-klett",
     "gregg-margarite",
-    "kara-shallenberg",
+    "john-greenman",
+    "john-burlinson",
     "karen-savage",
     "kirsten-ferreri",
     "laurie-anne-walden",
@@ -40,6 +40,15 @@ EXPECTED_VOICES = {
     "phil-chenevert",
     "ruth-golding",
     "sibella-denton",
+    "simon-evers",
+    "tony-foster",
+}
+REMOVED_VOICES = {
+    "adrian-praetzellis",
+    "david-clarke",
+    "elizabeth-klett",
+    "kara-shallenberg",
+    "lee-ann-howlett",
     "stuart-bell",
 }
 ALLOWED_MEDIA_LICENSES = {
@@ -114,8 +123,9 @@ def test_local_chatterbox_voice_profiles_are_configured_and_switchable(
     )
     assert all(
         manifest.character(f"character-{index}").gender == "female"
-        for index in range(21, 25)
+        for index in range(21, 24)
     )
+    assert manifest.character("character-24").gender == "male"
     assert {voice.name for voice in manifest.voices} == EXPECTED_VOICES
     assert {profile.name for profile in manifest.profiles} == EXPECTED_VOICES
     for name in EXPECTED_VOICES:
@@ -162,6 +172,50 @@ def test_every_bundled_voice_has_complete_verified_provenance() -> None:
             assert (
                 audio.getnframes() / audio.getframerate() == record["duration_seconds"]
             )
+
+
+def test_every_bundled_voice_has_an_explicit_quality_status() -> None:
+    records = QUALITY["voices"]
+    baselines = set(QUALITY["baseline_voices"])
+    high_quality = set(QUALITY["high_quality_voices"])
+    suspect = set(QUALITY["suspect_voices"])
+
+    assert QUALITY["schema_version"] == 1
+    assert QUALITY["scope"] == "automated_intelligibility_and_signal_quality"
+    assert baselines == {
+        "andy-minter",
+        "caro-davy",
+        "nick-whitley",
+        "ruth-golding",
+    }
+    assert baselines | high_quality == EXPECTED_VOICES
+    assert not suspect
+    assert not (
+        baselines & high_quality or baselines & suspect or high_quality & suspect
+    )
+    assert set(records) == EXPECTED_VOICES
+    assert all(records[name]["status"] == "baseline" for name in baselines)
+    assert all(records[name]["status"] == "high_quality" for name in high_quality)
+    assert all(not records[name]["reason_codes"] for name in baselines | high_quality)
+    assert set(QUALITY["removed_voice_names"]) == REMOVED_VOICES
+    assert set(QUALITY["removed_voices"]) == REMOVED_VOICES
+    assert {
+        name: record["replacement"]
+        for name, record in QUALITY["removed_voices"].items()
+        if "replacement" in record
+    } == {
+        "adrian-praetzellis": "simon-evers",
+        "david-clarke": "tony-foster",
+        "elizabeth-klett": "amanda-friday",
+        "kara-shallenberg": "lee-ann-howlett",
+        "stuart-bell": "john-greenman",
+    }
+    assert QUALITY["removed_voices"]["lee-ann-howlett"]["reason_codes"] == [
+        "failed_manual_listening_review"
+    ]
+    assert all(
+        QUALITY["removed_voices"][name]["reason_codes"] for name in REMOVED_VOICES
+    )
 
 
 def _sha256(path: Path) -> str:

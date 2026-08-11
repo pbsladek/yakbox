@@ -21,3 +21,9 @@ profile = "default"
 output_root = "build/yakbox"
 mastering = true
 m4b = false
+
+[repairs]
+mode = "context"
+takes = 4
+whisper_qa = true
+rebuild_on_approval = true

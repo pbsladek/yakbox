@@ -42,7 +42,9 @@ external evidence until the yakbox release passes digest/media checks.
 ## Cloud rewrite compatibility
 
 Existing direct cloud TTS/stream behavior remains file-oriented. Batch parsing
-matches local `.txt`, `.csv`, and `.jsonl`. The canonical recording command is:
+matches local `.txt`, `.csv`, `.yaml`, and `.yml`. Convert a JSON Lines batch
+to a YAML sequence or one mapping per YAML document. The canonical recording
+command is:
 
 ```console
 yakbox cloud voices recordings create VOICE_UUID AUDIO_FILE \

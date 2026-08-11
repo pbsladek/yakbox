@@ -22,6 +22,11 @@ class CacheEntry:
     size: int
     modified_at: datetime
     valid: bool
+    pinned: bool = False
+    synthesis_kind: str | None = None
+    text_sha256: str | None = None
+    backend: str | None = None
+    profile: str | None = None
 
     def to_dict(self, *, root: Path) -> dict[str, object]:
         """Serialize a cache entry relative to the workspace root."""
@@ -31,6 +36,11 @@ class CacheEntry:
             "size": self.size,
             "modified_at": self.modified_at.isoformat(),
             "valid": self.valid,
+            "pinned": self.pinned,
+            "synthesis_kind": self.synthesis_kind,
+            "text_sha256": self.text_sha256,
+            "backend": self.backend,
+            "profile": self.profile,
         }
 
 
@@ -86,10 +96,12 @@ def inventory_synthesis_cache(workspace: Path) -> CacheInventory:
     if not root.exists():
         return CacheInventory(())
     entries: list[CacheEntry] = []
+    pinned = _pinned_fingerprints(workspace)
     for audio in sorted(root.glob("*/*.wav")):
         metadata = audio.with_suffix(".json")
         status = audio.stat()
         fingerprint = audio.stem
+        details = _entry_details(metadata)
         entries.append(
             CacheEntry(
                 fingerprint=fingerprint,
@@ -98,6 +110,11 @@ def inventory_synthesis_cache(workspace: Path) -> CacheInventory:
                 size=status.st_size,
                 modified_at=datetime.fromtimestamp(status.st_mtime, tz=UTC),
                 valid=_valid_entry(audio, metadata, fingerprint),
+                pinned=fingerprint in pinned,
+                synthesis_kind=_string_or_none(details.get("synthesis_kind")),
+                text_sha256=_request_string(details, "text_sha256"),
+                backend=_request_string(details, "backend"),
+                profile=_request_string(details, "profile"),
             )
         )
     return CacheInventory(tuple(entries))
@@ -119,11 +136,17 @@ def plan_cache_cleanup(
     if max_age_days is not None:
         cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
         candidates.update(
-            entry for entry in inventory.entries if entry.modified_at < cutoff
+            entry
+            for entry in inventory.entries
+            if entry.modified_at < cutoff and not entry.pinned
         )
     if max_bytes is not None:
         retained = sorted(
-            (entry for entry in inventory.entries if entry not in candidates),
+            (
+                entry
+                for entry in inventory.entries
+                if entry not in candidates and not entry.pinned
+            ),
             key=lambda entry: entry.modified_at,
             reverse=True,
         )
@@ -178,4 +201,64 @@ def _valid_entry(audio: Path, metadata: Path, fingerprint: str) -> bool:
         and raw.get("fingerprint") == fingerprint
         and raw.get("size") == audio.stat().st_size
         and raw.get("sha256") == sha256_file(audio)
+    )
+
+
+def _entry_details(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except OSError, json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _request_string(value: dict[str, object], key: str) -> str | None:
+    request = value.get("request")
+    if not isinstance(request, dict):
+        return None
+    return _string_or_none(request.get(key))
+
+
+def _string_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _pinned_fingerprints(workspace: Path) -> frozenset[str]:
+    root = workspace.resolve() / ".yakbox" / "assemblies"
+    values: set[str] = set()
+    if not root.exists():
+        return frozenset()
+    for path in root.glob("**/*.json"):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except OSError, json.JSONDecodeError:
+            continue
+        if not _assembly_audio_is_current(raw, workspace):
+            continue
+        chunks = raw.get("chunks") if isinstance(raw, dict) else None
+        if not isinstance(chunks, list):
+            continue
+        values.update(
+            fingerprint
+            for chunk in chunks
+            if isinstance(chunk, dict)
+            and isinstance((fingerprint := chunk.get("cache_fingerprint")), str)
+        )
+    return frozenset(values)
+
+
+def _assembly_audio_is_current(value: object, workspace: Path) -> bool:
+    if not isinstance(value, dict):
+        return False
+    raw_path = value.get("raw_audio")
+    digest = value.get("raw_sha256")
+    if not isinstance(raw_path, str) or not isinstance(digest, str):
+        return False
+    root = workspace.resolve()
+    path = Path(raw_path)
+    resolved = path.resolve() if path.is_absolute() else (root / path).resolve()
+    return (
+        resolved.is_relative_to(root)
+        and resolved.is_file()
+        and sha256_file(resolved) == digest
     )

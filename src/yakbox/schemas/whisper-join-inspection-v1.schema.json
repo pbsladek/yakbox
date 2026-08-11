@@ -16,6 +16,30 @@
     "coalesced_join_count": {"type": "integer", "minimum": 0},
     "accepted": {"type": "boolean"},
     "failed_join_count": {"type": "integer", "minimum": 0},
+    "scope": {
+      "type": "object",
+      "required": ["incremental", "join_indices", "sources"],
+      "properties": {
+        "incremental": {"type": "boolean"},
+        "join_indices": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["join_index", "before_chunk_id", "after_chunk_id", "before", "after"],
+            "properties": {
+              "join_index": {"type": "integer", "minimum": 0},
+              "before_chunk_id": {"type": "string"},
+              "after_chunk_id": {"type": "string"},
+              "before": {"$ref": "#/$defs/sourceLocation"},
+              "after": {"$ref": "#/$defs/sourceLocation"}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "joins": {
       "type": "array",
       "minItems": 1,
@@ -23,6 +47,18 @@
         "type": "object",
         "required": ["index", "at_seconds", "boundary", "window_start_seconds", "window_end_seconds", "expected_before_sha256", "expected_after_sha256", "accepted", "reason_codes", "diagnostic_reason_codes", "recognized_tokens", "signal", "confidence_profile", "alignment"]
       }
+    }
+  },
+  "$defs": {
+    "sourceLocation": {
+      "type": "object",
+      "required": ["path", "start_line", "end_line"],
+      "properties": {
+        "path": {"type": "string"},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

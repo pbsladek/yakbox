@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import tomllib
 import wave
@@ -17,6 +18,8 @@ from tests.schema_helpers import validate_contract
 import yakbox.audiobook.build as build_module
 from yakbox.audio.crop import SpeechRegion
 from yakbox.audiobook import (
+    AudiobookManifest,
+    BackendProfile,
     apply_cache_cleanup,
     apply_cleanup,
     assemble_release,
@@ -35,12 +38,17 @@ from yakbox.audiobook import (
     select_build_chapters,
 )
 from yakbox.audiobook.artifacts import ArtifactKind
-from yakbox.audiobook.planner import plan_audiobook
+from yakbox.audiobook.planner import ChunkRoute, PlanNode, plan_audiobook
 from yakbox.audiobook.shards import (
     export_shard_manifests,
     verify_shard_manifests,
 )
-from yakbox.audiobook.sources import normalize_sources
+from yakbox.audiobook.sources import (
+    AttributionContext,
+    AttributionContextPosition,
+    AttributionTagKind,
+    normalize_sources,
+)
 from yakbox.cloud.usage import HostedUsageGate
 from yakbox.errors import BuildError, ValidationError
 from yakbox.speech import (
@@ -74,6 +82,70 @@ def test_chatterbox_chunk_seeds_are_stable_and_distinct() -> None:
     assert first == repeated
     assert first is not None and second is not None
     assert first.seed != second.seed
+
+
+def test_short_utterance_retry_profile_changes_candidate_seed_material() -> None:
+    manifest = cast(
+        AudiobookManifest,
+        SimpleNamespace(
+            characters=(object(),),
+            character=lambda _speaker: SimpleNamespace(profile="liora"),
+        ),
+    )
+    default_profile = cast(BackendProfile, SimpleNamespace(name="narrator"))
+    request = SpeechSynthesisRequest(
+        text="Micah Levi,",
+        voice="caro-davy",
+        chatterbox=ChatterboxSynthesisOptions(seed=4_321),
+    )
+
+    ordinary = build_module._short_utterance_seed_material(
+        manifest,
+        ChunkRoute("liora", "liora", seed=42),
+        default_profile,
+        request,
+        chapter_id="chapter",
+        chunk_index=46,
+    )
+    retry = build_module._short_utterance_seed_material(
+        manifest,
+        ChunkRoute("liora", "liora-retry", seed=43),
+        default_profile,
+        request,
+        chapter_id="chapter",
+        chunk_index=46,
+    )
+
+    assert ordinary == "chapter:46"
+    assert retry == "chapter:46:profile=liora-retry:seed=4321"
+
+
+def test_short_utterance_context_prefers_stripped_tags_at_the_dialogue_edge() -> None:
+    route = ChunkRoute("wren", "wren")
+    node = cast(
+        PlanNode,
+        SimpleNamespace(
+            chunks=("He stayed beside the sealed door.", "No.", "Leave it alone."),
+            chunk_routes=(route, route, route),
+        ),
+    )
+    context = (
+        AttributionContext(
+            "Wren said.",
+            AttributionTagKind.PURE,
+            AttributionContextPosition.AFTER,
+        ),
+    )
+
+    previous, following = build_module._short_utterance_context(
+        node,
+        1,
+        route,
+        context,
+    )
+
+    assert previous == "He stayed beside the sealed door."
+    assert following == "Wren said. Leave it alone."
 
 
 class _ChapterVerificationAligner:
@@ -226,10 +298,7 @@ async def test_fake_build_release_resume_and_cleanup(book_workspace: Path) -> No
         json.loads(release.release_manifest.read_text(encoding="utf-8")),
     )
     audition_report = auditions[0].path.parent / "audition.json"
-    validate_contract(
-        "audiobook-audition",
-        json.loads(audition_report.read_text(encoding="utf-8")),
-    )
+    _assert_audition_input(audition_report, "Hi.", token_count=1)
 
     inventory = inventory_artifacts(manifest.target("default").output_root)
     assert {item.kind for item in inventory.records} >= {
@@ -322,6 +391,16 @@ async def test_synthesis_cache_has_safe_inventory_and_explicit_cleanup(
     assert result.artifacts[0].path.is_file()
     assert len(inventory.entries) == 2
     assert inventory.invalid_entries == 0
+    assert all(entry.pinned for entry in inventory.entries)
+    assert all(entry.text_sha256 is not None for entry in inventory.entries)
+    assert "Opening line" not in "".join(
+        entry.metadata_path.read_text(encoding="utf-8") for entry in inventory.entries
+    )
+    cleanup = plan_cache_cleanup(manifest.root, max_bytes=0)
+    assert cleanup.candidates == ()
+
+    for assembly in (manifest.root / ".yakbox" / "assemblies").glob("**/*.json"):
+        assembly.unlink()
     cleanup = plan_cache_cleanup(manifest.root, max_bytes=0)
     assert len(cleanup.candidates) == 2
     assert apply_cache_cleanup(cleanup) == 2
@@ -1491,3 +1570,10 @@ async def test_twenty_one_chapter_audiobook_dogfood_pipeline(
     assert len(release.delivery_mp3s) == 21
     assert len(verified) == 4
     assert m4b.is_file()
+
+
+def _assert_audition_input(path: Path, text: str, *, token_count: int) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["input_text_sha256"] == hashlib.sha256(text.encode()).hexdigest()
+    assert payload["input_token_count"] == token_count
+    validate_contract("audiobook-audition", payload)
