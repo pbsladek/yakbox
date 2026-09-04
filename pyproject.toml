@@ -47,6 +47,12 @@ local = [
 alignment = [
     "mlx-whisper>=0.4.3,<0.5 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
 ]
+analysis-parakeet = [
+    "parakeet-mlx>=0.5.2,<0.6 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
+analysis-qwen = [
+    "mlx-audio[stt]>=0.4.8,<0.5 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
 phoneme = [
     "huggingface-hub>=1.4,<2",
     "torch==2.13.0",
@@ -85,6 +91,9 @@ default-groups = ["dev"]
 override-dependencies = [
     # chatterbox-tts 0.1.7 pins vulnerable releases. Keep these overrides
     # until upstream's published metadata moves to fixed versions.
+    # SecretStorage permits older cryptography releases affected by
+    # GHSA-g6cj-pr64-35w5; keep the complete optional-dependency graph fixed.
+    "cryptography>=50.0.0",
     "diffusers>=0.38.0",
     "gradio>=6.16.0",
     # Numba 0.66 currently requires NumPy below 2.5.
@@ -170,6 +179,47 @@ forbidden_modules = [
     "yakbox.diagnostics",
     "yakbox.local",
     "yakbox.speech",
+]
+
+[[tool.importlinter.contracts]]
+id = "speech-analysis-domain-is-adapter-neutral"
+name = "Speech analysis domain and consensus do not depend on worker adapters"
+type = "forbidden"
+source_modules = [
+    "yakbox.speech.analysis_calibration",
+    "yakbox.speech.analysis_cache",
+    "yakbox.speech.analysis_capabilities",
+    "yakbox.speech.analysis_evaluation",
+    "yakbox.speech.analysis_fingerprints",
+    "yakbox.speech.analysis_models",
+    "yakbox.speech.analysis_policy",
+    "yakbox.speech.analysis_services",
+    "yakbox.speech.analysis_windows",
+    "yakbox.speech.consensus",
+    "yakbox.speech.normalization",
+    "yakbox.speech.shadow",
+]
+forbidden_modules = [
+    "yakbox.speech.analysis_adapters",
+    "yakbox.speech.analysis_runtime",
+    "yakbox.speech.analysis_worker",
+]
+
+[[tool.importlinter.contracts]]
+id = "speech-analysis-worker-is-isolated"
+name = "Speech analysis workers do not depend on audiobook or CLI code"
+type = "forbidden"
+source_modules = ["yakbox.speech.analysis_worker"]
+forbidden_modules = ["yakbox.audiobook", "yakbox.cli"]
+
+[[tool.importlinter.contracts]]
+id = "speech-analysis-supervisor-uses-protocol"
+name = "Speech analysis supervisor does not depend on concrete adapters"
+type = "forbidden"
+source_modules = ["yakbox.speech.analysis_runtime"]
+forbidden_modules = [
+    "yakbox.speech.analysis_adapters",
+    "yakbox.speech.analysis_worker",
 ]
 
 [[tool.importlinter.contracts]]

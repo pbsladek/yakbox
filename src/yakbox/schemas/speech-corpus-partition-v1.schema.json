@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-corpus-partition-v1.schema.json",
+  "title": "Yakbox frozen speech qualification corpus partition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "source_inventory_fingerprint", "transcript_truth_fingerprint", "partition_seed_fingerprint", "minimum_held_out_clusters", "calibration_voice_count", "held_out_voice_count", "calibration_cluster_count", "held_out_cluster_count", "assignments"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-corpus-partition-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "source_inventory_fingerprint": {"$ref": "#/$defs/sha256"},
+    "transcript_truth_fingerprint": {"$ref": "#/$defs/sha256"},
+    "partition_seed_fingerprint": {"$ref": "#/$defs/sha256"},
+    "minimum_held_out_clusters": {"type": "integer", "minimum": 1},
+    "calibration_voice_count": {"type": "integer", "minimum": 1},
+    "held_out_voice_count": {"type": "integer", "minimum": 1},
+    "calibration_cluster_count": {"type": "integer", "minimum": 1},
+    "held_out_cluster_count": {"type": "integer", "minimum": 1},
+    "assignments": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/assignment"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_window_id", "source_passage_group", "voice", "partition", "fingerprint"],
+      "properties": {
+        "source_window_id": {"type": "string", "minLength": 1},
+        "source_passage_group": {"type": "string", "minLength": 1},
+        "voice": {"type": "string", "minLength": 1},
+        "partition": {"enum": ["calibration", "held_out"]},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

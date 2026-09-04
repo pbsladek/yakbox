@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/whisper-changed-region-verification-v1.schema.json",
+  "title": "yakbox changed synthesis region verification",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "chapter_id", "accepted", "changed_chunk_count", "results"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/whisper-changed-region-verification-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "chapter_id": {"type": "string"},
+    "accepted": {"type": "boolean"},
+    "changed_chunk_count": {"type": "integer", "minimum": 0},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["chunk_id", "chunk_index", "audio_sha256", "text_sha256", "accepted", "reason_codes", "diagnostic_reason_codes", "token_accuracy", "alignment_cache"],
+        "properties": {
+          "chunk_id": {"type": "string"},
+          "chunk_index": {"type": "integer", "minimum": 1},
+          "audio_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "text_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "accepted": {"type": "boolean"},
+          "reason_codes": {"type": "array", "items": {"type": "string"}},
+          "diagnostic_reason_codes": {"type": "array", "items": {"type": "string"}},
+          "token_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+          "alignment_cache": {
+            "type": "object",
+            "required": ["hits", "misses"],
+            "properties": {
+              "hits": {"type": "integer", "minimum": 0},
+              "misses": {"type": "integer", "minimum": 0}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

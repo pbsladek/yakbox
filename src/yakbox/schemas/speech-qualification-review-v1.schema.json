@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-qualification-review-v1.schema.json",
+  "title": "Yakbox speech qualification review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "status", "evaluation_fingerprint", "corpus_fingerprint", "policy_fingerprint", "protocol_fingerprint", "order_seed_fingerprint", "reviews"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-qualification-review-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "status": {"enum": ["pending", "approved"]},
+    "evaluation_fingerprint": {"$ref": "#/$defs/sha256"},
+    "corpus_fingerprint": {"$ref": "#/$defs/sha256"},
+    "policy_fingerprint": {"$ref": "#/$defs/sha256"},
+    "protocol_fingerprint": {"$ref": "#/$defs/sha256"},
+    "order_seed_fingerprint": {"$ref": "#/$defs/sha256"},
+    "reviews": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/review"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "kind", "pass_index", "reviewer_fingerprint", "decision"],
+      "properties": {
+        "case_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$"},
+        "kind": {"enum": ["automatic_acceptance", "valid_dissent", "boundary"]},
+        "pass_index": {"type": "integer", "minimum": 1},
+        "reviewer_fingerprint": {
+          "oneOf": [
+            {"const": ""},
+            {"$ref": "#/$defs/sha256"}
+          ]
+        },
+        "decision": {"enum": ["pending", "approved", "rejected"]}
+      }
+    }
+  }
+}

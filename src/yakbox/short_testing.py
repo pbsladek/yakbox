@@ -73,17 +73,42 @@ async def run_short_test(
         previous_context=previous_context,
         next_context=next_context,
     )
-    aligner = open_local_aligner(
-        policy.alignment_backend,
-        model=policy.alignment_model,
-        revision=policy.alignment_revision,
-        timeout_seconds=policy.alignment_timeout_seconds,
-        prompted_timing=policy.prompted_timing,
-        decode_consensus=policy.decode_consensus,
-        prompt_sensitivity=policy.prompt_sensitivity,
-        maximum_consensus_timing_delta_ms=(policy.maximum_consensus_timing_delta_ms),
-        hallucination_silence_threshold=policy.hallucination_silence_threshold,
-    )
+    if manifest.runtime.enabled:
+        from yakbox.local_runtime import (  # noqa: PLC0415 - optional backend
+            LocalRuntimeOptions,
+            PersistentMlxWhisperAligner,
+        )
+
+        aligner = PersistentMlxWhisperAligner(
+            manifest.root,
+            model=policy.alignment_model,
+            revision=policy.alignment_revision,
+            timeout_seconds=policy.alignment_timeout_seconds,
+            prompted_timing=policy.prompted_timing,
+            decode_consensus=policy.decode_consensus,
+            prompt_sensitivity=policy.prompt_sensitivity,
+            maximum_consensus_timing_delta_ms=policy.maximum_consensus_timing_delta_ms,
+            hallucination_silence_threshold=policy.hallucination_silence_threshold,
+            runtime_options=LocalRuntimeOptions(
+                idle_timeout_seconds=manifest.runtime.idle_timeout_seconds,
+                conditioning_cache_size=manifest.runtime.conditioning_cache_size,
+                maximum_memory_bytes=manifest.runtime.maximum_memory_bytes,
+            ),
+        )
+    else:
+        aligner = open_local_aligner(
+            policy.alignment_backend,
+            model=policy.alignment_model,
+            revision=policy.alignment_revision,
+            timeout_seconds=policy.alignment_timeout_seconds,
+            prompted_timing=policy.prompted_timing,
+            decode_consensus=policy.decode_consensus,
+            prompt_sensitivity=policy.prompt_sensitivity,
+            maximum_consensus_timing_delta_ms=(
+                policy.maximum_consensus_timing_delta_ms
+            ),
+            hallucination_silence_threshold=policy.hallucination_silence_threshold,
+        )
     destination = run_directory / "selected.wav"
     async with open_speech_backend(
         profile.backend,
@@ -92,6 +117,10 @@ async def run_short_test(
         local_worker_timeout_seconds=_profile_worker_timeout(profile),
         local_threads_per_process=_profile_threads(profile),
         local_worker_log_path=run_directory / "logs" / "local-worker.log",
+        local_runtime_workspace=manifest.root if manifest.runtime.enabled else None,
+        local_runtime_idle_timeout_seconds=manifest.runtime.idle_timeout_seconds,
+        local_conditioning_cache_size=manifest.runtime.conditioning_cache_size,
+        local_runtime_maximum_memory_bytes=manifest.runtime.maximum_memory_bytes,
     ) as service:
         selection = await synthesize_short_utterance(
             service=service,

@@ -26,6 +26,7 @@ class _Model:
     def __init__(self) -> None:
         self.calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
         self.prepare_calls: list[tuple[str, float]] = []
+        self.conds: object = object()
 
     def generate(self, *args: object, **kwargs: object) -> object:
         self.calls.append((args, kwargs))
@@ -33,6 +34,7 @@ class _Model:
 
     def prepare_conditionals(self, path: str, *, exaggeration: float) -> None:
         self.prepare_calls.append((path, exaggeration))
+        self.conds = (path, exaggeration)
 
 
 class _Factory:
@@ -260,6 +262,36 @@ async def test_reference_conditioning_is_prepared_once_per_voice(
 
     assert _Factory.loads == 1
     assert _Factory.model.prepare_calls == [(str(reference), 0.5)]
+
+
+@pytest.mark.asyncio
+async def test_reference_conditioning_lru_reuses_voice_after_switch(
+    tmp_path: Path, mocked_chatterbox: None
+) -> None:
+    _ = mocked_chatterbox
+    first = tmp_path / "first.wav"
+    second = tmp_path / "second.wav"
+    first.write_bytes(b"first-reference")
+    second.write_bytes(b"second-reference")
+    service = LocalChatterboxService(device="cpu", conditioning_cache_size=2)
+
+    for index, reference in enumerate((first, second, first), start=1):
+        await service.synthesize_to_file(
+            SpeechSynthesisRequest(
+                text=f"Line {index}.",
+                voice=f"voice-{index}",
+                reference_audio=reference,
+            ),
+            tmp_path / f"line-{index}.wav",
+        )
+
+    assert _Factory.loads == 1
+    assert _Factory.model.prepare_calls == [
+        (str(first), 0.5),
+        (str(second), 0.5),
+    ]
+    assert service.model_loaded
+    assert service.conditioning_cache_entries == 2
 
 
 @pytest.mark.asyncio

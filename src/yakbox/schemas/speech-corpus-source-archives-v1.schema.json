@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-corpus-source-archives-v1.schema.json",
+  "title": "Yakbox licensed corpus source archive inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "voice_registry_digest", "archive_count", "total_size_bytes", "archives"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-corpus-source-archives-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "voice_registry_digest": {"$ref": "#/$defs/sha256"},
+    "archive_count": {"type": "integer", "minimum": 1},
+    "total_size_bytes": {"type": "integer", "minimum": 1},
+    "archives": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["voice", "reader", "relative_path", "source_url", "source_digest", "size_bytes", "rights_id", "rights_url", "fingerprint"],
+        "properties": {
+          "voice": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+          "reader": {"type": "string", "minLength": 1},
+          "relative_path": {"type": "string", "minLength": 1},
+          "source_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+          "source_digest": {"$ref": "#/$defs/sha256"},
+          "size_bytes": {"type": "integer", "minimum": 1, "maximum": 536870912},
+          "rights_id": {"const": "LicenseRef-LibriVox-Public-Domain-US"},
+          "rights_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+          "fingerprint": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    }
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

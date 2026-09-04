@@ -63,6 +63,10 @@ from yakbox.speech import (
     TextToSpeechService,
 )
 from yakbox.speech.alignment import AlignmentResult, AlignmentToken, lexical_tokens
+from yakbox.speech.analysis_migration import (
+    build_migrated_manifest,
+    preview_manifest_migration,
+)
 from yakbox.speech.short_utterances import CarrierRecipe
 
 
@@ -287,6 +291,7 @@ async def test_fake_build_release_resume_and_cleanup(book_workspace: Path) -> No
         "audiobook-run",
         json.loads((first.run_directory / "run.json").read_text(encoding="utf-8")),
     )
+    _assert_performance_report(first.run_directory)
     for line in (
         (first.run_directory / "journal.ndjson")
         .read_text(encoding="utf-8")
@@ -308,6 +313,34 @@ async def test_fake_build_release_resume_and_cleanup(book_workspace: Path) -> No
         ArtifactKind.RELEASE,
     }
     validate_contract("audiobook-inventory", inventory.to_dict(workspace=manifest.root))
+    _assert_output_contracts_and_cleanup(manifest)
+    _assert_shards(manifest)
+
+
+@pytest.mark.asyncio
+async def test_internal_v2_migration_runs_real_fake_backend(
+    book_workspace: Path,
+) -> None:
+    preview = preview_manifest_migration(book_workspace / "yakbox.toml")
+
+    result = await build_migrated_manifest(preview)
+
+    assert result.status == "complete"
+    assert result.artifacts
+    assert preview.draft_manifest["schema_version"] == 2
+    assert preview._legacy_manifest.schema_version == 1
+
+
+def _assert_performance_report(run_directory: Path) -> None:
+    performance = json.loads(
+        (run_directory / "performance.json").read_text(encoding="utf-8")
+    )
+    validate_contract("audiobook-performance", performance)
+    assert performance["stage_seconds"]["synthesize"] >= 0
+    assert performance["synthesis_cache"]["pending_chunks"] >= 1
+
+
+def _assert_output_contracts_and_cleanup(manifest: AudiobookManifest) -> None:
     for metadata in manifest.target("default").output_root.rglob("*.artifact.json"):
         validate_contract(
             "audiobook-artifact",
@@ -343,6 +376,8 @@ async def test_fake_build_release_resume_and_cleanup(book_workspace: Path) -> No
     )
     assert raw.path.is_file()
 
+
+def _assert_shards(manifest: AudiobookManifest) -> None:
     document = normalize_sources(
         manifest.sources,
         pronunciations=manifest.pronunciations,

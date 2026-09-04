@@ -20,6 +20,7 @@ _LEXICAL_TOKEN = regex.compile(
     r"[\p{L}\p{M}\p{N}]+)*"
 )
 INTERNAL_SENTENCE_BOUNDARY_PAUSE_MS = 900
+INTERNAL_CLAUSE_BOUNDARY_PAUSE_MS = 650
 MINIMUM_CONSENSUS_DECODE_PASSES = 2
 
 
@@ -211,7 +212,8 @@ def validate_carrier_alignment(
         return AlignmentDecision(False, ("low_confidence",), confidence=confidence)
     start = selected[0].start_seconds
     end = selected[-1].end_seconds
-    if _maximum_internal_gap_ms(selected) > _internal_gap_limit_ms(
+    if _has_excessive_internal_gap(
+        selected,
         target_text,
         maximum_internal_token_gap_ms,
     ):
@@ -284,7 +286,8 @@ def validate_extracted_alignment(
         reasons.append("low_confidence")
     start = result.tokens[0].start_seconds
     end = result.tokens[-1].end_seconds
-    if _maximum_internal_gap_ms(result.tokens) > _internal_gap_limit_ms(
+    if _has_excessive_internal_gap(
+        result.tokens,
         target_text,
         maximum_internal_token_gap_ms,
     ):
@@ -484,17 +487,46 @@ def _recognized_tokens(tokens: tuple[AlignmentToken, ...]) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _internal_gap_limit_ms(text: str, baseline_ms: int) -> int:
-    return (
-        max(baseline_ms, INTERNAL_SENTENCE_BOUNDARY_PAUSE_MS)
-        if has_internal_sentence_boundary(text)
-        else baseline_ms
+def _has_excessive_internal_gap(
+    tokens: tuple[AlignmentToken, ...],
+    text: str,
+    baseline_ms: int,
+) -> bool:
+    limits = _internal_gap_limits_ms(text, len(tokens), baseline_ms)
+    return any(
+        max(0.0, following.start_seconds - previous.end_seconds) * 1_000 > limit
+        for (previous, following), limit in zip(pairwise(tokens), limits, strict=True)
     )
+
+
+def _internal_gap_limits_ms(
+    text: str,
+    token_count: int,
+    baseline_ms: int,
+) -> tuple[int, ...]:
+    words = tuple(regex.finditer(_LEXICAL_TOKEN, text.casefold()))
+    if len(words) != token_count:
+        return tuple(baseline_ms for _ in range(max(0, token_count - 1)))
+    limits: list[int] = []
+    for previous, following in pairwise(words):
+        punctuation = text[previous.end() : following.start()]
+        if regex.search(r"[.!?]", punctuation):
+            limits.append(max(baseline_ms, INTERNAL_SENTENCE_BOUNDARY_PAUSE_MS))
+        elif regex.search(r"[,;:]|[\u2013\u2014]", punctuation):
+            limits.append(max(baseline_ms, INTERNAL_CLAUSE_BOUNDARY_PAUSE_MS))
+        else:
+            limits.append(baseline_ms)
+    return tuple(limits)
 
 
 def has_internal_sentence_boundary(text: str) -> bool:
     """Return whether text contains punctuation between lexical phrases."""
     return regex.search(r"[.!?]\s+\S", text) is not None
+
+
+def has_internal_clause_boundary(text: str) -> bool:
+    """Return whether text contains a spoken clause boundary."""
+    return regex.search(r"(?:[,;:]|[\u2013\u2014])\s+\S", text) is not None
 
 
 def _canonical_tokens(
@@ -507,6 +539,7 @@ def _canonical_tokens(
         for canonical, accepted in aliases.items()
         for alias in (canonical, *accepted)
     }
+    reverse.update({canonical: canonical for canonical in aliases})
     return tuple(_canonical_token(token, reverse) for token in tokens)
 
 
@@ -572,14 +605,4 @@ def _speech_duration(
     return sum(
         max(0.0, min(region.end_seconds, end) - max(region.start_seconds, start))
         for region in regions
-    )
-
-
-def _maximum_internal_gap_ms(tokens: tuple[AlignmentToken, ...]) -> float:
-    return max(
-        (
-            max(0.0, following.start_seconds - previous.end_seconds) * 1_000
-            for previous, following in pairwise(tokens)
-        ),
-        default=0.0,
     )

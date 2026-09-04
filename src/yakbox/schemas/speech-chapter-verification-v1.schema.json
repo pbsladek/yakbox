@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-chapter-verification-v1.schema.json",
+  "title": "Yakbox exact chapter speech verification",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "chapter_id", "audio_digest", "fingerprint", "verification_fingerprint", "accepted", "defects", "scope", "consensus_fingerprint", "forced_alignment_fingerprint"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-chapter-verification-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "chapter_id": {"type": "string", "minLength": 1},
+    "audio_digest": {"$ref": "#/$defs/sha256"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "verification_fingerprint": {"$ref": "#/$defs/sha256"},
+    "accepted": {"type": "boolean"},
+    "scope": {"enum": ["candidate", "master", "delivery"]},
+    "consensus_fingerprint": {"$ref": "#/$defs/sha256"},
+    "forced_alignment_fingerprint": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+    "defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["reason_codes", "lexical_span", "selector"],
+        "properties": {
+          "reason_codes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "lexical_span": {
+            "type": "object",
+            "required": ["start", "end", "reason_codes", "review_eligible"],
+            "properties": {
+              "start": {"type": "integer", "minimum": 0},
+              "end": {"type": "integer", "minimum": 1},
+              "reason_codes": {"type": "array", "items": {"type": "string"}},
+              "review_eligible": {"type": "boolean"}
+            },
+            "additionalProperties": false
+          },
+          "selector": {
+            "type": "object",
+            "required": ["chunk_id", "source_path", "source_start_line", "source_end_line", "speaker", "profile", "token_start", "token_end", "adjacent_join_ids"],
+            "properties": {
+              "chunk_id": {"type": "string", "minLength": 1},
+              "source_path": {"type": "string", "minLength": 1},
+              "source_start_line": {"type": "integer", "minimum": 1},
+              "source_end_line": {"type": "integer", "minimum": 1},
+              "speaker": {"type": "string", "minLength": 1},
+              "profile": {"type": "string", "minLength": 1},
+              "token_start": {"type": "integer", "minimum": 0},
+              "token_end": {"type": "integer", "minimum": 1},
+              "adjacent_join_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

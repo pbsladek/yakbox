@@ -21,7 +21,16 @@
     "diagnostic_reason_codes": {"type": "array", "items": {"type": "string"}},
     "mismatches": {"type": "array", "items": {"type": "object"}},
     "alignment": {"type": "object"},
-    "confidence_profile": {"type": "object"}
+    "confidence_profile": {"type": "object"},
+    "alignment_cache": {
+      "type": "object",
+      "required": ["hits", "misses"],
+      "properties": {
+        "hits": {"type": "integer", "minimum": 0},
+        "misses": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }

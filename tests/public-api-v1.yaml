@@ -1,368 +1,356 @@
+schema_version: 1
 modules:
   yakbox:
     exports:
       ArtifactError:
+        kind: exception
         code: artifact_error
-        kind: exception
       BackendUnavailableError:
+        kind: exception
         code: backend_unavailable
-        kind: exception
       BuildError:
+        kind: exception
         code: build_error
-        kind: exception
       ConfigurationError:
+        kind: exception
         code: configuration_error
-        kind: exception
       ValidationError:
+        kind: exception
         code: validation_error
-        kind: exception
       YakboxError:
-        code: yakbox_error
         kind: exception
+        code: yakbox_error
       __version__:
         kind: value
   yakbox.audio:
     exports:
       AudioInspection:
         kind: class
-        signature: '(schema_version: ''int'', path: ''Path'', format_name: ''str'',
-          codec: ''str'', duration_seconds: ''float'', sample_rate: ''int'', channels:
-          ''int'', bit_rate: ''int | None'', size: ''int'', valid: ''bool'', issues:
-          ''tuple[str, ...]'', integrated_loudness_lufs: ''float | None'' = None,
-          true_peak_dbfs: ''float | None'' = None, loudness_range_lu: ''float | None''
-          = None, leading_silence_seconds: ''float | None'' = None, trailing_silence_seconds:
-          ''float | None'' = None) -> None'
+        signature: '(schema_version: ''int'', path: ''Path'', format_name: ''str'', codec: ''str'', duration_seconds:
+          ''float'', sample_rate: ''int'', channels: ''int'', bit_rate: ''int | None'', size: ''int'',
+          valid: ''bool'', issues: ''tuple[str, ...]'', integrated_loudness_lufs: ''float | None'' = None,
+          true_peak_dbfs: ''float | None'' = None, loudness_range_lu: ''float | None'' = None, leading_silence_seconds:
+          ''float | None'' = None, trailing_silence_seconds: ''float | None'' = None) -> None'
       AudioQualityPolicy:
         kind: class
-        signature: '(minimum_loudness_lufs: ''float | None'' = None, maximum_loudness_lufs:
-          ''float | None'' = None, maximum_true_peak_dbfs: ''float | None'' = None,
-          maximum_leading_silence_seconds: ''float | None'' = None, maximum_trailing_silence_seconds:
-          ''float | None'' = None) -> None'
+        signature: '(minimum_loudness_lufs: ''float | None'' = None, maximum_loudness_lufs: ''float |
+          None'' = None, maximum_true_peak_dbfs: ''float | None'' = None, maximum_leading_silence_seconds:
+          ''float | None'' = None, maximum_trailing_silence_seconds: ''float | None'' = None) -> None'
       assemble_m4b:
         kind: function
-        signature: '(chapters: ''tuple[Path, ...]'', destination: ''Path'', *, title:
-          ''str'', author: ''str | None'' = None, narrator: ''str | None'' = None,
-          subtitle: ''str | None'' = None, genre: ''str | None'' = None, publisher:
-          ''str | None'' = None, copyright: ''str | None'' = None, language: ''str
-          | None'' = None, date: ''str | None'' = None, series: ''str | None'' = None,
-          series_position: ''str | None'' = None, cover: ''Path | None'' = None, chapter_titles:
-          ''tuple[str, ...] | None'' = None, bitrate: ''str'' = ''192k'', overwrite:
-          ''bool'' = False) -> ''None'''
+        signature: '(chapters: ''tuple[Path, ...]'', destination: ''Path'', *, title: ''str'', author:
+          ''str | None'' = None, narrator: ''str | None'' = None, subtitle: ''str | None'' = None, genre:
+          ''str | None'' = None, publisher: ''str | None'' = None, copyright: ''str | None'' = None, language:
+          ''str | None'' = None, date: ''str | None'' = None, series: ''str | None'' = None, series_position:
+          ''str | None'' = None, cover: ''Path | None'' = None, chapter_titles: ''tuple[str, ...] | None''
+          = None, bitrate: ''str'' = ''192k'', overwrite: ''bool'' = False) -> ''None'''
       encode_mp3:
         kind: function
-        signature: '(source: ''Path'', destination: ''Path'', *, bitrate: ''str''
-          = ''192k'', title: ''str | None'' = None, album: ''str | None'' = None,
-          artist: ''str | None'' = None, album_artist: ''str | None'' = None, composer:
-          ''str | None'' = None, genre: ''str | None'' = None, publisher: ''str |
-          None'' = None, copyright: ''str | None'' = None, language: ''str | None''
-          = None, date: ''str | None'' = None, cover: ''Path | None'' = None, track:
-          ''int | None'' = None, overwrite: ''bool'' = False) -> ''None'''
+        signature: '(source: ''Path'', destination: ''Path'', *, bitrate: ''str'' = ''192k'', title: ''str
+          | None'' = None, album: ''str | None'' = None, artist: ''str | None'' = None, album_artist:
+          ''str | None'' = None, composer: ''str | None'' = None, genre: ''str | None'' = None, publisher:
+          ''str | None'' = None, copyright: ''str | None'' = None, language: ''str | None'' = None, date:
+          ''str | None'' = None, cover: ''Path | None'' = None, track: ''int | None'' = None, overwrite:
+          ''bool'' = False) -> ''None'''
       inspect_audio:
         kind: function
-        signature: '(path: ''Path'', *, quality: ''AudioQualityPolicy | None'' = None)
-          -> ''AudioInspection'''
+        signature: '(path: ''Path'', *, quality: ''AudioQualityPolicy | None'' = None) -> ''AudioInspection'''
       master_wav:
         kind: function
-        signature: '(source: ''Path'', destination: ''Path'', *, sample_rate: ''int''
-          = 44100, normalize: ''bool'' = True, overwrite: ''bool'' = False) -> ''None'''
+        signature: '(source: ''Path'', destination: ''Path'', *, sample_rate: ''int'' = 44100, normalize:
+          ''bool'' = True, overwrite: ''bool'' = False) -> ''None'''
   yakbox.audiobook:
     exports:
       ArtifactKind:
         kind: enum
-        members:
-          AUDITION: audition
-          DELIVERY: delivery
-          MASTER: master
-          PREVIEW: preview
-          RAW: raw
-          RELEASE: release
-          REPORT: report
         signature: (*values)
+        members:
+          RAW: raw
+          MASTER: master
+          DELIVERY: delivery
+          REPORT: report
+          AUDITION: audition
+          PREVIEW: preview
+          RELEASE: release
       ArtifactRecord:
         kind: class
-        signature: '(schema_version: ''int'', id: ''str'', kind: ''ArtifactKind'',
-          path: ''Path'', sha256: ''str'', size: ''int'', fingerprint: ''str'', target:
-          ''str'', run_id: ''str'', protected: ''bool'', dependencies: ''tuple[str,
-          ...]'' = (), media_type: ''str | None'' = None, logical_voice: ''str | None''
-          = None, logical_voices: ''tuple[str, ...]'' = (), reference_audio_sha256:
-          ''str | None'' = None, reference_rights_basis: ''str | None'' = None, watermark_disclosure:
-          ''str | None'' = None) -> None'
+        signature: '(schema_version: ''int'', id: ''str'', kind: ''ArtifactKind'', path: ''Path'', sha256:
+          ''str'', size: ''int'', fingerprint: ''str'', target: ''str'', run_id: ''str'', protected: ''bool'',
+          dependencies: ''tuple[str, ...]'' = (), media_type: ''str | None'' = None, logical_voice: ''str
+          | None'' = None, logical_voices: ''tuple[str, ...]'' = (), reference_audio_sha256: ''str | None''
+          = None, reference_rights_basis: ''str | None'' = None, watermark_disclosure: ''str | None''
+          = None) -> None'
       AttributionFinding:
         kind: class
-        signature: '(code: ''str'', speaker: ''str'', message: ''str'', suggestion:
-          ''str'', source: ''SourceLocation'') -> None'
+        signature: '(code: ''str'', speaker: ''str'', message: ''str'', suggestion: ''str'', source: ''SourceLocation'')
+          -> None'
       AudiobookManifest:
         kind: class
-        signature: '(path: ''Path'', schema_version: ''int'', book: ''BookMetadata'',
-          sources: ''tuple[Path, ...]'', pronunciations: ''Path | None'', voices:
-          ''tuple[LogicalVoice, ...]'', profiles: ''tuple[BackendProfile, ...]'',
-          characters: ''tuple[CharacterRole, ...]'', dialogue: ''DialoguePolicy'',
-          whisper_qa: ''WhisperQaPolicy'', short_utterances: ''ShortUtterancePolicy'',
-          targets: ''tuple[BuildTarget, ...]'', retention: ''RetentionPolicy'', repairs:
-          ''RepairPolicy'' = RepairPolicy(mode=''context'', takes=4, whisper_qa=True,
-          rebuild_on_approval=True), max_pause_ms: ''int'' = 30000) -> None'
+        signature: '(path: ''Path'', schema_version: ''int'', book: ''BookMetadata'', sources: ''tuple[Path,
+          ...]'', pronunciations: ''Path | None'', voices: ''tuple[LogicalVoice, ...]'', profiles: ''tuple[BackendProfile,
+          ...]'', characters: ''tuple[CharacterRole, ...]'', dialogue: ''DialoguePolicy'', whisper_qa:
+          ''WhisperQaPolicy'', short_utterances: ''ShortUtterancePolicy'', targets: ''tuple[BuildTarget,
+          ...]'', retention: ''RetentionPolicy'', repairs: ''RepairPolicy'' = RepairPolicy(mode=''context'',
+          takes=4, whisper_qa=True, rebuild_on_approval=True, minimum_passing_takes=2), runtime: ''RuntimePolicy''
+          = RuntimePolicy(enabled=False, idle_timeout_seconds=900.0, conditioning_cache_size=8, maximum_memory_bytes=None),
+          max_pause_ms: ''int'' = 30000) -> None'
       BackendOptions:
         kind: type_alias
       BackendProfile:
         kind: class
-        signature: '(name: ''str'', backend: ''str'', voice: ''str'', executor: ''str'',
-          options: ''BackendOptions'') -> None'
+        signature: '(name: ''str'', backend: ''str'', voice: ''str'', executor: ''str'', options: ''BackendOptions'')
+          -> None'
       BookMetadata:
         kind: class
-        signature: '(title: ''str'', subtitle: ''str | None'' = None, author: ''str
-          | None'' = None, narrator: ''str | None'' = None, language: ''str'' = ''en'',
-          copyright: ''str | None'' = None, publisher: ''str | None'' = None, genre:
-          ''str | None'' = None, series: ''str | None'' = None, series_position: ''str
-          | None'' = None, isbn: ''str | None'' = None, publication_date: ''str |
-          None'' = None, cover: ''Path | None'' = None) -> None'
+        signature: '(title: ''str'', subtitle: ''str | None'' = None, author: ''str | None'' = None, narrator:
+          ''str | None'' = None, language: ''str'' = ''en'', copyright: ''str | None'' = None, publisher:
+          ''str | None'' = None, genre: ''str | None'' = None, series: ''str | None'' = None, series_position:
+          ''str | None'' = None, isbn: ''str | None'' = None, publication_date: ''str | None'' = None,
+          cover: ''Path | None'' = None) -> None'
       BuildChangeSummary:
         kind: class
-        signature: '(previous_run_id: ''str | None'', previous_plan_fingerprint: ''str
-          | None'', added_nodes: ''tuple[str, ...]'', removed_nodes: ''tuple[str,
-          ...]'', changed_nodes: ''tuple[str, ...]'', unchanged_nodes: ''tuple[str,
-          ...]'', reasons: ''tuple[tuple[str, str], ...]'') -> None'
+        signature: '(previous_run_id: ''str | None'', previous_plan_fingerprint: ''str | None'', added_nodes:
+          ''tuple[str, ...]'', removed_nodes: ''tuple[str, ...]'', changed_nodes: ''tuple[str, ...]'',
+          unchanged_nodes: ''tuple[str, ...]'', reasons: ''tuple[tuple[str, str], ...]'') -> None'
       BuildPlan:
         kind: class
-        signature: '(schema_version: ''int'', target: ''str'', profile: ''str'', document_sha256:
-          ''str'', fingerprint: ''str'', nodes: ''tuple[PlanNode, ...]'', complete_document:
-          ''bool'' = True, attribution_findings: ''tuple[AttributionFinding, ...]''
-          = ()) -> None'
+        signature: '(schema_version: ''int'', target: ''str'', profile: ''str'', document_sha256: ''str'',
+          fingerprint: ''str'', nodes: ''tuple[PlanNode, ...]'', complete_document: ''bool'' = True, attribution_findings:
+          ''tuple[AttributionFinding, ...]'' = ()) -> None'
       BuildPreflight:
         kind: class
-        signature: '(target: ''str'', profile: ''str'', planned_nodes: ''int'', reusable_nodes:
-          ''int'', pending_nodes: ''int'', pending_chapters: ''int'', estimated_output_bytes:
-          ''int'', available_bytes: ''int'', storage_budget_bytes: ''int | None'',
-          hosted_work: ''HostedWorkEstimate | None'', reusable_node_ids: ''tuple[str,
-          ...]'', change_summary: ''BuildChangeSummary'', from_stage: ''BuildStage''
-          = <BuildStage.SYNTHESIZE: ''synthesize''>, through_stage: ''BuildStage''
-          = <BuildStage.INSPECT: ''inspect''>, short_utterance_chunks: ''int'' = 0,
-          maximum_short_utterance_generations: ''int'' = 0, synthesis_chunks: ''int''
-          = 0, reusable_synthesis_chunks: ''int'' = 0, pending_synthesis_chunks:
-          ''int'' = 0, affected_join_count: ''int'' = 0, estimated_synthesis_characters:
-          ''int'' = 0, estimated_model_loads: ''int'' = 0) -> None'
+        signature: '(target: ''str'', profile: ''str'', planned_nodes: ''int'', reusable_nodes: ''int'',
+          pending_nodes: ''int'', pending_chapters: ''int'', estimated_output_bytes: ''int'', available_bytes:
+          ''int'', storage_budget_bytes: ''int | None'', hosted_work: ''HostedWorkEstimate | None'', reusable_node_ids:
+          ''tuple[str, ...]'', change_summary: ''BuildChangeSummary'', from_stage: ''BuildStage'' = <BuildStage.SYNTHESIZE:
+          ''synthesize''>, through_stage: ''BuildStage'' = <BuildStage.INSPECT: ''inspect''>, short_utterance_chunks:
+          ''int'' = 0, maximum_short_utterance_generations: ''int'' = 0, synthesis_chunks: ''int'' = 0,
+          reusable_synthesis_chunks: ''int'' = 0, pending_synthesis_chunks: ''int'' = 0, affected_join_count:
+          ''int'' = 0, estimated_synthesis_characters: ''int'' = 0, estimated_model_loads: ''int'' = 0)
+          -> None'
       BuildProgress:
         kind: class
-        signature: '(event: ''BuildProgressEvent'', node_id: ''str'', stage: ''BuildStage'',
-          completed: ''int'', total: ''int'', reused: ''bool'' = False, error: ''str
-          | None'' = None) -> None'
+        signature: '(event: ''BuildProgressEvent'', node_id: ''str'', stage: ''BuildStage'', completed:
+          ''int'', total: ''int'', reused: ''bool'' = False, error: ''str | None'' = None) -> None'
       BuildProgressCallback:
         kind: type_alias
       BuildProgressEvent:
         kind: enum
-        members:
-          COMPLETED: completed
-          FAILED: failed
-          NOT_RUN: not_run
-          REUSED: reused
-          STARTED: started
         signature: (*values)
+        members:
+          STARTED: started
+          REUSED: reused
+          FAILED: failed
+          COMPLETED: completed
+          NOT_RUN: not_run
       BuildRequest:
         kind: class
-        signature: '(target_name: ''str'' = ''default'', profile_override: ''str |
-          None'' = None, chapter_selector: ''str | None'' = None, dry_run: ''bool''
-          = False, resume: ''bool'' = True, api_key: ''str | None'' = None, max_submitted_characters:
-          ''int | None'' = None, max_provider_requests: ''int | None'' = None, max_estimated_spend:
-          ''Decimal | None'' = None, currency: ''str | None'' = None, pricing_source:
-          ''str | None'' = None, price_per_character: ''Decimal | None'' = None, confirm_above_characters:
-          ''int | None'' = None, confirm_above_requests: ''int | None'' = None, from_stage:
-          ''BuildStage | str | None'' = None, through_stage: ''BuildStage | str |
-          None'' = None) -> None'
+        signature: '(target_name: ''str'' = ''default'', profile_override: ''str | None'' = None, chapter_selector:
+          ''str | None'' = None, dry_run: ''bool'' = False, resume: ''bool'' = True, api_key: ''str |
+          None'' = None, max_submitted_characters: ''int | None'' = None, max_provider_requests: ''int
+          | None'' = None, max_estimated_spend: ''Decimal | None'' = None, currency: ''str | None'' =
+          None, pricing_source: ''str | None'' = None, price_per_character: ''Decimal | None'' = None,
+          confirm_above_characters: ''int | None'' = None, confirm_above_requests: ''int | None'' = None,
+          from_stage: ''BuildStage | str | None'' = None, through_stage: ''BuildStage | str | None'' =
+          None) -> None'
       BuildResult:
         kind: class
-        signature: '(schema_version: ''int'', run_id: ''str'', target: ''str'', status:
-          ''BuildStatus'', plan_fingerprint: ''str'', artifacts: ''tuple[ArtifactRecord,
-          ...]'', reused_nodes: ''tuple[str, ...]'', failed_nodes: ''tuple[str, ...]'',
-          run_directory: ''Path'', hosted_usage: ''HostedUsageSnapshot | None'', preflight:
-          ''BuildPreflight'', resumed: ''bool'') -> None'
+        signature: '(schema_version: ''int'', run_id: ''str'', target: ''str'', status: ''BuildStatus'',
+          plan_fingerprint: ''str'', artifacts: ''tuple[ArtifactRecord, ...]'', reused_nodes: ''tuple[str,
+          ...]'', failed_nodes: ''tuple[str, ...]'', run_directory: ''Path'', hosted_usage: ''HostedUsageSnapshot
+          | None'', preflight: ''BuildPreflight'', resumed: ''bool'') -> None'
       BuildStage:
         kind: enum
+        signature: (*values)
         members:
+          SYNTHESIZE: synthesize
+          MASTER: master
+          VERIFY_MANUSCRIPT: verify_manuscript
           ENCODE_MP3: encode_mp3
           INSPECT: inspect
-          MASTER: master
           RELEASE: release
-          SYNTHESIZE: synthesize
-          VERIFY_MANUSCRIPT: verify_manuscript
-        signature: (*values)
       BuildStatus:
         kind: enum
+        signature: (*values)
         members:
+          PLANNED: planned
           COMPLETE: complete
           FAILED: failed
-          PLANNED: planned
-        signature: (*values)
       BuildTarget:
         kind: class
-        signature: '(name: ''str'', profile: ''str'', output_root: ''Path'', chunk_chars:
-          ''int'' = 2800, mastering: ''bool'' = True, wav_sample_rate: ''int'' = 44100,
-          mp3_bitrate: ''str'' = ''192k'', m4b: ''bool'' = False, m4b_bitrate: ''str''
-          = ''192k'', provider_concurrency: ''int'' = 5, media_concurrency: ''int''
-          = 2, from_stage: ''str'' = ''synthesize'', through_stage: ''str'' = ''inspect'',
-          quality_min_lufs: ''float | None'' = None, quality_max_lufs: ''float | None''
-          = None, quality_max_true_peak_dbfs: ''float | None'' = None, quality_max_leading_silence_seconds:
-          ''float | None'' = None, quality_max_trailing_silence_seconds: ''float |
-          None'' = None, max_submitted_characters: ''int | None'' = None, max_provider_requests:
-          ''int | None'' = None, max_estimated_spend: ''Decimal | None'' = None, currency:
-          ''str | None'' = None, pricing_source: ''str | None'' = None, price_per_character:
-          ''Decimal | None'' = None, confirm_above_characters: ''int | None'' = None,
-          confirm_above_requests: ''int | None'' = None, storage_budget_bytes: ''int
-          | None'' = None) -> None'
+        signature: '(name: ''str'', profile: ''str'', output_root: ''Path'', chunk_chars: ''int'' = 2800,
+          mastering: ''bool'' = True, wav_sample_rate: ''int'' = 44100, mp3_bitrate: ''str'' = ''192k'',
+          m4b: ''bool'' = False, m4b_bitrate: ''str'' = ''192k'', provider_concurrency: ''int'' = 5, media_concurrency:
+          ''int'' = 2, from_stage: ''str'' = ''synthesize'', through_stage: ''str'' = ''inspect'', quality_min_lufs:
+          ''float | None'' = None, quality_max_lufs: ''float | None'' = None, quality_max_true_peak_dbfs:
+          ''float | None'' = None, quality_max_leading_silence_seconds: ''float | None'' = None, quality_max_trailing_silence_seconds:
+          ''float | None'' = None, max_submitted_characters: ''int | None'' = None, max_provider_requests:
+          ''int | None'' = None, max_estimated_spend: ''Decimal | None'' = None, currency: ''str | None''
+          = None, pricing_source: ''str | None'' = None, price_per_character: ''Decimal | None'' = None,
+          confirm_above_characters: ''int | None'' = None, confirm_above_requests: ''int | None'' = None,
+          storage_budget_bytes: ''int | None'' = None) -> None'
       CacheCleanupPlan:
         kind: class
-        signature: '(cache_root: ''Path'', candidates: ''tuple[CacheEntry, ...]'',
-          bytes_reclaimed: ''int'') -> None'
+        signature: '(cache_root: ''Path'', candidates: ''tuple[CacheEntry, ...]'', bytes_reclaimed: ''int'')
+          -> None'
       CacheEntry:
         kind: class
-        signature: '(fingerprint: ''str'', audio_path: ''Path'', metadata_path: ''Path'',
-          size: ''int'', modified_at: ''datetime'', valid: ''bool'', pinned: ''bool''
-          = False, synthesis_kind: ''str | None'' = None, text_sha256: ''str | None''
-          = None, backend: ''str | None'' = None, profile: ''str | None'' = None)
-          -> None'
+        signature: '(fingerprint: ''str'', audio_path: ''Path'', metadata_path: ''Path'', size: ''int'',
+          modified_at: ''datetime'', valid: ''bool'', pinned: ''bool'' = False, synthesis_kind: ''str
+          | None'' = None, text_sha256: ''str | None'' = None, backend: ''str | None'' = None, profile:
+          ''str | None'' = None) -> None'
       CacheInventory:
         kind: class
         signature: '(entries: ''tuple[CacheEntry, ...]'') -> None'
       Chapter:
         kind: class
-        signature: '(id: ''str'', title: ''str'', order: ''int'', source_path: ''Path'',
-          segments: ''tuple[SpeechSegment | Pause, ...]'') -> None'
+        signature: '(id: ''str'', title: ''str'', order: ''int'', source_path: ''Path'', segments: ''tuple[SpeechSegment
+          | Pause, ...]'') -> None'
       CharacterRole:
         kind: class
-        signature: '(name: ''str'', display_name: ''str'', profile: ''str'', cfg_weight:
-          ''float | None'' = None, exaggeration: ''float | None'' = None, seed: ''int
-          | None'' = None, gender: ''str'' = ''unspecified'') -> None'
+        signature: '(name: ''str'', display_name: ''str'', profile: ''str'', cfg_weight: ''float | None''
+          = None, exaggeration: ''float | None'' = None, seed: ''int | None'' = None, gender: ''str''
+          = ''unspecified'') -> None'
       ChatterboxOptions:
         kind: class
-        signature: '(device: ''str'' = ''cpu'', cfg_weight: ''float | None'' = None,
-          exaggeration: ''float | None'' = None, seed: ''int | None'' = 0, max_processes:
-          ''int'' = 1, threads_per_process: ''int'' = 1, worker_timeout_seconds: ''float''
-          = 3600, estimated_model_memory_bytes: ''int | None'' = None) -> None'
+        signature: '(device: ''str'' = ''cpu'', cfg_weight: ''float | None'' = None, exaggeration: ''float
+          | None'' = None, seed: ''int | None'' = 0, max_processes: ''int'' = 1, threads_per_process:
+          ''int'' = 1, worker_timeout_seconds: ''float'' = 3600, estimated_model_memory_bytes: ''int |
+          None'' = None) -> None'
       ChunkRoute:
         kind: class
-        signature: '(speaker: ''str | None'', profile: ''str | None'', cfg_weight:
-          ''float | None'' = None, exaggeration: ''float | None'' = None, seed: ''int
-          | None'' = None) -> None'
+        signature: '(speaker: ''str | None'', profile: ''str | None'', cfg_weight: ''float | None'' =
+          None, exaggeration: ''float | None'' = None, seed: ''int | None'' = None) -> None'
       CleanupCandidate:
         kind: class
-        signature: '(id: ''str'', path: ''Path'', metadata_path: ''Path'', size: ''int'',
-          sha256: ''str'', metadata_sha256: ''str'', reason: ''str'') -> None'
+        signature: '(id: ''str'', path: ''Path'', metadata_path: ''Path'', size: ''int'', sha256: ''str'',
+          metadata_sha256: ''str'', reason: ''str'') -> None'
       CleanupPlan:
         kind: class
-        signature: '(schema_version: ''int'', cleanup_id: ''str'', workspace: ''Path'',
-          artifact_root: ''Path'', candidates: ''tuple[CleanupCandidate, ...]'', target:
-          ''str'' = ''default'', current_paths: ''tuple[Path, ...]'' = ()) -> None'
+        signature: '(schema_version: ''int'', cleanup_id: ''str'', workspace: ''Path'', artifact_root:
+          ''Path'', candidates: ''tuple[CleanupCandidate, ...]'', target: ''str'' = ''default'', current_paths:
+          ''tuple[Path, ...]'' = ()) -> None'
       DialoguePolicy:
         kind: class
-        signature: '(attribution_assistance: ''str'' = ''warn'', short_utterance_words:
-          ''int'' = 3, strip_attribution_tags: ''bool'' = False, routes: ''Path |
-          None'' = None, expressive_tag_handling: ''str'' = ''context'', retain_first_attribution_per_scene:
-          ''bool'' = False) -> None'
+        signature: '(attribution_assistance: ''str'' = ''warn'', short_utterance_words: ''int'' = 3, strip_attribution_tags:
+          ''bool'' = False, routes: ''Path | None'' = None, expressive_tag_handling: ''str'' = ''context'',
+          retain_first_attribution_per_scene: ''bool'' = False) -> None'
       FakeOptions:
         kind: class
         signature: '(sample_rate: ''int'' = 16000) -> None'
       InventoryReport:
         kind: class
-        signature: '(root: ''Path'', records: ''tuple[ArtifactRecord, ...]'', unknown_files:
-          ''tuple[Path, ...]'', total_bytes: ''int'', managed_bytes: ''int'') -> None'
+        signature: '(root: ''Path'', records: ''tuple[ArtifactRecord, ...]'', unknown_files: ''tuple[Path,
+          ...]'', total_bytes: ''int'', managed_bytes: ''int'') -> None'
       LogicalVoice:
         kind: class
-        signature: '(name: ''str'', display_name: ''str'', rights_basis: ''str'' =
-          ''not_applicable'', reference_audio: ''Path | None'' = None) -> None'
+        signature: '(name: ''str'', display_name: ''str'', rights_basis: ''str'' = ''not_applicable'',
+          reference_audio: ''Path | None'' = None) -> None'
       NormalizedDocument:
         kind: class
         signature: '(chapters: ''tuple[Chapter, ...]'', sha256: ''str'') -> None'
       Pause:
         kind: class
-        signature: '(chapter_id: ''str'', milliseconds: ''int'', source: ''SourceLocation'')
-          -> None'
+        signature: '(chapter_id: ''str'', milliseconds: ''int'', source: ''SourceLocation'') -> None'
       PlanNode:
         kind: class
-        signature: '(id: ''str'', stage: ''BuildStage'', chapter_id: ''str'', fingerprint:
-          ''str'', dependencies: ''tuple[str, ...]'', output: ''Path'', chunks: ''tuple[str,
-          ...]'' = (), chunk_ids: ''tuple[str, ...]'' = (), chunk_sources: ''tuple[SourceLocation,
-          ...]'' = (), chunk_boundaries: ''tuple[str, ...]'' = (), chunk_routes: ''tuple[ChunkRoute,
-          ...]'' = (), chunk_short_utterances: ''tuple[ShortUtteranceMarker | None,
-          ...]'' = (), chunk_attribution_contexts: ''tuple[tuple[AttributionContext,
-          ...], ...]'' = (), chunk_repair_fingerprints: ''tuple[str | None, ...]''
-          = ()) -> None'
+        signature: '(id: ''str'', stage: ''BuildStage'', chapter_id: ''str'', fingerprint: ''str'', dependencies:
+          ''tuple[str, ...]'', output: ''Path'', chunks: ''tuple[str, ...]'' = (), chunk_ids: ''tuple[str,
+          ...]'' = (), chunk_sources: ''tuple[SourceLocation, ...]'' = (), chunk_boundaries: ''tuple[str,
+          ...]'' = (), chunk_routes: ''tuple[ChunkRoute, ...]'' = (), chunk_short_utterances: ''tuple[ShortUtteranceMarker
+          | None, ...]'' = (), chunk_attribution_contexts: ''tuple[tuple[AttributionContext, ...], ...]''
+          = (), chunk_repair_fingerprints: ''tuple[str | None, ...]'' = ()) -> None'
       PronunciationAudit:
         kind: class
         signature: '(rules: ''tuple[PronunciationRuleAudit, ...]'') -> None'
       PronunciationRuleAudit:
         kind: class
-        signature: '(written: ''str'', spoken: ''str'', priority: ''int'', matches:
-          ''int'', applied: ''int'', shadowed: ''int'', locations: ''tuple[SourceLocation,
-          ...]'') -> None'
+        signature: '(written: ''str'', spoken: ''str'', priority: ''int'', matches: ''int'', applied:
+          ''int'', shadowed: ''int'', locations: ''tuple[SourceLocation, ...]'') -> None'
       ReleaseCheck:
         kind: class
-        signature: '(complete: ''bool'', issues: ''tuple[str, ...]'', master_wavs:
-          ''tuple[Path, ...]'', delivery_mp3s: ''tuple[Path, ...]'', release_manifest:
-          ''Path | None'' = None) -> None'
+        signature: '(complete: ''bool'', issues: ''tuple[str, ...]'', master_wavs: ''tuple[Path, ...]'',
+          delivery_mp3s: ''tuple[Path, ...]'', release_manifest: ''Path | None'' = None) -> None'
       ReleaseDiff:
         kind: class
-        signature: '(left_release_id: ''str'', right_release_id: ''str'', added_artifacts:
-          ''tuple[str, ...]'', removed_artifacts: ''tuple[str, ...]'', changed_artifacts:
-          ''tuple[str, ...]'', metadata_changes: ''tuple[str, ...]'') -> None'
+        signature: '(left_release_id: ''str'', right_release_id: ''str'', added_artifacts: ''tuple[str,
+          ...]'', removed_artifacts: ''tuple[str, ...]'', changed_artifacts: ''tuple[str, ...]'', metadata_changes:
+          ''tuple[str, ...]'') -> None'
       RepairApproval:
         kind: class
-        signature: '(target: ''str'', chapter_id: ''str'', repairs: ''tuple[ApprovedRepair,
-          ...]'') -> None'
+        signature: '(target: ''str'', chapter_id: ''str'', repairs: ''tuple[ApprovedRepair, ...]'') ->
+          None'
+      RepairBatch:
+        kind: class
+        signature: '(id: ''str'', entries: ''tuple[RepairBatchEntry, ...]'', report_path: ''Path'') ->
+          None'
+      RepairBatchEntry:
+        kind: class
+        signature: '(repair_id: ''str'', take: ''int'', target: ''str'', chapter_id: ''str'', installs:
+          ''tuple[RepairInstall, ...]'') -> None'
+      RepairBatchGeneration:
+        kind: class
+        signature: '(batch: ''RepairBatch'', sessions: ''tuple[RepairSession, ...]'', review_playlist:
+          ''Path'', report_path: ''Path'') -> None'
       RepairChunk:
         kind: class
-        signature: '(id: ''str'', index: ''int'', text: ''str'', source_path: ''Path'',
-          source_start_line: ''int'', source_end_line: ''int'', route: ''ChunkRoute'',
-          boundary: ''str'', previous_context: ''str | None'', next_context: ''str
-          | None'') -> None'
+        signature: '(id: ''str'', index: ''int'', text: ''str'', source_path: ''Path'', source_start_line:
+          ''int'', source_end_line: ''int'', route: ''ChunkRoute'', boundary: ''str'', previous_context:
+          ''str | None'', next_context: ''str | None'', replacement_text: ''str | None'' = None, replacement_start:
+          ''int'' = 0, replacement_end: ''int'' = 0) -> None'
       RepairMode:
         kind: enum
+        signature: (*values)
         members:
+          TARGET_ONLY: target-only
           CONTEXT: context
+          SENTENCE: sentence
+          CLAUSE: clause
           NEIGHBORS: neighbors
           PARAGRAPH: paragraph
           SCENE: scene
-          TARGET_ONLY: target-only
-        signature: (*values)
       RepairPlan:
         kind: class
-        signature: '(target: ''str'', chapter_id: ''str'', mode: ''RepairMode'',
-          chunks: ''tuple[RepairChunk, ...]'', affected_join_indices: ''tuple[int,
-          ...]'') -> None'
+        signature: '(target: ''str'', chapter_id: ''str'', mode: ''RepairMode'', chunks: ''tuple[RepairChunk,
+          ...]'', affected_join_indices: ''tuple[int, ...]'') -> None'
       RepairPolicy:
         kind: class
-        signature: '(mode: ''str'' = ''context'', takes: ''int'' = 4, whisper_qa:
-          ''bool'' = True, rebuild_on_approval: ''bool'' = True) -> None'
+        signature: '(mode: ''str'' = ''context'', takes: ''int'' = 4, whisper_qa: ''bool'' = True, rebuild_on_approval:
+          ''bool'' = True, minimum_passing_takes: ''int'' = 2) -> None'
       RepairSession:
         kind: class
-        signature: '(id: ''str'', plan: ''RepairPlan'', takes: ''tuple[RepairTake,
-          ...]'', report_path: ''Path'') -> None'
+        signature: '(id: ''str'', plan: ''RepairPlan'', takes: ''tuple[RepairTake, ...]'', report_path:
+          ''Path'', maximum_takes: ''int'' = 0, minimum_passing_takes: ''int'' = 0) -> None'
       RepairTake:
         kind: class
-        signature: '(number: ''int'', accepted: ''bool'', reason_codes: ''tuple[str,
-          ...]'', audition_path: ''Path'', chunk_paths: ''tuple[Path, ...]'', chunk_sha256s:
-          ''tuple[str, ...]'') -> None'
+        signature: '(number: ''int'', accepted: ''bool'', reason_codes: ''tuple[str, ...]'', audition_path:
+          ''Path'', chunk_paths: ''tuple[Path, ...]'', chunk_sha256s: ''tuple[str, ...]'', cache_events:
+          ''tuple[RepairCacheEvent, ...]'' = ()) -> None'
       ResembleOptions:
         kind: class
-        signature: '(voice_uuid: ''str'', project_uuid: ''str | None'' = None, use_hd:
-          ''bool'' = False, sample_rate: ''int | None'' = None) -> None'
+        signature: '(voice_uuid: ''str'', project_uuid: ''str | None'' = None, use_hd: ''bool'' = False,
+          sample_rate: ''int | None'' = None) -> None'
       RetentionPolicy:
         kind: class
-        signature: '(keep_successful_runs: ''int'' = 3, audition_days: ''int | None''
-          = 30, preview_days: ''int | None'' = 7, raw_until_release: ''bool'' = True)
-          -> None'
+        signature: '(keep_successful_runs: ''int'' = 3, audition_days: ''int | None'' = 30, preview_days:
+          ''int | None'' = 7, raw_until_release: ''bool'' = True) -> None'
+      RuntimePolicy:
+        kind: class
+        signature: '(enabled: ''bool'' = False, idle_timeout_seconds: ''float'' = 900.0, conditioning_cache_size:
+          ''int'' = 8, maximum_memory_bytes: ''int | None'' = None) -> None'
       ShardManifest:
         kind: class
-        signature: '(schema_version: ''int'', plan_fingerprint: ''str'', target: ''str'',
-          index: ''int'', count: ''int'', node_ids: ''tuple[str, ...]'', artifact_paths:
-          ''tuple[Path, ...]'') -> None'
+        signature: '(schema_version: ''int'', plan_fingerprint: ''str'', target: ''str'', index: ''int'',
+          count: ''int'', node_ids: ''tuple[str, ...]'', artifact_paths: ''tuple[Path, ...]'') -> None'
       SourceLocation:
         kind: class
         signature: '(path: ''Path'', start_line: ''int'', end_line: ''int'') -> None'
       SpeechSegment:
         kind: class
-        signature: '(id: ''str'', chapter_id: ''str'', text: ''str'', source: ''SourceLocation'',
-          sha256: ''str'', speaker: ''str'' = ''narrator'', speaker_explicit: ''bool''
-          = False, profile_override: ''str | None'' = None, boundary_after: ''ChunkBoundary''
-          = <ChunkBoundary.PARAGRAPH: ''paragraph''>, attribution_context: ''tuple[AttributionContext,
-          ...]'' = ()) -> None'
+        signature: '(id: ''str'', chapter_id: ''str'', text: ''str'', source: ''SourceLocation'', sha256:
+          ''str'', speaker: ''str'' = ''narrator'', speaker_explicit: ''bool'' = False, profile_override:
+          ''str | None'' = None, boundary_after: ''ChunkBoundary'' = <ChunkBoundary.PARAGRAPH: ''paragraph''>,
+          attribution_context: ''tuple[AttributionContext, ...]'' = ()) -> None'
       apply_cache_cleanup:
         kind: function
         signature: '(plan: ''CacheCleanupPlan'') -> ''int'''
@@ -371,57 +359,61 @@ modules:
         signature: '(plan: ''CleanupPlan'') -> ''Path'''
       approve_repair_session:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, repair_id: ''str'', take:
-          ''int'') -> ''RepairApproval'''
+        signature: '(manifest: ''AudiobookManifest'', *, repair_id: ''str'', take: ''int'') -> ''RepairApproval'''
       assemble_release:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'')
-          -> ''Path'''
+        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'') -> ''Path'''
       audit_pronunciations:
         kind: function
-        signature: '(paths: ''tuple[Path, ...]'', pronunciations: ''Path | None'',
-          *, max_pause_ms: ''int'' = 30000, strip_attribution_tags: ''bool'' = False,
-          dialogue_routes: ''Path | None'' = None, expressive_tag_handling: ''str''
-          = ''context'', retain_first_attribution_per_scene: ''bool'' = False) ->
-          ''PronunciationAudit'''
+        signature: '(paths: ''tuple[Path, ...]'', pronunciations: ''Path | None'', *, max_pause_ms: ''int''
+          = 30000, strip_attribution_tags: ''bool'' = False, dialogue_routes: ''Path | None'' = None,
+          expressive_tag_handling: ''str'' = ''context'', retain_first_attribution_per_scene: ''bool''
+          = False) -> ''PronunciationAudit'''
       audition_audiobook:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, profiles: ''tuple[str, ...]'',
-          target_name: ''str'' = ''default'', text: ''str | None'' = None, chapter_selector:
-          ''str | None'' = None, api_key: ''str | None'' = None, matrix: ''tuple[str,
-          ...]'' = ()) -> ''tuple[ArtifactRecord, ...]'''
+        signature: '(manifest: ''AudiobookManifest'', *, profiles: ''tuple[str, ...]'', target_name: ''str''
+          = ''default'', text: ''str | None'' = None, chapter_selector: ''str | None'' = None, api_key:
+          ''str | None'' = None, matrix: ''tuple[str, ...]'' = ()) -> ''tuple[ArtifactRecord, ...]'''
+      begin_repair_batch:
+        kind: function
+        signature: '(manifest: ''AudiobookManifest'') -> ''RepairBatch'''
       build_audiobook:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'',
-          profile_override: ''str | None'' = None, chapter_selector: ''str | None''
-          = None, dry_run: ''bool'' = False, resume: ''bool'' = True, api_key: ''str
-          | None'' = None, max_submitted_characters: ''int | None'' = None, max_provider_requests:
-          ''int | None'' = None, max_estimated_spend: ''Decimal | None'' = None, currency:
-          ''str | None'' = None, pricing_source: ''str | None'' = None, price_per_character:
-          ''Decimal | None'' = None, confirm_above_characters: ''int | None'' = None,
-          confirm_above_requests: ''int | None'' = None, from_stage: ''BuildStage
-          | str | None'' = None, through_stage: ''BuildStage | str | None'' = None,
-          progress: ''BuildProgressCallback | None'' = None) -> ''BuildResult'''
+        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'', profile_override:
+          ''str | None'' = None, chapter_selector: ''str | None'' = None, dry_run: ''bool'' = False, resume:
+          ''bool'' = True, api_key: ''str | None'' = None, max_submitted_characters: ''int | None'' =
+          None, max_provider_requests: ''int | None'' = None, max_estimated_spend: ''Decimal | None''
+          = None, currency: ''str | None'' = None, pricing_source: ''str | None'' = None, price_per_character:
+          ''Decimal | None'' = None, confirm_above_characters: ''int | None'' = None, confirm_above_requests:
+          ''int | None'' = None, from_stage: ''BuildStage | str | None'' = None, through_stage: ''BuildStage
+          | str | None'' = None, progress: ''BuildProgressCallback | None'' = None) -> ''BuildResult'''
       check_release:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'',
-          write_manifest: ''bool'' = False) -> ''ReleaseCheck'''
+        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'', write_manifest:
+          ''bool'' = False) -> ''ReleaseCheck'''
       diff_releases:
         kind: function
         signature: '(left: ''Path'', right: ''Path'') -> ''ReleaseDiff'''
       explain_synthesis_chunk:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, chunk_id: ''str'', target_name:
-          ''str'' = ''default'') -> ''dict[str, object]'''
+        signature: '(manifest: ''AudiobookManifest'', *, chunk_id: ''str'', target_name: ''str'' = ''default'')
+          -> ''dict[str, object]'''
       export_shard_manifests:
         kind: function
-        signature: '(plan: ''BuildPlan'', directory: ''Path'', *, count: ''int'',
-          root: ''Path'') -> ''tuple[Path, ...]'''
+        signature: '(plan: ''BuildPlan'', directory: ''Path'', *, count: ''int'', root: ''Path'') -> ''tuple[Path,
+          ...]'''
+      finalize_repair_batch:
+        kind: function
+        signature: '(manifest: ''AudiobookManifest'', *, batch_id: ''str'') -> ''RepairApproval'''
+      generate_repair_batch:
+        kind: function
+        signature: '(manifest: ''AudiobookManifest'', plans: ''tuple[RepairPlan, ...]'', *, takes: ''int''
+          = 4, minimum_passing_takes: ''int | None'' = None, whisper_qa: ''bool'' = True, api_key: ''str
+          | None'' = None) -> ''RepairBatchGeneration'''
       generate_repair_session:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', plan: ''RepairPlan'', *, takes:
-          ''int'' = 4, whisper_qa: ''bool'' = True, api_key: ''str | None'' = None)
-          -> ''RepairSession'''
+        signature: '(manifest: ''AudiobookManifest'', plan: ''RepairPlan'', *, takes: ''int'' = 4, minimum_passing_takes:
+          ''int | None'' = None, whisper_qa: ''bool'' = True, api_key: ''str | None'' = None) -> ''RepairSession'''
       inventory_artifacts:
         kind: function
         signature: '(root: ''Path'') -> ''InventoryReport'''
@@ -431,48 +423,47 @@ modules:
       load_manifest:
         kind: function
         signature: '(path: ''Path'') -> ''AudiobookManifest'''
+      load_repair_batch:
+        kind: function
+        signature: '(manifest: ''AudiobookManifest'', *, batch_id: ''str'') -> ''RepairBatch'''
       normalize_sources:
         kind: function
-        signature: '(paths: ''tuple[Path, ...]'', *, pronunciations: ''Path | None''
-          = None, max_pause_ms: ''int'' = 30000, strip_attribution_tags: ''bool''
-          = False, dialogue_routes: ''Path | None'' = None, expressive_tag_handling:
-          ''str'' = ''context'', retain_first_attribution_per_scene: ''bool'' = False)
-          -> ''NormalizedDocument'''
+        signature: '(paths: ''tuple[Path, ...]'', *, pronunciations: ''Path | None'' = None, max_pause_ms:
+          ''int'' = 30000, strip_attribution_tags: ''bool'' = False, dialogue_routes: ''Path | None''
+          = None, expressive_tag_handling: ''str'' = ''context'', retain_first_attribution_per_scene:
+          ''bool'' = False) -> ''NormalizedDocument'''
       plan_audiobook:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', document: ''NormalizedDocument'',
-          *, target_name: ''str'' = ''default'', profile_override: ''str | None''
-          = None, chapter_selector: ''str | None'' = None) -> ''BuildPlan'''
+        signature: '(manifest: ''AudiobookManifest'', document: ''NormalizedDocument'', *, target_name:
+          ''str'' = ''default'', profile_override: ''str | None'' = None, chapter_selector: ''str | None''
+          = None) -> ''BuildPlan'''
       plan_cache_cleanup:
         kind: function
-        signature: '(workspace: ''Path'', *, max_age_days: ''int | None'' = None,
-          max_bytes: ''int | None'' = None) -> ''CacheCleanupPlan'''
+        signature: '(workspace: ''Path'', *, max_age_days: ''int | None'' = None, max_bytes: ''int | None''
+          = None) -> ''CacheCleanupPlan'''
       plan_cleanup:
         kind: function
-        signature: '(workspace: ''Path'', artifact_root: ''Path'', *, kind: ''ArtifactKind
-          | None'' = None, older_than_days: ''int | None'' = None, target: ''str''
-          = ''default'', keep_successful_runs: ''int'' = 0, audition_days: ''int |
-          None'' = None, preview_days: ''int | None'' = None, raw_until_release: ''bool''
-          = True, current_paths: ''tuple[Path, ...]'' = ()) -> ''CleanupPlan'''
+        signature: '(workspace: ''Path'', artifact_root: ''Path'', *, kind: ''ArtifactKind | None'' =
+          None, older_than_days: ''int | None'' = None, target: ''str'' = ''default'', keep_successful_runs:
+          ''int'' = 0, audition_days: ''int | None'' = None, preview_days: ''int | None'' = None, raw_until_release:
+          ''bool'' = True, current_paths: ''tuple[Path, ...]'' = ()) -> ''CleanupPlan'''
       plan_repair:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'',
-          chapter_selector: ''str | None'' = None, chunk_id: ''str | None'' = None,
-          source_line: ''int | None'' = None, text_match: ''str | None'' = None,
-          speaker: ''str | None'' = None, mode: ''RepairMode | str'' = <RepairMode.CONTEXT:
-          ''context''>) -> ''RepairPlan'''
+        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'', chapter_selector:
+          ''str | None'' = None, chunk_id: ''str | None'' = None, source_line: ''int | None'' = None,
+          text_match: ''str | None'' = None, speaker: ''str | None'' = None, mode: ''RepairMode | str''
+          = <RepairMode.CONTEXT: ''context''>) -> ''RepairPlan'''
       preflight_audiobook_build:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'',
-          profile_override: ''str | None'' = None, chapter_selector: ''str | None''
-          = None, price_per_character: ''Decimal | None'' = None, from_stage: ''BuildStage
-          | str | None'' = None, through_stage: ''BuildStage | str | None'' = None)
-          -> ''BuildPreflight'''
+        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'', profile_override:
+          ''str | None'' = None, chapter_selector: ''str | None'' = None, price_per_character: ''Decimal
+          | None'' = None, from_stage: ''BuildStage | str | None'' = None, through_stage: ''BuildStage
+          | str | None'' = None) -> ''BuildPreflight'''
       preview_audiobook:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'',
-          profile_override: ''str | None'' = None, text: ''str | None'' = None, chapter_selector:
-          ''str | None'' = None, api_key: ''str | None'' = None) -> ''ArtifactRecord'''
+        signature: '(manifest: ''AudiobookManifest'', *, target_name: ''str'' = ''default'', profile_override:
+          ''str | None'' = None, text: ''str | None'' = None, chapter_selector: ''str | None'' = None,
+          api_key: ''str | None'' = None) -> ''ArtifactRecord'''
       purge_trash:
         kind: function
         signature: '(workspace: ''Path'', cleanup_id: ''str | None'' = None) -> ''int'''
@@ -481,231 +472,222 @@ modules:
         signature: '(record: ''ArtifactRecord'', *, root: ''Path'') -> ''ArtifactRecord'''
       restore_trash:
         kind: function
-        signature: '(workspace: ''Path'', cleanup_id: ''str'', *, relative_path: ''Path
-          | None'' = None) -> ''int'''
+        signature: '(workspace: ''Path'', cleanup_id: ''str'', *, relative_path: ''Path | None'' = None)
+          -> ''int'''
       run_audiobook_build:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', request: ''BuildRequest'', *,
-          progress: ''BuildProgressCallback | None'' = None) -> ''BuildResult'''
+        signature: '(manifest: ''AudiobookManifest'', request: ''BuildRequest'', *, progress: ''BuildProgressCallback
+          | None'' = None) -> ''BuildResult'''
       select_build_chapters:
         kind: function
-        signature: '(manifest: ''AudiobookManifest'', *, selection: ''str'', target_name:
-          ''str'' = ''default'', profile_override: ''str | None'' = None, chapter_selector:
-          ''str | None'' = None, since_release: ''Path | None'' = None, from_stage:
-          ''BuildStage | str | None'' = None, through_stage: ''BuildStage | str |
-          None'' = None) -> ''tuple[str, ...]'''
+        signature: '(manifest: ''AudiobookManifest'', *, selection: ''str'', target_name: ''str'' = ''default'',
+          profile_override: ''str | None'' = None, chapter_selector: ''str | None'' = None, since_release:
+          ''Path | None'' = None, from_stage: ''BuildStage | str | None'' = None, through_stage: ''BuildStage
+          | str | None'' = None) -> ''tuple[str, ...]'''
+      stage_repair_batch_entry:
+        kind: function
+        signature: '(manifest: ''AudiobookManifest'', *, batch_id: ''str'', repair_id: ''str'', take:
+          ''int'') -> ''RepairBatch'''
       verify_shard_manifests:
         kind: function
-        signature: '(paths: ''tuple[Path, ...]'', *, root: ''Path'') -> ''tuple[ShardManifest,
-          ...]'''
+        signature: '(paths: ''tuple[Path, ...]'', *, root: ''Path'') -> ''tuple[ShardManifest, ...]'''
   yakbox.cloud:
     exports:
       AmbiguousMutationError:
-        code: ambiguous_mutation
         kind: exception
         signature: '(operation: ''str'', *, cause: ''Exception'') -> ''None'''
+        code: ambiguous_mutation
       AudioFormat:
         kind: enum
-        members:
-          MP3: mp3
-          WAV: wav
         signature: (*values)
+        members:
+          WAV: wav
+          MP3: mp3
       BatchJournalError:
-        code: batch_journal_error
         kind: exception
+        code: batch_journal_error
       BatchReport:
         kind: class
-        signature: '(schema_version: ''int'', run_id: ''str'', started_at: ''str'',
-          ended_at: ''str'', journal_path: ''Path'', results: ''tuple[BatchResult,
-          ...]'', aborted: ''bool'', abort_reason: ''str | None'', usage: ''HostedUsageSnapshot
-          | None'' = None, preflight: ''HostedWorkEstimate | None'' = None) -> None'
+        signature: '(schema_version: ''int'', run_id: ''str'', started_at: ''str'', ended_at: ''str'',
+          journal_path: ''Path'', results: ''tuple[BatchResult, ...]'', aborted: ''bool'', abort_reason:
+          ''str | None'', usage: ''HostedUsageSnapshot | None'' = None, preflight: ''HostedWorkEstimate
+          | None'' = None) -> None'
       BatchResult:
         kind: class
-        signature: '(index: ''int'', row_id: ''str | None'', status: ''BatchStatus'',
-          path: ''Path | None'', bytes_written: ''int | None'', output_format: ''AudioFormat'',
-          duration_seconds: ''float | None'', elapsed_seconds: ''float'', attempts:
-          ''int'', request_id: ''str | None'', issues: ''tuple[str, ...]'', error_code:
-          ''str | None'', error_message: ''str | None'', text_sha256: ''str'', request_sha256:
+        signature: '(index: ''int'', row_id: ''str | None'', status: ''BatchStatus'', path: ''Path | None'',
+          bytes_written: ''int | None'', output_format: ''AudioFormat'', duration_seconds: ''float | None'',
+          elapsed_seconds: ''float'', attempts: ''int'', request_id: ''str | None'', issues: ''tuple[str,
+          ...]'', error_code: ''str | None'', error_message: ''str | None'', text_sha256: ''str'', request_sha256:
           ''str'', output_sha256: ''str | None'') -> None'
       BatchRow:
         kind: class
-        signature: '(index: ''int'', text: ''str'', row_id: ''str | None'' = None,
-          voice_uuid: ''str | None'' = None, title: ''str | None'' = None, output:
-          ''str | None'' = None, validation_error: ''str | None'' = None) -> None'
+        signature: '(index: ''int'', text: ''str'', row_id: ''str | None'' = None, voice_uuid: ''str |
+          None'' = None, title: ''str | None'' = None, output: ''str | None'' = None, validation_error:
+          ''str | None'' = None) -> None'
       BatchStatus:
         kind: enum
+        signature: (*values)
         members:
+          OK: ok
           ERROR: error
           NOT_RUN: not_run
-          OK: ok
           SKIPPED: skipped
-        signature: (*values)
       ClientOptions:
         kind: class
-        signature: '(management_base_url: ''str'' = ''https://app.resemble.ai/api/v2'',
-          synthesis_base_url: ''str'' = ''https://f.cluster.resemble.ai'', connect_timeout:
-          ''float'' = 10.0, read_timeout: ''float'' = 120.0, write_timeout: ''float''
-          = 30.0, pool_timeout: ''float'' = 10.0, max_connections: ''int'' = 20, max_keepalive_connections:
-          ''int'' = 20, max_json_response_bytes: ''int'' = 67108864, retry: ''RetryPolicy''
-          = <factory>) -> None'
+        signature: '(management_base_url: ''str'' = ''https://app.resemble.ai/api/v2'', synthesis_base_url:
+          ''str'' = ''https://f.cluster.resemble.ai'', connect_timeout: ''float'' = 10.0, read_timeout:
+          ''float'' = 120.0, write_timeout: ''float'' = 30.0, pool_timeout: ''float'' = 10.0, max_connections:
+          ''int'' = 20, max_keepalive_connections: ''int'' = 20, max_json_response_bytes: ''int'' = 67108864,
+          retry: ''RetryPolicy'' = <factory>) -> None'
       ClientStateError:
+        kind: exception
         code: client_state_error
-        kind: exception
       CloudError:
-        code: cloud_error
         kind: exception
+        code: cloud_error
       FileSynthesisResult:
         kind: class
-        signature: '(path: ''Path'', bytes_written: ''int'', duration_seconds: ''float
-          | None'', issues: ''tuple[str, ...]'', request_id: ''str | None'', attempts:
-          ''int'') -> None'
+        signature: '(path: ''Path'', bytes_written: ''int'', duration_seconds: ''float | None'', issues:
+          ''tuple[str, ...]'', request_id: ''str | None'', attempts: ''int'') -> None'
       HostedBudgetExceeded:
-        code: hosted_budget_exceeded
         kind: exception
+        code: hosted_budget_exceeded
       HostedUsageGate:
         kind: class
-        signature: '(budget: ''HostedUsageBudget'', *, price_per_character: ''Decimal
-          | None'' = None) -> ''None'''
+        signature: '(budget: ''HostedUsageBudget'', *, price_per_character: ''Decimal | None'' = None)
+          -> ''None'''
       Page:
         kind: class
-        signature: '(items: ''tuple[T, ...]'', page: ''int | None'', page_count: ''int
-          | None'', total_results: ''int | None'') -> None'
+        signature: '(items: ''tuple[T, ...]'', page: ''int | None'', page_count: ''int | None'', total_results:
+          ''int | None'') -> None'
       Precision:
         kind: enum
+        signature: (*values)
         members:
           MULAW: MULAW
           PCM_16: PCM_16
           PCM_24: PCM_24
           PCM_32: PCM_32
-        signature: (*values)
       ProgressCallback:
         kind: type_alias
       Project:
         kind: class
-        signature: '(uuid: ''str'', name: ''str'', description: ''str | None'' = None,
-          is_collaborative: ''bool'' = False, is_archived: ''bool'' = False, created_at:
-          ''str | None'' = None) -> None'
+        signature: '(uuid: ''str'', name: ''str'', description: ''str | None'' = None, is_collaborative:
+          ''bool'' = False, is_archived: ''bool'' = False, created_at: ''str | None'' = None) -> None'
       ProviderError:
+        kind: exception
+        signature: '(status_code: ''int'', message: ''str'', request_id: ''str | None'' = None, retry_after:
+          ''float | None'' = None, ambiguous: ''bool'' = False) -> None'
         code: provider_error
-        kind: exception
-        signature: '(status_code: ''int'', message: ''str'', request_id: ''str | None''
-          = None, retry_after: ''float | None'' = None, ambiguous: ''bool'' = False)
-          -> None'
       ProviderProtocolError:
-        code: provider_protocol_error
         kind: exception
+        code: provider_protocol_error
       Recording:
         kind: class
-        signature: '(uuid: ''str'', name: ''str'', text: ''str | None'' = None, status:
-          ''str | None'' = None) -> None'
+        signature: '(uuid: ''str'', name: ''str'', text: ''str | None'' = None, status: ''str | None''
+          = None) -> None'
       ResembleClient:
         kind: class
-        signature: '(api_key: ''str'', *, options: ''ClientOptions | None'' = None,
-          http_client: ''httpx.AsyncClient | None'' = None, usage_gate: ''HostedUsageGate
-          | None'' = None) -> ''None'''
+        signature: '(api_key: ''str'', *, options: ''ClientOptions | None'' = None, http_client: ''httpx.AsyncClient
+          | None'' = None, usage_gate: ''HostedUsageGate | None'' = None) -> ''None'''
       ResembleSpeechService:
         kind: class
         signature: '(client: ''ResembleClient'', *, concurrency: ''int'' = 1) -> ''None'''
       ResumeMismatchError:
-        code: resume_mismatch
         kind: exception
+        code: resume_mismatch
       RetryExhaustedError:
-        code: retry_exhausted
         kind: exception
         signature: '(*, attempts: ''int'', last_error: ''Exception'') -> ''None'''
+        code: retry_exhausted
       RetryPolicy:
         kind: class
-        signature: '(max_attempts: ''int'' = 4, base_delay: ''float'' = 0.5, max_backoff:
-          ''float'' = 8.0, max_retry_after: ''float'' = 60.0) -> None'
+        signature: '(max_attempts: ''int'' = 4, base_delay: ''float'' = 0.5, max_backoff: ''float'' =
+          8.0, max_retry_after: ''float'' = 60.0) -> None'
       StreamRequest:
         kind: class
-        signature: '(text: ''str'', voice_uuid: ''str'', project_uuid: ''str | None''
-          = None, precision: ''Precision'' = <Precision.PCM_32: ''PCM_32''>, sample_rate:
-          ''int | None'' = None, use_hd: ''bool'' = False, apply_custom_pronunciations:
-          ''bool'' = False) -> None'
+        signature: '(text: ''str'', voice_uuid: ''str'', project_uuid: ''str | None'' = None, precision:
+          ''Precision'' = <Precision.PCM_32: ''PCM_32''>, sample_rate: ''int | None'' = None, use_hd:
+          ''bool'' = False, apply_custom_pronunciations: ''bool'' = False) -> None'
       SynthesisRequest:
         kind: class
-        signature: '(text: ''str'', voice_uuid: ''str'', project_uuid: ''str | None''
-          = None, title: ''str | None'' = None, precision: ''Precision'' = <Precision.PCM_32:
-          ''PCM_32''>, output_format: ''AudioFormat'' = <AudioFormat.WAV: ''wav''>,
-          sample_rate: ''int | None'' = None, use_hd: ''bool'' = False, apply_custom_pronunciations:
-          ''bool'' = False) -> None'
+        signature: '(text: ''str'', voice_uuid: ''str'', project_uuid: ''str | None'' = None, title: ''str
+          | None'' = None, precision: ''Precision'' = <Precision.PCM_32: ''PCM_32''>, output_format: ''AudioFormat''
+          = <AudioFormat.WAV: ''wav''>, sample_rate: ''int | None'' = None, use_hd: ''bool'' = False,
+          apply_custom_pronunciations: ''bool'' = False) -> None'
       SynthesisResult:
         kind: class
-        signature: '(audio: ''bytes'', duration_seconds: ''float | None'', synthesis_seconds:
-          ''float | None'', output_format: ''AudioFormat'', sample_rate: ''int | None'',
-          title: ''str | None'', issues: ''tuple[str, ...]'', request_id: ''str |
-          None'', attempts: ''int'') -> None'
+        signature: '(audio: ''bytes'', duration_seconds: ''float | None'', synthesis_seconds: ''float
+          | None'', output_format: ''AudioFormat'', sample_rate: ''int | None'', title: ''str | None'',
+          issues: ''tuple[str, ...]'', request_id: ''str | None'', attempts: ''int'') -> None'
       Voice:
         kind: class
-        signature: '(uuid: ''str'', name: ''str'', status: ''str | None'' = None,
-          created_at: ''str | None'' = None) -> None'
+        signature: '(uuid: ''str'', name: ''str'', status: ''str | None'' = None, created_at: ''str |
+          None'' = None) -> None'
       run_cloud_batch:
         kind: function
-        signature: '(rows: ''Iterable[BatchRow]'', service: ''TextToSpeechService'',
-          *, default_voice: ''str | None'', project_uuid: ''str | None'', out_dir:
-          ''Path'', concurrency: ''int'' = 5, output_format: ''AudioFormat'' = <AudioFormat.WAV:
-          ''wav''>, use_hd: ''bool'' = False, precision: ''Precision | None'' = None,
-          sample_rate: ''int | None'' = None, apply_custom_pronunciations: ''bool''
-          = False, overwrite: ''bool'' = False, dry_run: ''bool'' = False, progress:
-          ''ProgressCallback | None'' = None, journal_path: ''Path | None'' = None,
-          report_path: ''Path | None'' = None, resume_path: ''Path | None'' = None,
-          write_report: ''bool'' = True, usage_gate: ''HostedUsageGate | None'' =
-          None, preflight: ''HostedWorkEstimate | None'' = None) -> ''BatchReport'''
+        signature: '(rows: ''Iterable[BatchRow]'', service: ''TextToSpeechService'', *, default_voice:
+          ''str | None'', project_uuid: ''str | None'', out_dir: ''Path'', concurrency: ''int'' = 5, output_format:
+          ''AudioFormat'' = <AudioFormat.WAV: ''wav''>, use_hd: ''bool'' = False, precision: ''Precision
+          | None'' = None, sample_rate: ''int | None'' = None, apply_custom_pronunciations: ''bool'' =
+          False, overwrite: ''bool'' = False, dry_run: ''bool'' = False, progress: ''ProgressCallback
+          | None'' = None, journal_path: ''Path | None'' = None, report_path: ''Path | None'' = None,
+          resume_path: ''Path | None'' = None, write_report: ''bool'' = True, usage_gate: ''HostedUsageGate
+          | None'' = None, preflight: ''HostedWorkEstimate | None'' = None) -> ''BatchReport'''
   yakbox.diagnostics:
     exports:
       Diagnostic:
         kind: class
-        signature: '(id: ''str'', status: ''DiagnosticStatus'', severity: ''DiagnosticSeverity'',
-          summary: ''str'', detail: ''str | None'' = None, action: ''str | None''
-          = None, elapsed_seconds: ''float'' = 0.0, skipped_by_policy: ''bool'' =
-          False, evidence: ''Mapping[str, object] | None'' = None) -> None'
+        signature: '(id: ''str'', status: ''DiagnosticStatus'', severity: ''DiagnosticSeverity'', summary:
+          ''str'', detail: ''str | None'' = None, action: ''str | None'' = None, elapsed_seconds: ''float''
+          = 0.0, skipped_by_policy: ''bool'' = False, evidence: ''Mapping[str, object] | None'' = None)
+          -> None'
       DiagnosticSeverity:
         kind: enum
+        signature: (*values)
         members:
-          ERROR: error
           INFO: info
           WARNING: warning
-        signature: (*values)
+          ERROR: error
       DiagnosticStatus:
         kind: enum
-        members:
-          FAIL: fail
-          PASS: pass
-          SKIP: skip
-          WARN: warn
         signature: (*values)
+        members:
+          PASS: pass
+          WARN: warn
+          FAIL: fail
+          SKIP: skip
       DoctorReport:
         kind: class
-        signature: '(schema_version: ''int'', diagnostics: ''tuple[Diagnostic, ...]'')
-          -> None'
+        signature: '(schema_version: ''int'', diagnostics: ''tuple[Diagnostic, ...]'') -> None'
       run_doctor:
         kind: function
-        signature: '(manifest: ''Path | None'' = None, *, backend: ''str | None''
-          = None, target: ''str | None'' = None, network: ''bool'' = False, deep:
-          ''bool'' = False, whisper: ''bool'' = False, api_key: ''str | None'' = None)
-          -> ''DoctorReport'''
+        signature: '(manifest: ''Path | None'' = None, *, backend: ''str | None'' = None, target: ''str
+          | None'' = None, network: ''bool'' = False, deep: ''bool'' = False, whisper: ''bool'' = False,
+          api_key: ''str | None'' = None) -> ''DoctorReport'''
   yakbox.speech:
     exports:
+      AcceleratorLease:
+        kind: class
+        signature: () -> 'None'
       AudioFormat:
         kind: enum
-        members:
-          MP3: mp3
-          WAV: wav
         signature: (*values)
+        members:
+          WAV: wav
+          MP3: mp3
       BackendCapabilities:
         kind: class
-        signature: '(name: str, synthesis: bool, transformation: bool, streaming:
-          bool, hosted: bool, output_formats: tuple[str, ...], max_text_characters:
-          int | None = None, supports_reference_voice: bool = False, supports_hd:
-          bool = False) -> None'
+        signature: '(name: str, synthesis: bool, transformation: bool, streaming: bool, hosted: bool,
+          output_formats: tuple[str, ...], max_text_characters: int | None = None, supports_reference_voice:
+          bool = False, supports_hd: bool = False) -> None'
       BatchTextToSpeechService:
         kind: class
         signature: (*args, **kwargs)
       ChatterboxSynthesisOptions:
         kind: class
-        signature: '(cfg_weight: ''float | None'' = None, exaggeration: ''float |
-          None'' = None, seed: ''int | None'' = None) -> None'
+        signature: '(cfg_weight: ''float | None'' = None, exaggeration: ''float | None'' = None, seed:
+          ''int | None'' = None) -> None'
       CurrencyCode:
         kind: class
         signature: '(value: ''str'') -> ''CurrencyCode'''
@@ -714,11 +696,10 @@ modules:
         signature: ()
       HostedUsageBudget:
         kind: class
-        signature: '(max_submitted_characters: ''int | None'' = None, max_provider_requests:
-          ''int | None'' = None, max_estimated_spend: ''Decimal | None'' = None, currency:
-          ''CurrencyCode | None'' = None, pricing_source: ''PricingSourceId | None''
-          = None, confirm_above_characters: ''int | None'' = None, confirm_above_requests:
-          ''int | None'' = None) -> None'
+        signature: '(max_submitted_characters: ''int | None'' = None, max_provider_requests: ''int | None''
+          = None, max_estimated_spend: ''Decimal | None'' = None, currency: ''CurrencyCode | None'' =
+          None, pricing_source: ''PricingSourceId | None'' = None, confirm_above_characters: ''int | None''
+          = None, confirm_above_requests: ''int | None'' = None) -> None'
       HostedUsageJournalingService:
         kind: class
         signature: (*args, **kwargs)
@@ -730,53 +711,48 @@ modules:
       HostedUsageSnapshot:
         kind: class
         signature: '(logical_items: ''int'' = 0, provider_attempts: ''int'' = 0, submitted_characters:
-          ''int'' = 0, estimated_spend: ''Decimal | None'' = None, currency: ''CurrencyCode
-          | None'' = None, ambiguous_attempts: ''int'' = 0) -> None'
+          ''int'' = 0, estimated_spend: ''Decimal | None'' = None, currency: ''CurrencyCode | None'' =
+          None, ambiguous_attempts: ''int'' = 0) -> None'
       HostedWorkEstimate:
         kind: class
-        signature: '(logical_items: ''int'', logical_characters: ''int'', max_attempts:
-          ''int'', minimum_provider_requests: ''int'', maximum_provider_requests:
-          ''int'', minimum_submitted_characters: ''int'', maximum_submitted_characters:
-          ''int'', minimum_estimated_spend: ''Decimal | None'' = None, maximum_estimated_spend:
-          ''Decimal | None'' = None) -> None'
+        signature: '(logical_items: ''int'', logical_characters: ''int'', max_attempts: ''int'', minimum_provider_requests:
+          ''int'', maximum_provider_requests: ''int'', minimum_submitted_characters: ''int'', maximum_submitted_characters:
+          ''int'', minimum_estimated_spend: ''Decimal | None'' = None, maximum_estimated_spend: ''Decimal
+          | None'' = None) -> None'
       Precision:
         kind: enum
+        signature: (*values)
         members:
           MULAW: MULAW
           PCM_16: PCM_16
           PCM_24: PCM_24
           PCM_32: PCM_32
-        signature: (*values)
       PricingSourceId:
         kind: class
         signature: '(value: ''str'') -> ''PricingSourceId'''
       SpeechArtifact:
         kind: class
-        signature: '(path: ''Path'', backend: ''str'', voice: ''str'', output_format:
-          ''AudioFormat'', bytes_written: ''int'', sha256: ''str'', duration_seconds:
-          ''float | None'' = None, sample_rate: ''int | None'' = None, request_id:
-          ''str | None'' = None, attempts: ''int'' = 1) -> None'
+        signature: '(path: ''Path'', backend: ''str'', voice: ''str'', output_format: ''AudioFormat'',
+          bytes_written: ''int'', sha256: ''str'', duration_seconds: ''float | None'' = None, sample_rate:
+          ''int | None'' = None, request_id: ''str | None'' = None, attempts: ''int'' = 1) -> None'
       SpeechBackendOptions:
         kind: class
-        signature: '(api_key: ''str | None'' = None, isolated_local: ''bool'' = False,
-          hosted_budget: ''HostedUsageBudget | None'' = None, price_per_character:
-          ''Decimal | None'' = None, max_connections: ''int | None'' = None, device:
-          ''str | None'' = None, local_worker_timeout_seconds: ''float'' = 3600, local_threads_per_process:
-          ''int'' = 1, local_worker_log_path: ''Path | None'' = None) -> None'
+        signature: '(api_key: ''str | None'' = None, isolated_local: ''bool'' = False, hosted_budget:
+          ''HostedUsageBudget | None'' = None, price_per_character: ''Decimal | None'' = None, max_connections:
+          ''int | None'' = None, device: ''str | None'' = None, local_worker_timeout_seconds: ''float''
+          = 3600, local_threads_per_process: ''int'' = 1, local_worker_log_path: ''Path | None'' = None)
+          -> None'
       SpeechSynthesisRequest:
         kind: class
-        signature: '(text: ''str'', voice: ''str'', backend: ''str'' = ''fake'', profile:
-          ''str | None'' = None, output_format: ''AudioFormat'' = <AudioFormat.WAV:
-          ''wav''>, sample_rate: ''int | None'' = None, title: ''str | None'' = None,
-          use_hd: ''bool'' = False, precision: ''Precision | None'' = None, apply_custom_pronunciations:
-          ''bool'' = False, project: ''str | None'' = None, reference_audio: ''Path
-          | None'' = None, chatterbox: ''ChatterboxSynthesisOptions | None'' = None)
-          -> None'
+        signature: '(text: ''str'', voice: ''str'', backend: ''str'' = ''fake'', profile: ''str | None''
+          = None, output_format: ''AudioFormat'' = <AudioFormat.WAV: ''wav''>, sample_rate: ''int | None''
+          = None, title: ''str | None'' = None, use_hd: ''bool'' = False, precision: ''Precision | None''
+          = None, apply_custom_pronunciations: ''bool'' = False, project: ''str | None'' = None, reference_audio:
+          ''Path | None'' = None, chatterbox: ''ChatterboxSynthesisOptions | None'' = None) -> None'
       SpeechTransformationRequest:
         kind: class
-        signature: '(input_path: ''Path'', voice: ''str'', backend: ''str'' = ''local'',
-          profile: ''str | None'' = None, reference_audio: ''Path | None'' = None)
-          -> None'
+        signature: '(input_path: ''Path'', voice: ''str'', backend: ''str'' = ''local'', profile: ''str
+          | None'' = None, reference_audio: ''Path | None'' = None) -> None'
       SpeechTransformationService:
         kind: class
         signature: (*args, **kwargs)
@@ -785,27 +761,27 @@ modules:
         signature: (*args, **kwargs)
       estimate_hosted_work:
         kind: function
-        signature: '(texts: ''Iterable[str]'', *, max_attempts: ''int'' = 4, price_per_character:
-          ''Decimal | None'' = None) -> ''HostedWorkEstimate'''
+        signature: '(texts: ''Iterable[str]'', *, max_attempts: ''int'' = 4, price_per_character: ''Decimal
+          | None'' = None) -> ''HostedWorkEstimate'''
       hosted_confirmation_reasons:
         kind: function
-        signature: '(budget: ''HostedUsageBudget'', estimate: ''HostedWorkEstimate'')
-          -> ''tuple[str, ...]'''
+        signature: '(budget: ''HostedUsageBudget'', estimate: ''HostedWorkEstimate'') -> ''tuple[str,
+          ...]'''
       open_configured_speech_backend:
         kind: function
         signature: '(name: ''str'', options: ''SpeechBackendOptions'') -> ''AsyncIterator[TextToSpeechService]'''
       open_speech_backend:
         kind: function
-        signature: '(name: ''str'', *, api_key: ''str | None'' = None, isolated_local:
-          ''bool'' = False, hosted_budget: ''HostedUsageBudget | None'' = None, price_per_character:
-          ''Decimal | None'' = None, max_connections: ''int | None'' = None, device:
-          ''str | None'' = None, local_worker_timeout_seconds: ''float'' = 3600, local_threads_per_process:
-          ''int'' = 1, local_worker_log_path: ''Path | None'' = None) -> ''AsyncIterator[TextToSpeechService]'''
+        signature: '(name: ''str'', *, api_key: ''str | None'' = None, isolated_local: ''bool'' = False,
+          hosted_budget: ''HostedUsageBudget | None'' = None, price_per_character: ''Decimal | None''
+          = None, max_connections: ''int | None'' = None, device: ''str | None'' = None, local_worker_timeout_seconds:
+          ''float'' = 3600, local_threads_per_process: ''int'' = 1, local_worker_log_path: ''Path | None''
+          = None, local_runtime_workspace: ''Path | None'' = None, local_runtime_idle_timeout_seconds:
+          ''float'' = 900.0, local_conditioning_cache_size: ''int'' = 8, local_runtime_maximum_memory_bytes:
+          ''int | None'' = None, accelerator_lease: ''AcceleratorLease | None'' = None) -> ''AsyncIterator[TextToSpeechService]'''
       open_transformation_backend:
         kind: function
         signature: '(name: ''str'') -> ''AsyncIterator[SpeechTransformationService]'''
       validate_hosted_preflight:
         kind: function
-        signature: '(budget: ''HostedUsageBudget'', estimate: ''HostedWorkEstimate'')
-          -> ''None'''
-schema_version: 1
+        signature: '(budget: ''HostedUsageBudget'', estimate: ''HostedWorkEstimate'') -> ''None'''

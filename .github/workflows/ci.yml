@@ -105,6 +105,8 @@ jobs:
           uv pip install --python .sdk-venv/bin/python dist/*.whl 'ty>=0.0.1a32,<0.1'
       - name: Smoke-test public SDK imports from the wheel
         run: .sdk-venv/bin/python tests/package_sdk_consumer.py
+      - name: Execute every packaged analysis worker from the wheel
+        run: .sdk-venv/bin/python tests/package_worker_consumer.py
       - name: Type-check a public SDK consumer against the wheel
         run: >-
           .sdk-venv/bin/ty check

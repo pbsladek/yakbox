@@ -12,6 +12,7 @@ import importlib.util
 import sys
 import tempfile
 import wave
+from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
@@ -39,6 +40,7 @@ class _AudioWriter(Protocol):
 
 class _ChatterboxModel(Protocol):
     sr: int
+    conds: object
 
     def generate(self, *args: object, **kwargs: object) -> object: ...
 
@@ -97,11 +99,29 @@ class LocalChatterboxService:
         supports_reference_voice=True,
     )
 
-    def __init__(self, *, device: str = "cpu") -> None:
+    def __init__(
+        self, *, device: str = "cpu", conditioning_cache_size: int = 8
+    ) -> None:
+        if conditioning_cache_size < 1:
+            raise ValidationError("Chatterbox conditioning cache size must be positive")
         self.device = device
+        self.conditioning_cache_size = conditioning_cache_size
         self._tts_model: _ChatterboxModel | None = None
         self._vc_model: _ChatterboxModel | None = None
         self._tts_reference_key: tuple[str, float] | None = None
+        self._tts_conditioning_cache: OrderedDict[tuple[str, float], object] = (
+            OrderedDict()
+        )
+
+    @property
+    def model_loaded(self) -> bool:
+        """Return whether the TTS weights are resident in this process."""
+        return self._tts_model is not None
+
+    @property
+    def conditioning_cache_entries(self) -> int:
+        """Return the number of reusable reference-conditioning objects."""
+        return len(self._tts_conditioning_cache)
 
     async def synthesize_to_file(
         self,
@@ -221,10 +241,21 @@ class LocalChatterboxService:
         if request.reference_audio is not None:
             reference_key = (sha256_file(request.reference_audio), exaggeration)
             if reference_key != self._tts_reference_key:
-                self._tts_model.prepare_conditionals(
-                    str(request.reference_audio),
-                    exaggeration=exaggeration,
-                )
+                cached = self._tts_conditioning_cache.get(reference_key)
+                if cached is None:
+                    self._tts_model.prepare_conditionals(
+                        str(request.reference_audio),
+                        exaggeration=exaggeration,
+                    )
+                    cached = self._tts_model.conds
+                    self._tts_conditioning_cache[reference_key] = cached
+                    while (
+                        len(self._tts_conditioning_cache) > self.conditioning_cache_size
+                    ):
+                        self._tts_conditioning_cache.popitem(last=False)
+                else:
+                    self._tts_conditioning_cache.move_to_end(reference_key)
+                    self._tts_model.conds = cached
                 self._tts_reference_key = reference_key
         elif self._tts_reference_key is not None:
             self._tts_model = factory.from_pretrained(device=self.device)

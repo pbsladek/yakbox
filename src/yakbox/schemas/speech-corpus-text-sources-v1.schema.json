@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-corpus-text-sources-v1.schema.json",
+  "title": "Yakbox public-domain corpus source-text inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "voice_registry_digest", "source_override_digest", "normalization_version", "source_count", "raw_byte_count", "sources"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-corpus-text-sources-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "voice_registry_digest": {"$ref": "#/$defs/sha256"},
+    "source_override_digest": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+    "normalization_version": {"type": "integer", "minimum": 1},
+    "source_count": {"type": "integer", "minimum": 1},
+    "raw_byte_count": {"type": "integer", "minimum": 1},
+    "sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/source"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "https_uri": {"type": "string", "pattern": "^https://"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["voice", "reader", "source_work", "catalog_url", "text_url", "rights_id", "rights_url", "relative_raw_path", "raw_digest", "raw_byte_count", "relative_plain_path", "plain_digest", "token_count", "fingerprint"],
+      "properties": {
+        "voice": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+        "reader": {"type": "string", "minLength": 1},
+        "source_work": {"type": "string", "minLength": 1},
+        "catalog_url": {"$ref": "#/$defs/https_uri"},
+        "text_url": {"$ref": "#/$defs/https_uri"},
+        "rights_id": {"const": "LicenseRef-Public-Domain-US"},
+        "rights_url": {"$ref": "#/$defs/https_uri"},
+        "relative_raw_path": {"type": "string", "minLength": 1},
+        "raw_digest": {"$ref": "#/$defs/sha256"},
+        "raw_byte_count": {"type": "integer", "minimum": 1},
+        "relative_plain_path": {"type": "string", "minLength": 1},
+        "plain_digest": {"$ref": "#/$defs/sha256"},
+        "token_count": {"type": "integer", "minimum": 100},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-join-verification-v1.schema.json",
+  "title": "Yakbox contextual join verification",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "join_id", "fingerprint", "state", "accepted", "pcm", "speech_verification_fingerprint", "consensus_fingerprint", "forced_alignment_fingerprint", "reason_codes"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-join-verification-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "join_id": {"type": "string", "minLength": 1},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "state": {"const": "repair_candidate"},
+    "accepted": {"type": "boolean"},
+    "pcm": {
+      "type": "object",
+      "required": ["sample_jump_ratio", "local_peak_change_db", "surrounding_silence_ms", "accepted", "measurement_fingerprint"],
+      "properties": {
+        "sample_jump_ratio": {"type": "number"},
+        "local_peak_change_db": {"type": "number"},
+        "surrounding_silence_ms": {"type": "number", "minimum": 0},
+        "accepted": {"type": "boolean"},
+        "measurement_fingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "speech_verification_fingerprint": {"$ref": "#/$defs/sha256"},
+    "consensus_fingerprint": {"$ref": "#/$defs/sha256"},
+    "forced_alignment_fingerprint": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+    "reason_codes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false,
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

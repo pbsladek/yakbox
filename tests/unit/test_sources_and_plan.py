@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -763,7 +764,7 @@ def test_chunking_prioritizes_sentence_boundaries_over_later_words() -> None:
     assert chunks[0].boundary is ChunkBoundary.SENTENCE
 
 
-def test_plan_marks_short_narration_with_policy_fingerprint(
+def test_plan_marks_short_narration_with_split_fingerprints(
     book_workspace: Path,
 ) -> None:
     manifest = load_manifest(book_workspace / "yakbox.toml")
@@ -783,10 +784,54 @@ def test_plan_marks_short_narration_with_policy_fingerprint(
     assert synthesis.chunk_short_utterances[1] is None
     assert synthesis.chunk_short_utterances[2] is not None
     assert synthesis.chunk_short_utterances[2].word_count == 3
-    assert synthesis.chunk_short_utterances[2].policy_fingerprint == (
-        manifest.short_utterances.fingerprint
+    assert synthesis.chunk_short_utterances[2].generation_fingerprint == (
+        manifest.short_utterances.generation_fingerprint
+    )
+    assert synthesis.chunk_short_utterances[2].extraction_fingerprint == (
+        manifest.short_utterances.extraction_fingerprint
+    )
+    assert synthesis.chunk_short_utterances[2].evaluation_fingerprint == (
+        manifest.short_utterances.evaluation_fingerprint
     )
     assert short_marker["reason"] == "word_count"
+
+
+def test_whisper_qa_change_does_not_invalidate_synthesis(
+    book_workspace: Path,
+) -> None:
+    manifest = load_manifest(book_workspace / "yakbox.toml")
+    manifest = replace(
+        manifest,
+        whisper_qa=replace(manifest.whisper_qa, chapter_verification=True),
+    )
+    document = normalize_sources(
+        manifest.sources,
+        pronunciations=manifest.pronunciations,
+    )
+    original = plan_audiobook(manifest, document)
+    changed = replace(
+        manifest,
+        whisper_qa=replace(
+            manifest.whisper_qa,
+            manuscript_aliases=(("asterion", ("asterian",)),),
+        ),
+    )
+    revised = plan_audiobook(changed, document)
+    original_synthesis = next(
+        node for node in original.nodes if node.stage == "synthesize"
+    )
+    revised_synthesis = next(
+        node for node in revised.nodes if node.stage == "synthesize"
+    )
+    original_verify = next(
+        node for node in original.nodes if node.stage == "verify_manuscript"
+    )
+    revised_verify = next(
+        node for node in revised.nodes if node.stage == "verify_manuscript"
+    )
+
+    assert original_synthesis.fingerprint == revised_synthesis.fingerprint
+    assert original_verify.fingerprint != revised_verify.fingerprint
 
 
 @pytest.mark.parametrize(

@@ -438,9 +438,38 @@ the build engine to a particular book:
 [repairs]
 mode = "context"
 takes = 4
+minimum_passing_takes = 2
 whisper_qa = true
 rebuild_on_approval = true
 ```
 
 See [Localized regeneration and repair](localized-repair.md) for the selection,
 audition, approval, and rebuild commands.
+
+## Persistent local runtime
+
+Local model startup can be retained across separate CLI commands:
+
+```toml
+[runtime]
+enabled = true
+idle_timeout_seconds = 900
+conditioning_cache_size = 8
+# maximum_memory_bytes = 51539607552
+```
+
+With this opt-in policy, local speech and MLX Whisper requests use one
+authenticated loopback process scoped to the manifest directory. It lazily
+loads each model, keeps up to the configured number of voice-conditioning
+states, stops after the idle timeout, and can stop after a request if the
+resident-memory ceiling is exceeded.
+
+```console
+yakbox runtime start yakbox.toml
+yakbox runtime status yakbox.toml
+yakbox runtime stop yakbox.toml
+```
+
+The endpoint token is stored mode `0600` under `.yakbox/runtime/`; status output
+never includes it. When `enabled = false` (the default), existing isolated
+per-command workers remain unchanged.

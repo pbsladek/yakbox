@@ -97,14 +97,15 @@ artifacts into quarantine; `purge_trash` permanently deletes them.
 Manifest and backend models: `AudiobookManifest`, `BookMetadata`,
 `LogicalVoice`, `BackendOptions`, `BackendProfile`, `FakeOptions`,
 `ChatterboxOptions`, `ResembleOptions`, `CharacterRole`, `DialoguePolicy`,
-`BuildTarget`, `RetentionPolicy`, and `RepairPolicy`.
+`BuildTarget`, `RetentionPolicy`, `RepairPolicy`, and `RuntimePolicy`.
 
 Normalized source and planning models: `Chapter`, `Pause`, `SpeechSegment`,
 `SourceLocation`, `NormalizedDocument`, `BuildStage`, `PlanNode`, `BuildPlan`,
 `ChunkRoute`, `AttributionFinding`, `BuildChangeSummary`, and `BuildPreflight`.
 
 Localized repair models: `RepairMode`, `RepairChunk`, `RepairPlan`, `RepairTake`,
-`RepairSession`, and `RepairApproval`.
+`RepairSession`, `RepairApproval`, `RepairBatchEntry`, `RepairBatch`, and
+`RepairBatchGeneration`.
 
 Build models and callbacks: `BuildRequest`, `BuildResult`, `BuildStatus`,
 `BuildProgress`, `BuildProgressEvent`, and `BuildProgressCallback`.
@@ -124,8 +125,10 @@ Application functions: `load_manifest`, `normalize_sources`,
 `plan_cache_cleanup`, `apply_cache_cleanup`, `plan_cleanup`, `apply_cleanup`,
 `restore_trash`, `purge_trash`, `assemble_release`, `check_release`,
 `diff_releases`, `export_shard_manifests`, `verify_shard_manifests`,
-`plan_repair`, `generate_repair_session`, `approve_repair_session`, and
-`explain_synthesis_chunk`.
+`plan_repair`, `generate_repair_session`, `generate_repair_batch`,
+`approve_repair_session`,
+`begin_repair_batch`, `stage_repair_batch_entry`, `load_repair_batch`,
+`finalize_repair_batch`, and `explain_synthesis_chunk`.
 
 ## Direct speech services
 
@@ -165,6 +168,9 @@ asyncio.run(render())
 The legacy keyword factory `open_speech_backend` remains public.
 `open_transformation_backend` opens voice-conversion services. All three are
 async context managers; do not retain a service after its context exits.
+Pass one `AcceleratorLease` to local TTS and speech-analysis supervisors when
+they share an Apple Silicon accelerator. It serializes model loading,
+inference, and cleanup across Torch/MPS and MLX workers.
 
 ### Speech reference
 

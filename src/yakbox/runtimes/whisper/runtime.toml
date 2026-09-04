@@ -1,0 +1,7 @@
+schema_version = 1
+family = "whisper"
+engines = ["whisper"]
+python = "3.14"
+worker_artifact = "analysis-worker.pyz"
+adapter = "mlx-whisper"
+

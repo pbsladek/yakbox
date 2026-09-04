@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-consensus-v1.schema.json",
+  "title": "Yakbox multi-recognizer consensus evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "policy_fingerprint", "expected_tokens_hash", "equivalence_set_fingerprint", "recognition_fingerprints", "applied_equivalences", "votes", "accepted_spans", "rejected_spans", "disagreement_spans", "high_risk_spans", "escalation_reason", "outcome", "reason_codes"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-consensus-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "policy_fingerprint": {"$ref": "#/$defs/sha256"},
+    "expected_tokens_hash": {"$ref": "#/$defs/sha256"},
+    "equivalence_set_fingerprint": {"$ref": "#/$defs/sha256"},
+    "recognition_fingerprints": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/sha256"}},
+    "applied_equivalences": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["engine", "recognition_fingerprint", "rule_fingerprint", "reason_code", "expected_start", "expected_end", "recognized_start", "recognized_end", "recognized_sequence_hash"],
+        "properties": {
+          "engine": {"enum": ["whisper", "parakeet", "qwen"]},
+          "recognition_fingerprint": {"$ref": "#/$defs/sha256"},
+          "rule_fingerprint": {"$ref": "#/$defs/sha256"},
+          "reason_code": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$"},
+          "expected_start": {"type": "integer", "minimum": 0},
+          "expected_end": {"type": "integer", "minimum": 1},
+          "recognized_start": {"type": "integer", "minimum": 0},
+          "recognized_end": {"type": "integer", "minimum": 1},
+          "recognized_sequence_hash": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "votes": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["expected_index", "engine", "recognition_fingerprint", "state", "recognized_token_hash", "reason_codes"],
+        "properties": {
+          "expected_index": {"type": "integer", "minimum": 0},
+          "engine": {"enum": ["whisper", "parakeet", "qwen"]},
+          "recognition_fingerprint": {"$ref": "#/$defs/sha256"},
+          "state": {"enum": ["match", "dissent", "invalid", "not_run"]},
+          "recognized_token_hash": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+          "reason_codes": {"$ref": "#/$defs/reasons"}
+        }
+      }
+    },
+    "accepted_spans": {"$ref": "#/$defs/spans"},
+    "rejected_spans": {"$ref": "#/$defs/spans"},
+    "disagreement_spans": {"$ref": "#/$defs/spans"},
+    "high_risk_spans": {"$ref": "#/$defs/spans"},
+    "escalation_reason": {"type": "string", "minLength": 1},
+    "outcome": {"enum": ["accepted", "rejected"]},
+    "reason_codes": {"$ref": "#/$defs/reasons"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reasons": {"type": "array", "uniqueItems": true, "items": {"enum": ["ambiguous_target_projection", "engine_decode_invalid", "engine_result_missing", "forced_alignment_incomplete", "invalid_engine_result", "lexical_deletion", "lexical_insertion", "lexical_substitution", "missing_required_engine", "persistent_valid_dissent", "recognition_match", "recognition_not_run", "unexpected_speech"]}},
+    "span": {
+      "type": "object", "additionalProperties": false,
+      "required": ["start", "end", "reason_codes", "review_eligible"],
+      "properties": {
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 1},
+        "reason_codes": {"$ref": "#/$defs/reasons"},
+        "review_eligible": {"type": "boolean"}
+      }
+    },
+    "spans": {"type": "array", "items": {"$ref": "#/$defs/span"}}
+  }
+}

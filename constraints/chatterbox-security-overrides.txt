@@ -1,5 +1,8 @@
 # Chatterbox 0.1.7 pins vulnerable versions of these packages. Pass this file
-# to Astral uv with --overrides when installing yakbox's local extra.
+# to Astral uv with --overrides when installing yakbox's optional dependency
+# sets. SecretStorage otherwise permits cryptography releases affected by
+# GHSA-g6cj-pr64-35w5.
+cryptography==50.0.0
 diffusers==0.39.0
 gradio==6.21.0
 numpy==2.4.6

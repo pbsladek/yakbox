@@ -118,6 +118,13 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
             (output / "yakbox-0.1.0.tar.gz").write_bytes(b"source")
         if command[:2] == ("uv", "export"):
             output = Path(command[command.index("--output-file") + 1])
+            if "--project" in command:
+                family = Path(command[command.index("--project") + 1]).name
+                component_name = f"yakbox-analysis-{family}-runtime"
+                component_version = "0"
+            else:
+                component_name = "yakbox"
+                component_version = "0.1.0"
             output.write_text(
                 json.dumps(
                     {
@@ -125,8 +132,8 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
                         "specVersion": "1.5",
                         "metadata": {
                             "component": {
-                                "name": "yakbox",
-                                "version": "0.1.0",
+                                "name": component_name,
+                                "version": component_version,
                             }
                         },
                     }
@@ -148,6 +155,9 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
     assert "yakbox-0.1.0-py3-none-any.whl" in checksums
     assert "yakbox-0.1.0.tar.gz" in checksums
     assert "yakbox.cdx.json" in checksums
+    assert "yakbox-worker-whisper.cdx.json" in checksums
+    assert "yakbox-worker-parakeet.cdx.json" in checksums
+    assert "yakbox-worker-qwen.cdx.json" in checksums
     assert "release-preflight.json" in checksums
     assert (
         commands.count(
@@ -166,4 +176,16 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
     assert ("uv", "run", "pytest") in commands
     assert ("uv", "run", "lint-imports", "--no-cache") in commands
     assert ("uv", "audit", "--frozen") in commands
+    assert len(report.worker_sboms) == 3
+    assert sum(command[:2] == ("uv", "audit") for command in commands) == 4
+    assert sum(command[:2] == ("uv", "export") for command in commands) == 4
     assert sum(command[:2] == ("uv", "run") for command in commands) >= 6
+    assert {
+        command[command.index("--project") + 1]
+        for command in commands
+        if command[:2] in {("uv", "audit"), ("uv", "export")} and "--project" in command
+    } == {
+        "src/yakbox/runtimes/whisper",
+        "src/yakbox/runtimes/parakeet",
+        "src/yakbox/runtimes/qwen",
+    }

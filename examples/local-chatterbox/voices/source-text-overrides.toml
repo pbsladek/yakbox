@@ -1,0 +1,13 @@
+schema_version = 1
+
+[sources.amanda-friday]
+url = "https://archive.org/download/screenacting00marsiala/screenacting00marsiala_djvu.txt"
+rights_url = "https://archive.org/details/screenacting00marsiala"
+
+[sources.andy-minter]
+url = "https://www.gutenberg.org/ebooks/40321"
+rights_url = "https://www.gutenberg.org/policy/license.html"
+
+[sources.cori-samuel]
+url = "https://www.gutenberg.org/ebooks/41445"
+rights_url = "https://www.gutenberg.org/policy/license.html"

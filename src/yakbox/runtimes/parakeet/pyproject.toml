@@ -1,0 +1,12 @@
+[project]
+name = "yakbox-analysis-parakeet-runtime"
+version = "0"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "parakeet-mlx==0.5.2",
+  "regex>=2026.7.19,<2027",
+]
+
+[tool.uv]
+override-dependencies = ["cryptography>=50.0.0"]
+

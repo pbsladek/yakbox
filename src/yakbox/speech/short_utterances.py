@@ -223,8 +223,136 @@ class ShortUtterancePolicy:
         return max(baseline, calibrated)
 
     @property
+    def generation_fingerprint(self) -> str:
+        """Return the identity of candidate recipes, independent of QA policy."""
+        payload = json.dumps(
+            {
+                "version": f"{SHORT_UTTERANCE_POLICY_VERSION}-generation-v1",
+                "strategy": self.strategy,
+                "maximum_words": self.maximum_words,
+                "candidate_count": self.candidate_count,
+                "prefer_natural_context": self.prefer_natural_context,
+                "carrier_positions": self.carrier_positions,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    @property
+    def evaluation_fingerprint(self) -> str:
+        """Return the identity of per-candidate hard gates."""
+        generation_fields = {
+            "strategy",
+            "maximum_words",
+            "candidate_count",
+            "prefer_natural_context",
+            "carrier_positions",
+            "automatic_join_inspection",
+            "join_inspection_window_seconds",
+            "keep_candidates",
+        }
+        extraction_fields = {
+            "alignment_backend",
+            "alignment_model",
+            "alignment_revision",
+            "alignment_aliases",
+            "prompted_timing",
+            "decode_consensus",
+            "prompt_sensitivity",
+            "maximum_consensus_timing_delta_ms",
+            "hallucination_silence_threshold",
+            "alignment_timeout_seconds",
+            "pre_roll_ms",
+            "post_roll_ms",
+            "fade_ms",
+        }
+        selection_fields = {
+            "candidate_confidence_tolerance",
+            "failure",
+            "require_review_for_one_word",
+        }
+        payload = json.dumps(
+            {
+                "version": f"{SHORT_UTTERANCE_POLICY_VERSION}-evaluation-v1",
+                **{
+                    key: value
+                    for key, value in asdict(self).items()
+                    if key
+                    not in generation_fields | extraction_fields | selection_fields
+                },
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    @property
+    def extraction_fingerprint(self) -> str:
+        """Return the identity of alignment and carrier-crop behavior."""
+        fields = (
+            "alignment_backend",
+            "alignment_model",
+            "alignment_revision",
+            "alignment_aliases",
+            "prompted_timing",
+            "decode_consensus",
+            "prompt_sensitivity",
+            "maximum_consensus_timing_delta_ms",
+            "hallucination_silence_threshold",
+            "alignment_timeout_seconds",
+            "pre_roll_ms",
+            "post_roll_ms",
+            "fade_ms",
+        )
+        values = asdict(self)
+        payload = json.dumps(
+            {
+                "version": f"{SHORT_UTTERANCE_POLICY_VERSION}-extraction-v1",
+                **{key: values[key] for key in fields},
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    @property
+    def selection_fingerprint(self) -> str:
+        """Return the identity of ranking and post-selection review behavior."""
+        payload = json.dumps(
+            {
+                "version": f"{SHORT_UTTERANCE_POLICY_VERSION}-selection-v1",
+                "candidate_confidence_tolerance": self.candidate_confidence_tolerance,
+                "prefer_natural_context": self.prefer_natural_context,
+                "failure": self.failure,
+                "require_review_for_one_word": self.require_review_for_one_word,
+                "keep_candidates": self.keep_candidates,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    @property
+    def join_fingerprint(self) -> str:
+        """Return the identity of post-assembly join inspection policy."""
+        payload = json.dumps(
+            {
+                "version": f"{SHORT_UTTERANCE_POLICY_VERSION}-join-v1",
+                "automatic_join_inspection": self.automatic_join_inspection,
+                "join_inspection_window_seconds": self.join_inspection_window_seconds,
+                "alignment_backend": self.alignment_backend,
+                "alignment_model": self.alignment_model,
+                "alignment_revision": self.alignment_revision,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    @property
     def fingerprint(self) -> str:
-        """Return a stable fingerprint covering every behavior setting."""
+        """Return the compatibility identity covering every behavior setting."""
         payload = json.dumps(
             {
                 "version": SHORT_UTTERANCE_POLICY_VERSION,

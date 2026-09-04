@@ -42,6 +42,38 @@ local cache.
 - OpenAI Whisper license: <https://github.com/openai/whisper/blob/main/LICENSE>
 - Default MLX model card: <https://huggingface.co/mlx-community/whisper-large-v3-turbo>
 
+## Optional multi-model speech-analysis software and models
+
+Yakbox can use `parakeet-mlx` under Apache-2.0 and the speech-to-text portion of
+`mlx-audio` under MIT. These packages and their model files are optional. Model
+installation is explicit, targets a user cache, and is separate from Yakbox
+distribution.
+
+The optional model set contains:
+
+- NVIDIA Parakeet TDT 0.6B v3 and its MLX conversion, under CC BY 4.0;
+- Qwen3-ASR 1.7B and its BF16 MLX conversion, under Apache-2.0; and
+- Qwen3-ForcedAligner 0.6B and its BF16 MLX conversion, under Apache-2.0.
+
+Yakbox's qualification-only registry additionally references the official
+8-bit MLX-community conversions of both Qwen models under Apache-2.0. These
+weights are not distributed with Yakbox and are not default runtime models.
+
+When redistributing the Parakeet weights, retain attribution to NVIDIA, the
+CC BY 4.0 license notice, and the upstream and converted model-card links. No
+NVIDIA, Qwen, MLX Community, or runtime-project endorsement is claimed.
+
+- parakeet-mlx: <https://github.com/senstella/parakeet-mlx>
+- mlx-audio: <https://github.com/Blaizzy/mlx-audio>
+- NVIDIA Parakeet model: <https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3>
+- Parakeet MLX conversion: <https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3>
+- Qwen3-ASR model: <https://huggingface.co/Qwen/Qwen3-ASR-1.7B>
+- Qwen3-ASR MLX conversion: <https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-bf16>
+- Qwen3-ASR 8-bit qualification conversion: <https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit>
+- Qwen3-ForcedAligner model: <https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B>
+- Qwen3-ForcedAligner MLX conversion: <https://huggingface.co/mlx-community/Qwen3-ForcedAligner-0.6B-bf16>
+- Qwen3-ForcedAligner 8-bit qualification conversion: <https://huggingface.co/mlx-community/Qwen3-ForcedAligner-0.6B-8bit>
+
 ## Optional phoneme forced-alignment runtime and model
 
 The optional phoneme path uses Meta's Apache-2.0

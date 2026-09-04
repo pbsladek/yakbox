@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-analysis-independent-evidence-v1.schema.json",
+  "title": "Yakbox independent speech-analysis release evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "yakbox_version",
+    "timestamp",
+    "fingerprint",
+    "kind",
+    "passed",
+    "producer",
+    "report_digest",
+    "execution_class_fingerprint",
+    "subjects",
+    "issues"
+  ],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-analysis-independent-evidence-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "kind": {
+      "enum": [
+        "apple_silicon_real_models",
+        "automated_tests",
+        "dependency_sbom_audit",
+        "installed_wheel_runtime_matrix",
+        "listening_review",
+        "package_release_preflight",
+        "repeated_call_endurance"
+      ]
+    },
+    "passed": {"type": "boolean"},
+    "producer": {"$ref": "#/$defs/identifier"},
+    "report_digest": {"$ref": "#/$defs/sha256"},
+    "execution_class_fingerprint": {"$ref": "#/$defs/sha256"},
+    "subjects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "fingerprint"],
+        "properties": {
+          "name": {"$ref": "#/$defs/identifier"},
+          "fingerprint": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/identifier"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,127}$"}
+  }
+}

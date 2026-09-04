@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-performance-qualification-v1.schema.json",
+  "title": "Yakbox speech-analysis performance qualification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "protocol_fingerprint", "observation_fingerprint", "coverage_complete", "repeat_uses_zero_inference", "localized_repair_within_fraction", "multi_repair_is_single_pass_and_scoped", "model_loads_bounded", "qwen_is_policy_scoped", "offline_operation_passed", "delivery_verification_separate", "passed", "slices"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-performance-qualification-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "protocol_fingerprint": {"$ref": "#/$defs/sha256"},
+    "observation_fingerprint": {"$ref": "#/$defs/sha256"},
+    "coverage_complete": {"type": "boolean"},
+    "repeat_uses_zero_inference": {"type": "boolean"},
+    "localized_repair_within_fraction": {"type": "boolean"},
+    "multi_repair_is_single_pass_and_scoped": {"type": "boolean"},
+    "model_loads_bounded": {"type": "boolean"},
+    "qwen_is_policy_scoped": {"type": "boolean"},
+    "offline_operation_passed": {"type": "boolean"},
+    "delivery_verification_separate": {"type": "boolean"},
+    "passed": {"type": "boolean"},
+    "slices": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/slice"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "slice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparison_group", "workflow", "cache_state", "measured_runs", "median_speech_analysis_seconds", "minimum_speech_analysis_seconds", "maximum_speech_analysis_seconds", "p95_speech_analysis_seconds", "median_audio_seconds", "peak_memory_bytes"],
+      "properties": {
+        "comparison_group": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$"},
+        "workflow": {"enum": ["delivery_verification", "full_chapter_verification", "localized_repair", "mastered_release_promotion", "multi_repair", "unchanged_build"]},
+        "cache_state": {"enum": ["cold_process_cold_cache", "fully_repeated_cache_hit", "warm_process_cold_evidence"]},
+        "measured_runs": {"type": "integer", "minimum": 1},
+        "median_speech_analysis_seconds": {"type": "number", "minimum": 0},
+        "minimum_speech_analysis_seconds": {"type": "number", "minimum": 0},
+        "maximum_speech_analysis_seconds": {"type": "number", "minimum": 0},
+        "p95_speech_analysis_seconds": {"type": ["number", "null"], "minimum": 0},
+        "median_audio_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "peak_memory_bytes": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

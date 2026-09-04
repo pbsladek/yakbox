@@ -32,6 +32,9 @@ def test_quality_gates_are_configured() -> None:
         "audio-is-backend-neutral",
         "backends-do-not-directly-couple",
         "cli-is-an-entrypoint",
+        "speech-analysis-domain-is-adapter-neutral",
+        "speech-analysis-supervisor-uses-protocol",
+        "speech-analysis-worker-is-isolated",
         "speech-is-backend-neutral",
         "subpackage-imports-are-acyclic",
     } <= contracts.keys()

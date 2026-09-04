@@ -17,6 +17,17 @@ from typing import cast
 
 type CommandRunner = Callable[[tuple[str, ...], Path], str]
 
+_WORKER_PROJECTS = {
+    "whisper": Path("src/yakbox/runtimes/whisper"),
+    "parakeet": Path("src/yakbox/runtimes/parakeet"),
+    "qwen": Path("src/yakbox/runtimes/qwen"),
+}
+_WORKER_SBOM_FILENAMES = {
+    "whisper": "yakbox-worker-whisper.cdx.json",
+    "parakeet": "yakbox-worker-parakeet.cdx.json",
+    "qwen": "yakbox-worker-qwen.cdx.json",
+}
+
 
 class ReleasePreflightError(RuntimeError):
     """A package release invariant was not satisfied."""
@@ -43,6 +54,7 @@ class ReleasePreflightReport:
     head_sha: str
     distributions: tuple[ReleaseFile, ...]
     sbom: ReleaseFile
+    worker_sboms: tuple[ReleaseFile, ...]
     report_path: Path
     checksums_path: Path
 
@@ -58,6 +70,7 @@ class ReleasePreflightReport:
                 artifact.to_dict(root=root) for artifact in self.distributions
             ],
             "sbom": self.sbom.to_dict(root=root),
+            "worker_sboms": [item.to_dict(root=root) for item in self.worker_sboms],
             "checksums_path": self.checksums_path.relative_to(root).as_posix(),
         }
 
@@ -148,6 +161,8 @@ def run_release_preflight(
     )
     for command in quality_commands:
         command_runner(command, root)
+    for project in _WORKER_PROJECTS.values():
+        command_runner(_worker_audit_command(project), root)
 
     command_runner(
         (
@@ -177,7 +192,33 @@ def run_release_preflight(
     )
 
     distributions = _distribution_files(distribution_root, version)
-    _verify_sbom(sbom_path, version)
+    _verify_sbom(sbom_path, name="yakbox", version=version)
+    worker_sbom_paths = tuple(
+        metadata_root / _WORKER_SBOM_FILENAMES[family] for family in _WORKER_PROJECTS
+    )
+    for (family, project), worker_sbom_path in zip(
+        _WORKER_PROJECTS.items(), worker_sbom_paths, strict=True
+    ):
+        command_runner(
+            (
+                "uv",
+                "export",
+                "--project",
+                str(project),
+                "--frozen",
+                "--no-dev",
+                "--format",
+                "cyclonedx1.5",
+                "--output-file",
+                str(worker_sbom_path),
+            ),
+            root,
+        )
+        _verify_sbom(
+            worker_sbom_path,
+            name=f"yakbox-analysis-{family}-runtime",
+            version="0",
+        )
     wheel = next(item.path for item in distributions if item.path.suffix == ".whl")
     source = next(
         item.path for item in distributions if item.path.name.endswith(".tar.gz")
@@ -198,6 +239,7 @@ def run_release_preflight(
         )
 
     sbom = _release_file(sbom_path)
+    worker_sboms = tuple(_release_file(path) for path in worker_sbom_paths)
     report_path = metadata_root / "release-preflight.json"
     checksums_path = metadata_root / "SHA256SUMS"
     report = ReleasePreflightReport(
@@ -206,6 +248,7 @@ def run_release_preflight(
         head_sha=head_sha,
         distributions=distributions,
         sbom=sbom,
+        worker_sboms=worker_sboms,
         report_path=report_path,
         checksums_path=checksums_path,
     )
@@ -213,7 +256,10 @@ def run_release_preflight(
         json.dumps(report.to_dict(root=root), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    _write_checksums((*distributions, sbom, _release_file(report_path)), checksums_path)
+    _write_checksums(
+        (*distributions, sbom, *worker_sboms, _release_file(report_path)),
+        checksums_path,
+    )
     return report
 
 
@@ -225,6 +271,17 @@ def _managed_directory(root: Path, value: Path) -> Path:
             f"Release output must be a child of the project root: {value}"
         )
     return resolved
+
+
+def _worker_audit_command(project: Path) -> tuple[str, ...]:
+    return (
+        "uv",
+        "audit",
+        "--project",
+        str(project),
+        "--frozen",
+        "--no-dev",
+    )
 
 
 def _clear_directory(path: Path) -> None:
@@ -250,7 +307,7 @@ def _distribution_files(path: Path, version: str) -> tuple[ReleaseFile, ...]:
     return tuple(_release_file(item) for item in (*wheels, *sources))
 
 
-def _verify_sbom(path: Path, version: str) -> None:
+def _verify_sbom(path: Path, *, name: str, version: str) -> None:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
@@ -266,7 +323,7 @@ def _verify_sbom(path: Path, version: str) -> None:
         valid = (
             document.get("bomFormat") == "CycloneDX"
             and document.get("specVersion") == "1.5"
-            and typed_component.get("name") == "yakbox"
+            and typed_component.get("name") == name
             and typed_component.get("version") == version
         )
     except (KeyError, OSError, TypeError, json.JSONDecodeError) as error:
@@ -275,7 +332,7 @@ def _verify_sbom(path: Path, version: str) -> None:
         ) from error
     if not valid:
         raise ReleasePreflightError(
-            "Generated SBOM does not describe this yakbox release"
+            "Generated SBOM does not describe its frozen release project"
         )
 
 

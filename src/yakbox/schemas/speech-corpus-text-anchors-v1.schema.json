@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-corpus-text-anchors-v1.schema.json",
+  "title": "Yakbox source-anchored corpus transcript evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "source_inventory_fingerprint", "draft_fingerprint", "text_source_inventory_fingerprint", "matching_strategy", "case_count", "anchored_count", "automatic_count", "audit_count", "unresolved_count", "audit_case_ids", "anchors", "unresolved"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-corpus-text-anchors-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "source_inventory_fingerprint": {"$ref": "#/$defs/sha256"},
+    "draft_fingerprint": {"$ref": "#/$defs/sha256"},
+    "text_source_inventory_fingerprint": {"$ref": "#/$defs/sha256"},
+    "matching_strategy": {"const": "bounded-typography-v1"},
+    "case_count": {"type": "integer", "minimum": 1},
+    "anchored_count": {"type": "integer", "minimum": 0},
+    "automatic_count": {"type": "integer", "minimum": 0},
+    "audit_count": {"type": "integer", "minimum": 0},
+    "unresolved_count": {"type": "integer", "minimum": 0},
+    "audit_case_ids": {"type": "array", "items": {"$ref": "#/$defs/case-id"}, "uniqueItems": true},
+    "anchors": {"type": "array", "items": {"$ref": "#/$defs/anchor"}},
+    "unresolved": {"type": "array", "items": {"$ref": "#/$defs/unresolved"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "case-id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,95}$"},
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_window_id", "source_passage_group", "voice", "audio_digest", "draft_case_fingerprint", "source_text_fingerprint", "source_plain_digest", "source_token_start", "source_token_end", "accepted_tokens_hash", "accepted_token_count", "evidence_tier", "matched_engines", "recognition_fingerprints", "maximum_candidate_edits", "audit_required", "fingerprint"],
+      "properties": {
+        "source_window_id": {"$ref": "#/$defs/case-id"},
+        "source_passage_group": {"$ref": "#/$defs/case-id"},
+        "voice": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+        "audio_digest": {"$ref": "#/$defs/sha256"},
+        "draft_case_fingerprint": {"$ref": "#/$defs/sha256"},
+        "source_text_fingerprint": {"$ref": "#/$defs/sha256"},
+        "source_plain_digest": {"$ref": "#/$defs/sha256"},
+        "source_token_start": {"type": "integer", "minimum": 0},
+        "source_token_end": {"type": "integer", "minimum": 1},
+        "accepted_tokens_hash": {"$ref": "#/$defs/sha256"},
+        "accepted_token_count": {"type": "integer", "minimum": 1},
+        "evidence_tier": {"enum": ["source-plus-one", "source-plus-multiple"]},
+        "matched_engines": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"enum": ["parakeet", "qwen", "whisper"]}, "uniqueItems": true},
+        "recognition_fingerprints": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/sha256"}},
+        "maximum_candidate_edits": {"type": "integer", "minimum": 0},
+        "audit_required": {"type": "boolean"},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "unresolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_window_id", "source_passage_group", "voice", "reason", "draft_case_fingerprint"],
+      "properties": {
+        "source_window_id": {"$ref": "#/$defs/case-id"},
+        "source_passage_group": {"$ref": "#/$defs/case-id"},
+        "voice": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+        "reason": {"enum": ["no-two-engine-agreement", "agreed-text-not-found", "agreed-text-not-unique", "insufficient-model-corroboration"]},
+        "draft_case_fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

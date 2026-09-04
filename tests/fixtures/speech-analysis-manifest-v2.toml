@@ -1,0 +1,95 @@
+"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v2.schema.json"
+schema_version = 2
+
+[book]
+title = "Internal speech-analysis cutover fixture"
+language = "en"
+
+[speech_analysis]
+preset = "strict"
+baseline_recognizers = ["whisper", "parakeet"]
+escalation_recognizer = "qwen"
+forced_aligner = "qwen-forced"
+always_escalate_clip_classes = ["one_word", "short_phrase", "join", "repaired_region"]
+always_escalate_repairs = true
+
+[speech_analysis.engines.whisper]
+backend = "mlx-whisper"
+model = "mlx-community/whisper-large-v3-turbo"
+revision = "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+timeout_seconds = 180.0
+decode_mode = "greedy"
+
+[speech_analysis.engines.parakeet]
+backend = "parakeet-mlx"
+model = "mlx-community/parakeet-tdt-0.6b-v3"
+revision = "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15"
+timeout_seconds = 180.0
+decode_mode = "greedy"
+chunk_seconds = 120
+overlap_seconds = 15
+
+[speech_analysis.engines.qwen]
+backend = "mlx-audio"
+model = "mlx-community/Qwen3-ASR-1.7B-bf16"
+revision = "e1f6c266914abc5a46e8756e02580f834a6cf8a7"
+timeout_seconds = 300.0
+decode_mode = "greedy"
+
+[speech_analysis.engines.qwen-forced]
+backend = "mlx-audio"
+model = "mlx-community/Qwen3-ForcedAligner-0.6B-bf16"
+revision = "53c8c0e46733eec430e4b53dd6471d0e5dee45f8"
+timeout_seconds = 300.0
+decode_mode = "argmax"
+maximum_window_seconds = 300
+
+[speech_analysis.consensus]
+ordinary_acceptance = "all_baseline_match"
+escalated_acceptance = "two_matches_no_valid_dissent"
+reject_unresolved_disagreement = true
+reject_unexpected_speech = true
+valid_dissent = "retry_then_reject"
+missing_required_engine = "error"
+one_word_required_recognizers = ["whisper", "qwen"]
+
+[speech_analysis.cache]
+version = 2
+enabled = true
+directory = ".yakbox/speech-analysis"
+legacy_evidence = "historical_only"
+
+[speech_analysis.short_utterances]
+maximum_words = 3
+candidate_count = 5
+maximum_rounds = 3
+require_independent_crop_verification = true
+
+[speech_analysis.joins]
+automatic_inspection = true
+window_seconds = 1.5
+coalesce_gap_ms = 100
+
+[speech_analysis.chapters]
+verification = true
+
+[speech_analysis.phonemes]
+enabled = false
+backend = "wav2vec2-ctc"
+model = "facebook/wav2vec2-lv-60-espeak-cv-ft"
+revision = "c43348bbaa5a77692c8e7bf3409d683474fdf2a4"
+language = "en-us"
+timeout_seconds = 180.0
+minimum_confidence = 0.2
+
+[speech_analysis.repairs]
+verification = "strict"
+approval_output = "repair_candidate"
+candidate_verification_scope = "affected"
+candidates_per_round = 5
+maximum_rounds = 3
+
+[speech_analysis.releases]
+complete_master_recognition = true
+verify_decoded_delivery = true
+codec_equivalence = "disabled_until_qualified"

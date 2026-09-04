@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-performance-v1.schema.json",
+  "title": "yakbox audiobook build performance",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "run_id", "wall_seconds", "node_seconds", "stage_seconds", "nodes", "synthesis_cache", "short_utterance_candidates", "whisper_cache", "speech_analysis"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-performance-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "run_id": {"type": "string"},
+    "wall_seconds": {"type": "number", "minimum": 0},
+    "node_seconds": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}},
+    "stage_seconds": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}},
+    "nodes": {
+      "type": "object",
+      "required": ["executed", "reused", "failed"],
+      "properties": {
+        "executed": {"type": "integer", "minimum": 0},
+        "reused": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "synthesis_cache": {
+      "type": "object",
+      "required": ["pending_chunks", "reusable_chunks", "estimated_model_loads"],
+      "properties": {
+        "pending_chunks": {"type": "integer", "minimum": 0},
+        "reusable_chunks": {"type": "integer", "minimum": 0},
+        "estimated_model_loads": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "short_utterance_candidates": {
+      "type": "object",
+      "required": ["generated", "generation_reused", "extraction_reused", "evaluation_reused"],
+      "properties": {
+        "generated": {"type": "integer", "minimum": 0},
+        "generation_reused": {"type": "integer", "minimum": 0},
+        "extraction_reused": {"type": "integer", "minimum": 0},
+        "evaluation_reused": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "whisper_cache": {
+      "type": "object",
+      "required": ["hits", "misses", "entries"],
+      "properties": {
+        "hits": {"type": "integer", "minimum": 0},
+        "misses": {"type": "integer", "minimum": 0},
+        "entries": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "speech_analysis": {
+      "type": "object",
+      "required": ["engines"],
+      "properties": {
+        "engines": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["stages"],
+            "properties": {
+              "stages": {
+                "type": "object",
+                "additionalProperties": {"$ref": "#/$defs/analysisStage"}
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "analysisStage": {
+      "type": "object",
+      "required": [
+        "cold_loads", "warm_reuses", "unloads", "evictions", "restarts",
+        "soft_cancellations", "forced_terminations",
+        "requested_audio_seconds", "analyzed_audio_seconds", "wall_seconds",
+        "real_time_factor", "batches", "batch_items", "maximum_batch_size",
+        "survivor_count", "cache_hits", "cache_misses", "cache_miss_reasons",
+        "peak_resident_memory_bytes", "peak_accelerator_memory_bytes", "stage_seconds"
+      ],
+      "properties": {
+        "cold_loads": {"type": "integer", "minimum": 0},
+        "warm_reuses": {"type": "integer", "minimum": 0},
+        "unloads": {"type": "integer", "minimum": 0},
+        "evictions": {"type": "integer", "minimum": 0},
+        "restarts": {"type": "integer", "minimum": 0},
+        "soft_cancellations": {"type": "integer", "minimum": 0},
+        "forced_terminations": {"type": "integer", "minimum": 0},
+        "requested_audio_seconds": {"type": "number", "minimum": 0},
+        "analyzed_audio_seconds": {"type": "number", "minimum": 0},
+        "wall_seconds": {"type": "number", "minimum": 0},
+        "real_time_factor": {"type": "number", "minimum": 0},
+        "batches": {"type": "integer", "minimum": 0},
+        "batch_items": {"type": "integer", "minimum": 0},
+        "maximum_batch_size": {"type": "integer", "minimum": 0},
+        "survivor_count": {"type": "integer", "minimum": 0},
+        "cache_hits": {"type": "integer", "minimum": 0},
+        "cache_misses": {"type": "integer", "minimum": 0},
+        "cache_miss_reasons": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "peak_resident_memory_bytes": {"type": "integer", "minimum": 0},
+        "peak_accelerator_memory_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "stage_seconds": {
+          "type": "object",
+          "required": ["preparing_audio", "inference", "normalizing_tokens", "consensus", "forced_alignment", "writing_evidence"],
+          "properties": {
+            "preparing_audio": {"type": "number", "minimum": 0},
+            "inference": {"type": "number", "minimum": 0},
+            "normalizing_tokens": {"type": "number", "minimum": 0},
+            "consensus": {"type": "number", "minimum": 0},
+            "forced_alignment": {"type": "number", "minimum": 0},
+            "writing_evidence": {"type": "number", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

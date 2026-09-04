@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/local-runtime-endpoint-v1.schema.json",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "protocol_version", "workspace", "pid", "port", "token", "idle_timeout_seconds"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/local-runtime-endpoint-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "protocol_version": {"const": 1},
+    "workspace": {"type": "string"},
+    "pid": {"type": "integer", "minimum": 1},
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "token": {"type": "string", "minLength": 32},
+    "idle_timeout_seconds": {"type": "number", "exclusiveMinimum": 0}
+  },
+  "additionalProperties": false
+}

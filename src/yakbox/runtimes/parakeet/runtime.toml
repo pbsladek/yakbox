@@ -1,0 +1,7 @@
+schema_version = 1
+family = "parakeet"
+engines = ["parakeet"]
+python = "3.14"
+worker_artifact = "analysis-worker.pyz"
+adapter = "parakeet-mlx"
+

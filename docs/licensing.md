@@ -63,6 +63,47 @@ user cache; builds never download them. They are not part of
 Yakbox distributions. Treat a custom model as a separate licensing review even
 when its loader code is MIT-licensed.
 
+## Optional multi-model speech analysis
+
+The speech-analysis extras add two permissively licensed runtimes:
+
+- `parakeet-mlx` is Apache-2.0 licensed; and
+- `mlx-audio` is MIT licensed. Yakbox imports only its local speech-to-text
+  implementation. It does not initialize the package's server, microphone,
+  text-to-speech, or speech-to-speech features.
+
+The reviewed model set is installed only by the explicit model lifecycle
+service. Model files stay in the user's platform cache and are not included in
+Yakbox wheels or source distributions.
+
+| Yakbox engine | Model | License |
+| --- | --- | --- |
+| `whisper` | OpenAI Whisper Large-v3-Turbo, MLX conversion | MIT |
+| `parakeet` | NVIDIA Parakeet TDT 0.6B v3, MLX conversion | CC BY 4.0 |
+| `qwen` | Qwen3-ASR 1.7B BF16, MLX conversion | Apache-2.0 |
+| `qwen-forced` | Qwen3-ForcedAligner 0.6B BF16, MLX conversion | Apache-2.0 |
+
+The separate qualification-only registry also pins the official MLX-community
+8-bit affine, group-size-64 conversions of Qwen3-ASR 1.7B and
+Qwen3-ForcedAligner 0.6B. They remain Apache-2.0, stay outside the default model
+set, and cannot be selected by a book manifest. They exist only for measured
+BF16 non-inferiority comparisons.
+
+Parakeet's CC BY 4.0 terms require attribution when its weights are shared.
+Preserve the model name, NVIDIA as the model provider, the license, and links
+to the upstream and converted model cards. Do not imply endorsement.
+
+The packaged registry at
+`src/yakbox/data/speech-model-registry-v1.toml` is the authoritative record for
+package versions and hashes, immutable model revisions, file allowlists,
+checksums, source URLs, conversion recipes, and license identifiers. The
+qualification candidates use the same controls in
+`src/yakbox/data/speech-model-candidates-v1.toml` but carry no default-model
+authority. The
+qualification record in `docs/speech-analysis-qualification.md` states which
+runtime and corpus gates have actually been run. A pinned artifact is not
+automatically a qualified artifact.
+
 ## Optional phoneme forced alignment
 
 The `phoneme` extra uses BSD-licensed PyTorch, Apache-2.0 Transformers, and

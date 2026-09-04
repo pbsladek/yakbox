@@ -48,6 +48,7 @@ from yakbox.audiobook.manifest import (
     LogicalVoice,
     ResembleOptions,
 )
+from yakbox.audiobook.performance import write_performance_report
 from yakbox.audiobook.planner import (
     BuildPlan,
     BuildStage,
@@ -102,6 +103,7 @@ from yakbox.speech import (
 )
 from yakbox.speech.alignment import SpeechAligner, WindowSpeechAligner, lexical_tokens
 from yakbox.speech.chunking import CHATTERBOX_CHUNK_CHARACTERS, chunk_text
+from yakbox.speech.fingerprints import speech_request_fingerprint
 from yakbox.speech.phonemes import PhonemeAligner
 from yakbox.speech.short_synthesis import synthesize_short_utterance
 from yakbox.speech.short_utterances import (
@@ -758,6 +760,18 @@ async def build_audiobook(
                     local_worker_timeout_seconds=_profile_worker_timeout(profile),
                     local_threads_per_process=_profile_threads(profile),
                     local_worker_log_path=run_directory / "logs" / "local-worker.log",
+                    local_runtime_workspace=(
+                        manifest.root if manifest.runtime.enabled else None
+                    ),
+                    local_runtime_idle_timeout_seconds=(
+                        manifest.runtime.idle_timeout_seconds
+                    ),
+                    local_conditioning_cache_size=(
+                        manifest.runtime.conditioning_cache_size
+                    ),
+                    local_runtime_maximum_memory_bytes=(
+                        manifest.runtime.maximum_memory_bytes
+                    ),
                 ) as service,
                 _journal_hosted_usage(service, journal, prior_events),
             ):
@@ -804,6 +818,15 @@ async def build_audiobook(
             f"run_{status.value}",
             fingerprint=plan.fingerprint,
             usage=_usage_dict(hosted_usage),
+        )
+        write_performance_report(
+            run_directory,
+            journal=journal,
+            plan=plan,
+            whisper_cache_directory=manifest.whisper_qa.cache_directory,
+            pending_synthesis_chunks=preflight.pending_synthesis_chunks,
+            reusable_synthesis_chunks=preflight.reusable_synthesis_chunks,
+            estimated_model_loads=preflight.estimated_model_loads,
         )
         result = BuildResult(
             schema_version=1,
@@ -1276,6 +1299,18 @@ async def audition_audiobook(
                         local_worker_timeout_seconds=_profile_worker_timeout(profile),
                         local_threads_per_process=_profile_threads(profile),
                         local_worker_log_path=root / "logs" / "local-worker.log",
+                        local_runtime_workspace=(
+                            manifest.root if manifest.runtime.enabled else None
+                        ),
+                        local_runtime_idle_timeout_seconds=(
+                            manifest.runtime.idle_timeout_seconds
+                        ),
+                        local_conditioning_cache_size=(
+                            manifest.runtime.conditioning_cache_size
+                        ),
+                        local_runtime_maximum_memory_bytes=(
+                            manifest.runtime.maximum_memory_bytes
+                        ),
                     )
                 )
                 services[service_key] = service
@@ -1582,6 +1617,10 @@ async def preview_audiobook(
         local_worker_timeout_seconds=_profile_worker_timeout(profile),
         local_threads_per_process=_profile_threads(profile),
         local_worker_log_path=root / "logs" / "local-worker.log",
+        local_runtime_workspace=manifest.root if manifest.runtime.enabled else None,
+        local_runtime_idle_timeout_seconds=manifest.runtime.idle_timeout_seconds,
+        local_conditioning_cache_size=manifest.runtime.conditioning_cache_size,
+        local_runtime_maximum_memory_bytes=manifest.runtime.maximum_memory_bytes,
     ) as service:
         artifact = await service.synthesize_to_file(
             SpeechSynthesisRequest(
@@ -2267,20 +2306,10 @@ async def _execute_node(
             for segment in chapter.segments
             if isinstance(segment, SpeechSegment)
         )
-        aligner = open_local_aligner(
-            manifest.short_utterances.alignment_backend,
-            model=manifest.short_utterances.alignment_model,
-            revision=manifest.short_utterances.alignment_revision,
-            timeout_seconds=manifest.short_utterances.alignment_timeout_seconds,
+        aligner = _build_aligner(
+            manifest,
             prompted_timing=False,
-            decode_consensus=manifest.short_utterances.decode_consensus,
             prompt_sensitivity=False,
-            maximum_consensus_timing_delta_ms=(
-                manifest.short_utterances.maximum_consensus_timing_delta_ms
-            ),
-            hallucination_silence_threshold=(
-                manifest.short_utterances.hallucination_silence_threshold
-            ),
         )
         report = await verify_manuscript(
             source,
@@ -2388,21 +2417,7 @@ async def _synthesize_node(
         for path in chunk_paths:
             path.unlink(missing_ok=True)
         aligner: WindowSpeechAligner | None = (
-            open_local_aligner(
-                manifest.short_utterances.alignment_backend,
-                model=manifest.short_utterances.alignment_model,
-                revision=manifest.short_utterances.alignment_revision,
-                timeout_seconds=manifest.short_utterances.alignment_timeout_seconds,
-                prompted_timing=manifest.short_utterances.prompted_timing,
-                decode_consensus=manifest.short_utterances.decode_consensus,
-                prompt_sensitivity=manifest.short_utterances.prompt_sensitivity,
-                maximum_consensus_timing_delta_ms=(
-                    manifest.short_utterances.maximum_consensus_timing_delta_ms
-                ),
-                hallucination_silence_threshold=(
-                    manifest.short_utterances.hallucination_silence_threshold
-                ),
-            )
+            _build_aligner(manifest)
             if _uses_alignment_for_synthesis(node, manifest)
             else None
         )
@@ -2440,9 +2455,6 @@ async def _synthesize_node(
             ),
         )
         try:
-            await _render_pending_chunks(
-                list(prepared.pending), service, workspace=manifest.root
-            )
             if prepared.short_pending:
                 if aligner is None:
                     raise BuildError("Short-utterance alignment was not initialized")
@@ -2452,7 +2464,17 @@ async def _synthesize_node(
                     aligner=aligner,
                     phoneme_aligner=phoneme_aligner,
                     manifest=manifest,
+                    report_path=(
+                        target.output_root
+                        / "qa"
+                        / "short-utterances"
+                        / node.chapter_id
+                        / "preflight.json"
+                    ),
                 )
+            await _render_pending_chunks(
+                list(prepared.pending), service, workspace=manifest.root
+            )
         except Exception as error:
             raise _chunk_failure(node, chunk_paths, manifest.root, error) from error
         wav_params = _normalize_synthesis_chunks(
@@ -2480,7 +2502,36 @@ async def _synthesize_node(
             node=node,
             cache_fingerprints=prepared.cache_fingerprints,
         )
+        changed_chunks = _incremental_changed_chunks(
+            manifest,
+            target=target,
+            node=node,
+            cache_fingerprints=prepared.cache_fingerprints,
+        )
         concatenate_wavs(join_parts, node.output, overwrite=True)
+        if (
+            aligner is not None
+            and manifest.whisper_qa.chapter_verification
+            and changed_chunks
+            and len(changed_chunks) < len(node.chunks)
+        ):
+            await _verify_changed_synthesis_chunks(
+                node,
+                join_parts=join_parts,
+                changed_indices=changed_chunks,
+                aligner=aligner,
+                manifest=manifest,
+                target=target,
+            )
+        if aligner is not None and manifest.short_utterances.automatic_join_inspection:
+            await _inspect_synthesis_joins(
+                node,
+                join_parts=join_parts,
+                aligner=aligner,
+                manifest=manifest,
+                target=target,
+                join_indices=affected_joins,
+            )
         write_assembly_manifest(
             create_assembly_manifest(
                 workspace=manifest.root,
@@ -2503,15 +2554,6 @@ async def _synthesize_node(
             ),
             workspace=manifest.root,
         )
-        if aligner is not None and manifest.short_utterances.automatic_join_inspection:
-            await _inspect_synthesis_joins(
-                node,
-                join_parts=join_parts,
-                aligner=aligner,
-                manifest=manifest,
-                target=target,
-                join_indices=affected_joins,
-            )
     finally:
         for path in chunk_paths:
             path.unlink(missing_ok=True)
@@ -2625,8 +2667,17 @@ def _prepare_synthesis_chunks(
             fingerprint = _short_utterance_fingerprint(
                 request,
                 recipes=recipes,
-                policy_fingerprint=manifest.short_utterances.fingerprint,
+                generation_fingerprint=(
+                    manifest.short_utterances.generation_fingerprint
+                ),
+                extraction_fingerprint=(
+                    manifest.short_utterances.extraction_fingerprint
+                ),
+                evaluation_fingerprint=(
+                    manifest.short_utterances.evaluation_fingerprint
+                ),
                 aligner_fingerprint=aligner_fingerprint,
+                phoneme_policy_fingerprint=_phoneme_policy_fingerprint(manifest),
             )
             cache_fingerprints.append(fingerprint)
             cached = _cached_chunk(workspace, fingerprint)
@@ -2848,8 +2899,59 @@ def _planned_chunk_cache_fingerprint(
     return _short_utterance_fingerprint(
         request,
         recipes=recipes,
-        policy_fingerprint=policy.fingerprint,
+        generation_fingerprint=policy.generation_fingerprint,
+        extraction_fingerprint=policy.extraction_fingerprint,
+        evaluation_fingerprint=policy.evaluation_fingerprint,
         aligner_fingerprint=aligner_fingerprint,
+        phoneme_policy_fingerprint=_phoneme_policy_fingerprint(manifest),
+    )
+
+
+def _build_aligner(
+    manifest: AudiobookManifest,
+    *,
+    prompted_timing: bool | None = None,
+    prompt_sensitivity: bool | None = None,
+) -> WindowSpeechAligner:
+    policy = manifest.short_utterances
+    prompted = policy.prompted_timing if prompted_timing is None else prompted_timing
+    sensitivity = (
+        policy.prompt_sensitivity if prompt_sensitivity is None else prompt_sensitivity
+    )
+    if manifest.runtime.enabled:
+        from yakbox.local_runtime import (  # noqa: PLC0415 - optional backend
+            LocalRuntimeOptions,
+            PersistentMlxWhisperAligner,
+        )
+
+        return PersistentMlxWhisperAligner(
+            manifest.root,
+            model=policy.alignment_model,
+            revision=policy.alignment_revision,
+            timeout_seconds=policy.alignment_timeout_seconds,
+            prompted_timing=prompted,
+            decode_consensus=policy.decode_consensus,
+            prompt_sensitivity=sensitivity,
+            maximum_consensus_timing_delta_ms=(
+                policy.maximum_consensus_timing_delta_ms
+            ),
+            hallucination_silence_threshold=policy.hallucination_silence_threshold,
+            runtime_options=LocalRuntimeOptions(
+                idle_timeout_seconds=manifest.runtime.idle_timeout_seconds,
+                conditioning_cache_size=manifest.runtime.conditioning_cache_size,
+                maximum_memory_bytes=manifest.runtime.maximum_memory_bytes,
+            ),
+        )
+    return open_local_aligner(
+        policy.alignment_backend,
+        model=policy.alignment_model,
+        revision=policy.alignment_revision,
+        timeout_seconds=policy.alignment_timeout_seconds,
+        prompted_timing=prompted,
+        decode_consensus=policy.decode_consensus,
+        prompt_sensitivity=sensitivity,
+        maximum_consensus_timing_delta_ms=policy.maximum_consensus_timing_delta_ms,
+        hallucination_silence_threshold=policy.hallucination_silence_threshold,
     )
 
 
@@ -2940,29 +3042,69 @@ async def _render_short_utterances(
     aligner: SpeechAligner,
     phoneme_aligner: PhonemeAligner | None,
     manifest: AudiobookManifest,
+    report_path: Path,
 ) -> None:
+    results: list[dict[str, object]] = []
     for item in pending:
-        await synthesize_short_utterance(
-            service=service,
-            aligner=aligner,
-            request=item.request,
-            destination=item.destination,
-            recipes=item.recipes,
-            policy=manifest.short_utterances,
-            language=manifest.book.language,
-            qa_directory=item.qa_directory,
-            phoneme_aligner=phoneme_aligner,
-            phoneme_language=manifest.whisper_qa.phoneme_language,
-            minimum_phoneme_confidence=(manifest.whisper_qa.minimum_phoneme_confidence),
-        )
-        if _is_readable_wav(item.destination):
-            _store_cached_chunk(
-                manifest.root,
-                item.fingerprint,
-                item.destination,
+        error: str | None = None
+        try:
+            await synthesize_short_utterance(
+                service=service,
+                aligner=aligner,
                 request=item.request,
-                synthesis_kind="context_extract",
+                destination=item.destination,
+                recipes=item.recipes,
+                policy=manifest.short_utterances,
+                language=manifest.book.language,
+                qa_directory=item.qa_directory,
+                phoneme_aligner=phoneme_aligner,
+                phoneme_language=manifest.whisper_qa.phoneme_language,
+                minimum_phoneme_confidence=(
+                    manifest.whisper_qa.minimum_phoneme_confidence
+                ),
+                candidate_cache_directory=(
+                    manifest.root / ".yakbox" / "cache" / "short-utterance-candidates"
+                ),
             )
+            if _is_readable_wav(item.destination):
+                _store_cached_chunk(
+                    manifest.root,
+                    item.fingerprint,
+                    item.destination,
+                    request=item.request,
+                    synthesis_kind="context_extract",
+                )
+        except BuildError as caught:
+            error = _safe_error(caught)
+        results.append(
+            {
+                "chunk_index": item.chunk_index,
+                "selection_fingerprint": item.fingerprint,
+                "accepted": error is None,
+                "error": error,
+                "qa_report": (
+                    str(item.qa_directory / "report.json")
+                    if item.qa_directory is not None
+                    else None
+                ),
+            }
+        )
+    atomic_write_json(
+        report_path,
+        {
+            **runtime_metadata("short-utterance-preflight"),
+            "accepted": all(item["accepted"] for item in results),
+            "checked_chunks": len(results),
+            "failed_chunks": sum(not bool(item["accepted"]) for item in results),
+            "results": results,
+        },
+    )
+    failures = tuple(item for item in results if not item["accepted"])
+    if failures:
+        raise BuildError(
+            f"Short-utterance preflight rejected {len(failures)} chunk(s); "
+            f"review {report_path}"
+        )
 
 
 def _uses_context_extraction(node: PlanNode, manifest: AudiobookManifest) -> bool:
@@ -2973,10 +3115,80 @@ def _uses_context_extraction(node: PlanNode, manifest: AudiobookManifest) -> boo
 
 
 def _uses_alignment_for_synthesis(node: PlanNode, manifest: AudiobookManifest) -> bool:
-    return _uses_context_extraction(node, manifest) or (
-        manifest.short_utterances.automatic_join_inspection
-        and any(value is not None for value in _node_repair_fingerprints(node))
+    return (
+        _uses_context_extraction(node, manifest)
+        or manifest.whisper_qa.chapter_verification
+        or (
+            manifest.short_utterances.automatic_join_inspection
+            and any(value is not None for value in _node_repair_fingerprints(node))
+        )
     )
+
+
+async def _verify_changed_synthesis_chunks(
+    node: PlanNode,
+    *,
+    join_parts: tuple[WavJoinPart, ...],
+    changed_indices: frozenset[int],
+    aligner: WindowSpeechAligner,
+    manifest: AudiobookManifest,
+    target: BuildTarget,
+) -> None:
+    """Verify only changed chunk bytes before mastering and chapter-wide QA."""
+    results: list[dict[str, object]] = []
+    for index in sorted(changed_indices):
+        if _PAUSE.fullmatch(node.chunks[index]) is not None:
+            continue
+        verification = await verify_manuscript(
+            join_parts[index].path,
+            node.chunk_sources[index].path,
+            node.chunks[index],
+            language=manifest.book.language,
+            model=manifest.short_utterances.alignment_model,
+            revision=manifest.short_utterances.alignment_revision,
+            aligner=aligner,
+            cache_root=(
+                manifest.whisper_qa.cache_directory
+                if manifest.whisper_qa.cache_enabled
+                else None
+            ),
+            token_aliases=manifest.short_utterances.alignment_alias_map,
+        )
+        results.append(
+            {
+                "chunk_id": _node_chunk_ids(node)[index],
+                "chunk_index": index + 1,
+                "audio_sha256": sha256_file(join_parts[index].path),
+                "text_sha256": hashlib.sha256(node.chunks[index].encode()).hexdigest(),
+                "accepted": verification.accepted,
+                "reason_codes": list(verification.reason_codes),
+                "diagnostic_reason_codes": list(verification.diagnostic_reason_codes),
+                "token_accuracy": verification.token_accuracy,
+                "alignment_cache": {
+                    "hits": verification.alignment_cache_hits,
+                    "misses": verification.alignment_cache_misses,
+                },
+            }
+        )
+    destination = (
+        target.output_root / "qa" / "changed-regions" / f"{node.chapter_id}.chunks.json"
+    )
+    atomic_write_json(
+        destination,
+        {
+            **runtime_metadata("whisper-changed-region-verification"),
+            "chapter_id": node.chapter_id,
+            "accepted": all(item["accepted"] for item in results),
+            "changed_chunk_count": len(results),
+            "results": results,
+        },
+    )
+    failures = sum(not bool(item["accepted"]) for item in results)
+    if failures:
+        raise BuildError(
+            f"Changed-region verification rejected {failures} chunk(s) in "
+            f"{node.chapter_id}; review {destination}"
+        )
 
 
 async def _inspect_synthesis_joins(
@@ -3165,14 +3377,20 @@ def _short_utterance_fingerprint(
     request: SpeechSynthesisRequest,
     *,
     recipes: tuple[CarrierRecipe, ...],
-    policy_fingerprint: str,
+    generation_fingerprint: str,
+    extraction_fingerprint: str,
+    evaluation_fingerprint: str,
     aligner_fingerprint: str,
+    phoneme_policy_fingerprint: str = "disabled",
 ) -> str:
     payload = {
-        "version": 1,
+        "version": 2,
         "request": _speech_request_fingerprint(request),
-        "policy": policy_fingerprint,
+        "generation": generation_fingerprint,
+        "extraction": extraction_fingerprint,
+        "evaluation": evaluation_fingerprint,
         "aligner": aligner_fingerprint,
+        "phoneme_policy": phoneme_policy_fingerprint,
         "recipes": [
             {
                 "index": recipe.candidate_index,
@@ -3187,6 +3405,23 @@ def _short_utterance_fingerprint(
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _phoneme_policy_fingerprint(manifest: AudiobookManifest) -> str:
+    policy = manifest.whisper_qa
+    if not policy.phoneme_alignment:
+        return "disabled"
+    payload = {
+        "version": 1,
+        "backend": policy.phoneme_backend,
+        "model": policy.phoneme_model,
+        "revision": policy.phoneme_revision,
+        "language": policy.phoneme_language,
+        "minimum_confidence": policy.minimum_phoneme_confidence,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _short_utterance_qa_directory(
@@ -3481,34 +3716,7 @@ def _node_boundaries(node: PlanNode) -> tuple[str, ...]:
 
 
 def _speech_request_fingerprint(request: SpeechSynthesisRequest) -> str:
-    chatterbox = request.chatterbox
-    payload = {
-        "version": 1,
-        "text": request.text,
-        "voice": request.voice,
-        "backend": request.backend,
-        "backend_runtime": backend_runtime_fingerprint(request.backend),
-        "output_format": request.output_format.value,
-        "sample_rate": request.sample_rate,
-        "use_hd": request.use_hd,
-        "precision": request.precision,
-        "apply_custom_pronunciations": request.apply_custom_pronunciations,
-        "project": request.project,
-        "reference_audio_sha256": (
-            sha256_file(request.reference_audio) if request.reference_audio else None
-        ),
-        "chatterbox": (
-            {
-                "cfg_weight": chatterbox.cfg_weight,
-                "exaggeration": chatterbox.exaggeration,
-                "seed": chatterbox.seed,
-            }
-            if chatterbox is not None
-            else None
-        ),
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return speech_request_fingerprint(request)
 
 
 def _cached_chunk(workspace: Path, fingerprint: str) -> Path | None:
@@ -3668,6 +3876,40 @@ def _incremental_affected_joins(
             cache_fingerprints[index + 1],
         )
         not in old_parts
+    )
+
+
+def _incremental_changed_chunks(
+    manifest: AudiobookManifest,
+    *,
+    target: BuildTarget,
+    node: PlanNode,
+    cache_fingerprints: tuple[str | None, ...],
+) -> frozenset[int]:
+    """Return chunk indices whose identity or synthesized bytes changed."""
+    path = assembly_manifest_path(
+        manifest.root,
+        target=target.name,
+        chapter_id=node.chapter_id,
+    )
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except OSError, json.JSONDecodeError:
+        return frozenset(range(len(node.chunks)))
+    values = raw.get("chunks") if isinstance(raw, dict) else None
+    if not isinstance(values, list):
+        return frozenset(range(len(node.chunks)))
+    prior = {
+        item.get("id"): item.get("cache_fingerprint")
+        for item in values
+        if isinstance(item, dict)
+    }
+    return frozenset(
+        index
+        for index, (chunk_id, fingerprint) in enumerate(
+            zip(_node_chunk_ids(node), cache_fingerprints, strict=True)
+        )
+        if prior.get(chunk_id) != fingerprint
     )
 
 
@@ -4319,6 +4561,11 @@ def _result_dict(result: BuildResult) -> dict[str, object]:
         "hosted_usage": _usage_dict(result.hosted_usage),
         "preflight": result.preflight.to_dict(),
         "resumed": result.resumed,
+        "performance_report": (
+            str(result.run_directory / "performance.json")
+            if (result.run_directory / "performance.json").is_file()
+            else None
+        ),
     }
 
 

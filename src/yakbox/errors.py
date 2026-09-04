@@ -41,6 +41,24 @@ class ArtifactError(YakboxError):
     code = "artifact_error"
 
 
+class ModelIntegrityError(YakboxError):
+    """A registered local model does not match its immutable record."""
+
+    code = "model_integrity_error"
+
+
+class WorkerProtocolError(YakboxError):
+    """An analysis worker request or response violates its protocol."""
+
+    code = "worker_protocol_error"
+
+
+class SpeechAnalysisError(YakboxError):
+    """Speech evidence cannot satisfy the configured analysis policy."""
+
+    code = "speech_analysis_error"
+
+
 def stable_error_code(error: BaseException) -> str:
     """Return a compatibility-safe error code for an expected failure."""
     if isinstance(error, YakboxError):

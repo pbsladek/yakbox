@@ -27,6 +27,8 @@ class CachedWhisperAligner:
     def __init__(self, delegate: WindowSpeechAligner, root: Path) -> None:
         self.delegate = delegate
         self.root = root.resolve()
+        self.hits = 0
+        self.misses = 0
 
     @property
     def fingerprint(self) -> str:
@@ -87,7 +89,9 @@ class CachedWhisperAligner:
         path = safe_child(self.root, self.root / key[:2] / f"{key}.json")
         cached = _read_cache(path, expected_key=key)
         if cached is not None:
+            self.hits += 1
             return cached
+        self.misses += 1
         if start_seconds is None or end_seconds is None:
             result = await self.delegate.align(
                 audio,

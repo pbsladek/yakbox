@@ -624,8 +624,15 @@ keep_candidates = false
 [repairs]
 mode = "context"
 takes = 4
+minimum_passing_takes = 2
 whisper_qa = true
 rebuild_on_approval = true
+
+[runtime]
+enabled = true
+idle_timeout_seconds = 900
+conditioning_cache_size = 8
+# maximum_memory_bytes = 51539607552
 
 [targets.default]
 profile = "andy-minter"

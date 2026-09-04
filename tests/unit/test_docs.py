@@ -104,6 +104,9 @@ def test_actions_are_commit_pinned_and_release_attests_artifacts() -> None:
     assert release.count("actions/attest@") == 2
     assert "yakbox-release-preflight" in release
     assert "sbom-path: release-metadata/yakbox.cdx.json" in release
+    assert "yakbox-worker-whisper.cdx.json" in (
+        root / "src" / "yakbox" / "release_preflight.py"
+    ).read_text(encoding="utf-8")
     assert "attestations: write" in release
     assert "id-token: write" in release
 
@@ -132,6 +135,7 @@ def test_local_extra_and_distributed_security_overrides_stay_aligned() -> None:
     root = Path(__file__).parents[2]
     project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     expected = {
+        "cryptography",
         "diffusers",
         "gradio",
         "numpy",
@@ -162,7 +166,7 @@ def test_local_extra_and_distributed_security_overrides_stay_aligned() -> None:
         if line and not line.startswith("#")
     }
 
-    assert expected <= local
+    assert expected - {"cryptography"} <= local
     assert configured == expected
     assert distributed == expected
 

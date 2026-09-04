@@ -278,6 +278,33 @@ def test_explicit_sentence_boundary_allows_bounded_rhetorical_pause() -> None:
     assert _speech_island_gap_ms("You first in?", policy) == 300
 
 
+def test_punctuation_does_not_excuse_an_unrelated_internal_pause() -> None:
+    result = AlignmentResult(
+        tokens=(
+            AlignmentToken("wait", 0.0, 0.2, 0.9),
+            AlignmentToken("now", 0.3, 0.5, 0.9),
+            AlignmentToken("keep", 1.2, 1.4, 0.9),
+            AlignmentToken("moving", 1.5, 1.7, 0.9),
+        ),
+        speech_regions=(SpeechRegion(0.0, 1.7),),
+        backend="fake",
+        model="fake",
+        fingerprint="f" * 64,
+    )
+
+    decision = validate_extracted_alignment(
+        result,
+        target_text="Wait, now keep moving.",
+        minimum_confidence=0.5,
+        maximum_extra_speech_ms=60,
+        minimum_duration_seconds=0.1,
+        maximum_duration_seconds=2.0,
+        maximum_internal_token_gap_ms=350,
+    )
+
+    assert decision.reason_codes == ("excessive_internal_pause",)
+
+
 def test_carrier_matrix_is_bounded_deterministic_and_adapts_commas() -> None:
     policy = ShortUtterancePolicy(
         strategy=ShortUtteranceStrategy.CONTEXT_EXTRACT,
@@ -705,6 +732,26 @@ class _LongFakeSpeechService(FakeSpeechService):
         )
 
 
+class _CountingLongFakeSpeechService(_LongFakeSpeechService):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    @override
+    async def synthesize_to_file(
+        self,
+        request: SpeechSynthesisRequest,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+    ) -> SpeechArtifact:
+        self.calls += 1
+        return await super().synthesize_to_file(
+            request,
+            destination,
+            overwrite=overwrite,
+        )
+
+
 class _DetachedSpeechService(FakeSpeechService):
     @override
     async def synthesize_to_file(
@@ -916,6 +963,196 @@ async def test_candidate_pipeline_prefers_verified_context_and_writes_safe_repor
     assert "Wren asked" not in report
     assert '"target_word_count": 2' in report
     assert aligner.calls == 5
+
+
+@pytest.mark.asyncio
+async def test_candidate_generation_cache_survives_evaluation_policy_change(
+    tmp_path: Path,
+) -> None:
+    base = ShortUtterancePolicy(
+        strategy=ShortUtteranceStrategy.CONTEXT_EXTRACT,
+        candidate_count=2,
+        minimum_pause_ms=100,
+        minimum_edge_silence_ms=0,
+        require_review_for_one_word=False,
+        keep_candidates=True,
+    )
+    request = SpeechSynthesisRequest(text="Wren asked.", voice="nick")
+    recipes = carrier_recipes(request.text, base, seed_material="chapter:cache")
+    service = _CountingLongFakeSpeechService()
+    cache = tmp_path / "candidate-cache"
+
+    first = await synthesize_short_utterance(
+        service=service,
+        aligner=_ExpectedTextAligner(),
+        request=request,
+        destination=tmp_path / "first.wav",
+        recipes=recipes,
+        policy=base,
+        language="en",
+        qa_directory=tmp_path / "qa-first",
+        candidate_cache_directory=cache,
+    )
+    calls = service.calls
+    changed = replace(base, minimum_alignment_confidence=0.45)
+    second = await synthesize_short_utterance(
+        service=service,
+        aligner=_ExpectedTextAligner(),
+        request=request,
+        destination=tmp_path / "second.wav",
+        recipes=recipes,
+        policy=changed,
+        language="en",
+        qa_directory=tmp_path / "qa-second",
+        candidate_cache_directory=cache,
+    )
+
+    assert calls > 0
+    assert service.calls == calls
+    assert all(item.generation_cache_hit for item in second.candidates)
+    assert first.selected.recipe == second.selected.recipe
+
+
+@pytest.mark.asyncio
+async def test_candidate_evaluation_cache_skips_alignment_on_identical_rerun(
+    tmp_path: Path,
+) -> None:
+    policy = ShortUtterancePolicy(
+        strategy=ShortUtteranceStrategy.CONTEXT_EXTRACT,
+        candidate_count=2,
+        minimum_pause_ms=100,
+        minimum_edge_silence_ms=0,
+        require_review_for_one_word=False,
+        keep_candidates=True,
+    )
+    request = SpeechSynthesisRequest(text="Wren asked.", voice="nick")
+    recipes = carrier_recipes(request.text, policy, seed_material="chapter:stages")
+    cache = tmp_path / "candidate-cache"
+
+    first_aligner = _ExpectedTextAligner()
+    await synthesize_short_utterance(
+        service=_LongFakeSpeechService(),
+        aligner=first_aligner,
+        request=request,
+        destination=tmp_path / "first.wav",
+        recipes=recipes,
+        policy=policy,
+        language="en",
+        qa_directory=tmp_path / "qa-first",
+        candidate_cache_directory=cache,
+    )
+    second_aligner = _ExpectedTextAligner()
+    result = await synthesize_short_utterance(
+        service=_LongFakeSpeechService(),
+        aligner=second_aligner,
+        request=request,
+        destination=tmp_path / "second.wav",
+        recipes=recipes,
+        policy=policy,
+        language="en",
+        qa_directory=tmp_path / "qa-second",
+        candidate_cache_directory=cache,
+    )
+
+    assert second_aligner.calls == 0
+    assert all(item.generation_cache_hit for item in result.candidates)
+    assert all(item.evaluation_cache_hit for item in result.candidates)
+
+
+@pytest.mark.asyncio
+async def test_candidate_extraction_cache_survives_evaluation_policy_change(
+    tmp_path: Path,
+) -> None:
+    base = ShortUtterancePolicy(
+        strategy=ShortUtteranceStrategy.CONTEXT_EXTRACT,
+        candidate_count=2,
+        minimum_pause_ms=100,
+        minimum_edge_silence_ms=0,
+        require_review_for_one_word=False,
+        keep_candidates=True,
+    )
+    request = SpeechSynthesisRequest(text="Wren asked.", voice="nick")
+    recipes = carrier_recipes(request.text, base, seed_material="chapter:extract")
+    cache = tmp_path / "candidate-cache"
+    await synthesize_short_utterance(
+        service=_LongFakeSpeechService(),
+        aligner=_ExpectedTextAligner(),
+        request=request,
+        destination=tmp_path / "first.wav",
+        recipes=recipes,
+        policy=base,
+        language="en",
+        qa_directory=tmp_path / "qa-first",
+        candidate_cache_directory=cache,
+    )
+
+    changed = replace(base, minimum_extracted_confidence=0.1)
+    result = await synthesize_short_utterance(
+        service=_LongFakeSpeechService(),
+        aligner=_ExpectedTextAligner(),
+        request=request,
+        destination=tmp_path / "second.wav",
+        recipes=recipes,
+        policy=changed,
+        language="en",
+        qa_directory=tmp_path / "qa-second",
+        candidate_cache_directory=cache,
+    )
+
+    context_candidates = tuple(
+        item
+        for item in result.candidates
+        if item.recipe.position is not CarrierPosition.DIRECT
+    )
+    assert context_candidates
+    assert all(item.extraction_cache_hit for item in context_candidates)
+
+
+@pytest.mark.asyncio
+async def test_candidate_evaluation_cache_survives_ranking_policy_change(
+    tmp_path: Path,
+) -> None:
+    base = ShortUtterancePolicy(
+        strategy=ShortUtteranceStrategy.CONTEXT_EXTRACT,
+        candidate_count=2,
+        minimum_pause_ms=100,
+        minimum_edge_silence_ms=0,
+        require_review_for_one_word=False,
+        keep_candidates=True,
+    )
+    request = SpeechSynthesisRequest(text="Wren asked.", voice="nick")
+    recipes = carrier_recipes(request.text, base, seed_material="chapter:select")
+    cache = tmp_path / "candidate-cache"
+    await synthesize_short_utterance(
+        service=_LongFakeSpeechService(),
+        aligner=_ExpectedTextAligner(),
+        request=request,
+        destination=tmp_path / "first.wav",
+        recipes=recipes,
+        policy=base,
+        language="en",
+        qa_directory=tmp_path / "qa-first",
+        candidate_cache_directory=cache,
+    )
+
+    changed = replace(base, candidate_confidence_tolerance=0.1)
+    aligner = _ExpectedTextAligner()
+    result = await synthesize_short_utterance(
+        service=_LongFakeSpeechService(),
+        aligner=aligner,
+        request=request,
+        destination=tmp_path / "second.wav",
+        recipes=recipes,
+        policy=changed,
+        language="en",
+        qa_directory=tmp_path / "qa-second",
+        candidate_cache_directory=cache,
+    )
+
+    assert base.evaluation_fingerprint == changed.evaluation_fingerprint
+    assert base.selection_fingerprint != changed.selection_fingerprint
+    assert aligner.calls == 0
+    assert all(item.evaluation_cache_hit for item in result.candidates)
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/pronunciations-v2.schema.json",
+  "title": "yakbox pronunciation policy version 2",
+  "type": "object",
+  "required": ["$schema", "schema_version", "terms"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/pronunciations-v2.schema.json"},
+    "schema_version": {"const": 2},
+    "terms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "written",
+          "synthesis_hint",
+          "expected_lexical",
+          "phonemes",
+          "match",
+          "case",
+          "priority",
+          "status",
+          "enabled"
+        ],
+        "properties": {
+          "written": {"type": "string", "minLength": 1},
+          "synthesis_hint": {"type": "string", "minLength": 1},
+          "expected_lexical": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "phonemes": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1}
+          },
+          "match": {"enum": ["whole_word", "substring"]},
+          "case": {"enum": ["sensitive", "insensitive"]},
+          "priority": {"type": "integer"},
+          "language": {"type": "string", "minLength": 1},
+          "status": {"enum": ["approved", "draft", "rejected"]},
+          "enabled": {"type": "boolean"},
+          "notes": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

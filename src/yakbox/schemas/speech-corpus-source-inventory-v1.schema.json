@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-corpus-source-inventory-v1.schema.json",
+  "title": "Yakbox speech-analysis corpus source inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "registry_digest", "window_count_per_passage", "source_cluster_count", "window_count", "windows"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-corpus-source-inventory-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "registry_digest": {"$ref": "#/$defs/sha256"},
+    "window_count_per_passage": {"const": 1},
+    "source_cluster_count": {"type": "integer", "minimum": 1},
+    "window_count": {"type": "integer", "minimum": 1},
+    "windows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_window_id", "source_passage_group", "voice", "reader", "relative_audio_path", "audio_digest", "sample_rate", "frame_count", "canonical_source_digest", "start_frame", "end_frame", "archive_start_milliseconds", "archive_end_milliseconds", "source_url", "source_digest", "rights_id", "rights_url", "fingerprint"],
+        "properties": {
+          "source_window_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,95}$"},
+          "source_passage_group": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,95}$"},
+          "voice": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+          "reader": {"type": "string", "minLength": 1},
+          "relative_audio_path": {"type": "string", "minLength": 1},
+          "audio_digest": {"$ref": "#/$defs/sha256"},
+          "sample_rate": {"const": 16000},
+          "frame_count": {"type": "integer", "minimum": 1},
+          "canonical_source_digest": {"$ref": "#/$defs/sha256"},
+          "start_frame": {"type": "integer", "minimum": 0},
+          "end_frame": {"type": "integer", "minimum": 1},
+          "archive_start_milliseconds": {"type": "integer", "minimum": 0},
+          "archive_end_milliseconds": {"type": "integer", "minimum": 1},
+          "source_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+          "source_digest": {"$ref": "#/$defs/sha256"},
+          "rights_id": {"const": "LicenseRef-LibriVox-Public-Domain-US"},
+          "rights_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+          "fingerprint": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    }
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

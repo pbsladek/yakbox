@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-repair-batch-v1.schema.json",
+  "title": "yakbox transactional localized repair batch",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "batch_id", "entries"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-repair-batch-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "batch_id": {"type": "string"},
+    "report_path": {"type": "string"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["repair_id", "take", "target", "chapter_id", "chunks"],
+        "properties": {
+          "repair_id": {"type": "string"},
+          "take": {"type": "integer", "minimum": 1},
+          "target": {"type": "string"},
+          "chapter_id": {"type": "string"},
+          "chunks": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id", "text_sha256", "profile", "candidate_path", "candidate_sha256", "source"],
+              "properties": {
+                "id": {"type": "string", "pattern": "^[0-9a-f]{24}$"},
+                "text_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "profile": {"type": "string"},
+                "candidate_path": {"type": "string"},
+                "candidate_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "source": {
+                  "type": "object",
+                  "required": ["path", "start_line", "end_line"],
+                  "properties": {
+                    "path": {"type": "string"},
+                    "start_line": {"type": "integer", "minimum": 1},
+                    "end_line": {"type": "integer", "minimum": 1}
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -108,6 +108,7 @@ def test_manifest_parses_localized_repair_defaults(tmp_path: Path) -> None:
             "\n[repairs]\n"
             'mode = "paragraph"\n'
             "takes = 6\n"
+            "minimum_passing_takes = 3\n"
             "whisper_qa = false\n"
             "rebuild_on_approval = false\n",
         )
@@ -115,8 +116,27 @@ def test_manifest_parses_localized_repair_defaults(tmp_path: Path) -> None:
 
     assert manifest.repairs.mode == "paragraph"
     assert manifest.repairs.takes == 6
+    assert manifest.repairs.minimum_passing_takes == 3
     assert not manifest.repairs.whisper_qa
     assert not manifest.repairs.rebuild_on_approval
+
+
+def test_manifest_parses_persistent_runtime_policy(tmp_path: Path) -> None:
+    manifest = load_manifest(
+        _write_manifest(
+            tmp_path,
+            "\n[runtime]\n"
+            "enabled = true\n"
+            "idle_timeout_seconds = 120\n"
+            "conditioning_cache_size = 4\n"
+            "maximum_memory_bytes = 8589934592\n",
+        )
+    )
+
+    assert manifest.runtime.enabled
+    assert manifest.runtime.idle_timeout_seconds == 120
+    assert manifest.runtime.conditioning_cache_size == 4
+    assert manifest.runtime.maximum_memory_bytes == 8_589_934_592
 
 
 def test_local_chatterbox_defaults_to_cpu(tmp_path: Path) -> None:

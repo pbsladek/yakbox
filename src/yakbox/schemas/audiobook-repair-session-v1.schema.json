@@ -10,6 +10,18 @@
     "yakbox_version": {"type": "string"},
     "timestamp": {"type": "string", "format": "date-time"},
     "repair_id": {"type": "string"},
+    "generation": {
+      "type": "object",
+      "required": ["maximum_takes", "minimum_passing_takes", "generated_takes", "passing_takes", "stopped_early"],
+      "properties": {
+        "maximum_takes": {"type": "integer", "minimum": 1, "maximum": 20},
+        "minimum_passing_takes": {"type": "integer", "minimum": 1, "maximum": 20},
+        "generated_takes": {"type": "integer", "minimum": 1, "maximum": 20},
+        "passing_takes": {"type": "integer", "minimum": 0, "maximum": 20},
+        "stopped_early": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "report_path": {"type": "string"},
     "plan": {
       "type": "object",
@@ -18,7 +30,7 @@
         "schema_version": {"const": 1},
         "target": {"type": "string"},
         "chapter_id": {"type": "string"},
-        "mode": {"enum": ["target-only", "context", "neighbors", "paragraph", "scene"]},
+        "mode": {"enum": ["target-only", "context", "sentence", "clause", "neighbors", "paragraph", "scene"]},
         "synthesis_chunks": {"type": "integer", "minimum": 1},
         "affected_join_indices": {"type": "array", "items": {"type": "integer", "minimum": 0}},
         "chunks": {
@@ -32,6 +44,17 @@
               "index": {"type": "integer", "minimum": 0},
               "text_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
               "characters": {"type": "integer", "minimum": 1},
+              "replacement": {
+                "type": "object",
+                "required": ["text_sha256", "characters", "start", "end"],
+                "properties": {
+                  "text_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "characters": {"type": "integer", "minimum": 1},
+                  "start": {"type": "integer", "minimum": 0},
+                  "end": {"type": "integer", "minimum": 1}
+                },
+                "additionalProperties": false
+              },
               "speaker": {"type": ["string", "null"]},
               "profile": {"type": ["string", "null"]},
               "boundary": {"enum": ["paragraph", "sentence", "clause", "word", "hard", "end", "explicit_pause"]},
@@ -53,6 +76,7 @@
           "number": {"type": "integer", "minimum": 1},
           "accepted": {"type": "boolean"},
           "reason_codes": {"type": "array", "items": {"type": "string"}},
+          "cache": {"type": "array", "items": {"type": "object"}},
           "audition_path": {"type": "string"},
           "chunks": {
             "type": "array",

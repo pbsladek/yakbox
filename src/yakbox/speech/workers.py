@@ -14,6 +14,7 @@ from typing import TextIO, cast
 
 from yakbox._files import atomic_write_json
 from yakbox.errors import BackendUnavailableError, BuildError, ValidationError
+from yakbox.speech.accelerator import AcceleratorLease, accelerator_operation
 from yakbox.speech.capabilities import BackendCapabilities
 from yakbox.speech.models import (
     AudioFormat,
@@ -95,6 +96,7 @@ class IsolatedLocalSpeechService:
         threads_per_process: int = 1,
         heartbeat_seconds: float = 15,
         log_path: Path | None = None,
+        accelerator_lease: AcceleratorLease | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValidationError("Local worker timeout must be positive")
@@ -107,6 +109,7 @@ class IsolatedLocalSpeechService:
         self.threads_per_process = threads_per_process
         self.heartbeat_seconds = heartbeat_seconds
         self.log_path = log_path
+        self.accelerator_lease = accelerator_lease
         self._process: asyncio.subprocess.Process | None = None
         self._request_lock = asyncio.Lock()
         self._stderr_task: asyncio.Task[None] | None = None
@@ -163,42 +166,53 @@ class IsolatedLocalSpeechService:
         self,
         worker_request: LocalWorkerRequest,
     ) -> tuple[dict[str, object], ...]:
-        async with self._request_lock:
-            process = await self._ensure_worker()
-            if process.stdin is None or process.stdout is None:
-                await self._discard_worker(process)
-                raise BuildError("Local Chatterbox worker pipes are unavailable")
-            payload = {
-                "protocol_version": WORKER_PROTOCOL_VERSION,
-                **worker_request.to_dict(),
-            }
-            try:
-                process.stdin.write(
-                    json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
-                )
-                await process.stdin.drain()
-                results = await self._read_batch_responses(
-                    process, len(worker_request.items)
-                )
-            except asyncio.CancelledError:
-                self._log(f"worker_cancelled pid={process.pid}")
-                await self._discard_worker(process)
-                _cleanup_worker_parts(worker_request.items)
-                raise
-            except BuildError:
-                _cleanup_worker_parts(worker_request.items)
-                raise
-            except (BrokenPipeError, ConnectionError, OSError, ValueError) as error:
-                await self._discard_worker(process)
-                _cleanup_worker_parts(worker_request.items)
-                detail = self._stderr_tail.decode(errors="replace").strip()[-2048:]
-                raise BuildError(
-                    f"Local Chatterbox worker connection failed: {detail or error}"
-                ) from error
-            self._log(
-                f"worker_request_completed pid={process.pid} items={len(results)}"
+        async with (
+            self._request_lock,
+            accelerator_operation(
+                self.accelerator_lease,
+                owner="tts:chatterbox",
+                enabled=self.device.casefold() != "cpu",
+            ),
+        ):
+            return await self._run_worker_with_lease(worker_request)
+
+    async def _run_worker_with_lease(
+        self,
+        worker_request: LocalWorkerRequest,
+    ) -> tuple[dict[str, object], ...]:
+        process = await self._ensure_worker()
+        if process.stdin is None or process.stdout is None:
+            await self._discard_worker(process)
+            raise BuildError("Local Chatterbox worker pipes are unavailable")
+        payload = {
+            "protocol_version": WORKER_PROTOCOL_VERSION,
+            **worker_request.to_dict(),
+        }
+        try:
+            process.stdin.write(
+                json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
             )
-            return results
+            await process.stdin.drain()
+            results = await self._read_batch_responses(
+                process, len(worker_request.items)
+            )
+        except asyncio.CancelledError:
+            self._log(f"worker_cancelled pid={process.pid}")
+            await self._discard_worker(process)
+            _cleanup_worker_parts(worker_request.items)
+            raise
+        except BuildError:
+            _cleanup_worker_parts(worker_request.items)
+            raise
+        except (BrokenPipeError, ConnectionError, OSError, ValueError) as error:
+            await self._discard_worker(process)
+            _cleanup_worker_parts(worker_request.items)
+            detail = self._stderr_tail.decode(errors="replace").strip()[-2048:]
+            raise BuildError(
+                f"Local Chatterbox worker connection failed: {detail or error}"
+            ) from error
+        self._log(f"worker_request_completed pid={process.pid} items={len(results)}")
+        return results
 
     async def _read_batch_responses(
         self, process: asyncio.subprocess.Process, expected: int

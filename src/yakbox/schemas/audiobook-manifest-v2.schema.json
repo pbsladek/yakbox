@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-manifest-v2.schema.json",
+  "$comment": "Internal Phase 1 draft. Version 1 remains the canonical public manifest until Phase 9.",
+  "title": "Yakbox audiobook manifest version 2 draft",
+  "type": "object",
+  "required": ["schema_version", "book", "speech_analysis"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "book": {
+      "type": "object",
+      "required": ["language"],
+      "properties": {"language": {"const": "en"}}
+    },
+    "speech_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preset", "baseline_recognizers", "escalation_recognizer", "forced_aligner", "always_escalate_clip_classes", "always_escalate_repairs", "engines", "consensus", "cache", "short_utterances", "joins", "chapters", "phonemes", "repairs", "releases"],
+      "properties": {
+        "preset": {"const": "strict"},
+        "baseline_recognizers": {"const": ["whisper", "parakeet"]},
+        "escalation_recognizer": {"const": "qwen"},
+        "forced_aligner": {"const": "qwen-forced"},
+        "always_escalate_clip_classes": {"type": "array", "uniqueItems": true, "items": {"enum": ["one_word", "short_phrase", "sentence", "join", "chapter", "repaired_region"]}},
+        "always_escalate_repairs": {"type": "boolean"},
+        "engines": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["whisper", "parakeet", "qwen", "qwen-forced"],
+          "properties": {
+            "whisper": {"$ref": "#/$defs/engine"},
+            "parakeet": {"$ref": "#/$defs/engine"},
+            "qwen": {"$ref": "#/$defs/engine"},
+            "qwen-forced": {"$ref": "#/$defs/engine"}
+          }
+        },
+        "consensus": {
+          "type": "object", "additionalProperties": false,
+          "required": ["ordinary_acceptance", "escalated_acceptance", "reject_unresolved_disagreement", "reject_unexpected_speech", "valid_dissent", "missing_required_engine", "one_word_required_recognizers"],
+          "properties": {
+            "ordinary_acceptance": {"const": "all_baseline_match"},
+            "escalated_acceptance": {"const": "two_matches_no_valid_dissent"},
+            "reject_unresolved_disagreement": {"const": true},
+            "reject_unexpected_speech": {"const": true},
+            "valid_dissent": {"const": "retry_then_reject"},
+            "missing_required_engine": {"const": "error"},
+            "one_word_required_recognizers": {"const": ["whisper", "qwen"]}
+          }
+        },
+        "cache": {
+          "type": "object", "additionalProperties": false,
+          "required": ["version", "enabled", "directory", "legacy_evidence"],
+          "properties": {
+            "version": {"const": 2},
+            "enabled": {"type": "boolean"},
+            "directory": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+            "legacy_evidence": {"const": "historical_only"}
+          }
+        },
+        "short_utterances": {
+          "type": "object", "additionalProperties": false,
+          "required": ["maximum_words", "candidate_count", "maximum_rounds", "require_independent_crop_verification"],
+          "properties": {
+            "maximum_words": {"type": "integer", "minimum": 1},
+            "candidate_count": {"type": "integer", "minimum": 1},
+            "maximum_rounds": {"type": "integer", "minimum": 1},
+            "require_independent_crop_verification": {"const": true}
+          }
+        },
+        "joins": {
+          "type": "object", "additionalProperties": false,
+          "required": ["automatic_inspection", "window_seconds", "coalesce_gap_ms"],
+          "properties": {
+            "automatic_inspection": {"type": "boolean"},
+            "window_seconds": {"type": "number", "exclusiveMinimum": 0},
+            "coalesce_gap_ms": {"type": "integer", "minimum": 0}
+          }
+        },
+        "chapters": {
+          "type": "object", "additionalProperties": false,
+          "required": ["verification"],
+          "properties": {"verification": {"type": "boolean"}}
+        },
+        "phonemes": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "backend", "model", "revision", "language", "timeout_seconds", "minimum_confidence"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "backend": {"type": "string", "minLength": 1},
+            "model": {"type": "string", "minLength": 1},
+            "revision": {"type": ["string", "null"], "minLength": 1},
+            "language": {"const": "en-us"},
+            "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+            "minimum_confidence": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "repairs": {
+          "type": "object", "additionalProperties": false,
+          "required": ["verification", "approval_output", "candidate_verification_scope", "candidates_per_round", "maximum_rounds"],
+          "properties": {
+            "verification": {"const": "strict"},
+            "approval_output": {"const": "repair_candidate"},
+            "candidate_verification_scope": {"const": "affected"},
+            "candidates_per_round": {"type": "integer", "minimum": 1},
+            "maximum_rounds": {"type": "integer", "minimum": 1}
+          }
+        },
+        "releases": {
+          "type": "object", "additionalProperties": false,
+          "required": ["complete_master_recognition", "verify_decoded_delivery", "codec_equivalence"],
+          "properties": {
+            "complete_master_recognition": {"const": true},
+            "verify_decoded_delivery": {"const": true},
+            "codec_equivalence": {"const": "disabled_until_qualified"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "engine": {
+      "type": "object", "additionalProperties": false,
+      "required": ["backend", "model", "revision", "timeout_seconds"],
+      "properties": {
+        "backend": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "decode_mode": {"type": "string", "minLength": 1},
+        "chunk_seconds": {"type": "integer", "minimum": 1},
+        "overlap_seconds": {"type": "integer", "minimum": 0},
+        "maximum_window_seconds": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

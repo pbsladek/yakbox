@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/short-utterance-preflight-v1.schema.json",
+  "title": "yakbox short utterance chapter preflight",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "accepted", "checked_chunks", "failed_chunks", "results"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/short-utterance-preflight-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "accepted": {"type": "boolean"},
+    "checked_chunks": {"type": "integer", "minimum": 1},
+    "failed_chunks": {"type": "integer", "minimum": 0},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["chunk_index", "selection_fingerprint", "accepted", "error", "qa_report"],
+        "properties": {
+          "chunk_index": {"type": "integer", "minimum": 1},
+          "selection_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "accepted": {"type": "boolean"},
+          "error": {"type": ["string", "null"]},
+          "qa_report": {"type": ["string", "null"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-repair-splice-v1.schema.json",
+  "title": "yakbox localized adaptive repair splice evidence",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "chunk_id", "mode", "carrier_extraction", "splice", "reconstructed_qa", "join_qa"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-repair-splice-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "chunk_id": {"type": "string", "pattern": "^[0-9a-f]{24}$"},
+    "mode": {"enum": ["sentence", "clause"]},
+    "carrier_extraction": {"type": "object"},
+    "splice": {
+      "type": "object",
+      "required": ["gain_db", "replacement_high_frequency_ratio_before", "replacement_high_frequency_ratio_after", "context_high_frequency_ratio", "spectral_smoothing", "leading_trim_ms", "trailing_trim_ms", "leading_crossfade_ms", "trailing_crossfade_ms", "output_duration_seconds"],
+      "properties": {
+        "gain_db": {"type": "number"},
+        "replacement_high_frequency_ratio_before": {"type": "number", "minimum": 0},
+        "replacement_high_frequency_ratio_after": {"type": "number", "minimum": 0},
+        "context_high_frequency_ratio": {"type": "number", "minimum": 0},
+        "spectral_smoothing": {"type": "number", "minimum": 0, "maximum": 1},
+        "leading_trim_ms": {"type": "number", "minimum": 0},
+        "trailing_trim_ms": {"type": "number", "minimum": 0},
+        "leading_crossfade_ms": {"type": "number", "minimum": 0},
+        "trailing_crossfade_ms": {"type": "number", "minimum": 0},
+        "output_duration_seconds": {"type": "number", "exclusiveMinimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "reconstructed_qa": {"type": "object"},
+    "join_qa": {"type": "object"}
+  },
+  "additionalProperties": false
+}

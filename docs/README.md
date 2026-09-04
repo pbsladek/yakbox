@@ -13,6 +13,8 @@ speech services as audiobook builds.
 - [Local narration QA](local-narration-qa.md)
 - [Short-utterance synthesis design and testing plan](short-utterance-synthesis.md)
 - [Whisper inspection and short-audio QA](whisper-and-short-audio.md)
+- [Speech-analysis migration preview](speech-analysis-migration.md)
+- [Speech-analysis qualification record](speech-analysis-qualification.md)
 - [Localized regeneration and repair](localized-repair.md)
 - [Getting started](getting-started.md)
 - [Manifests, sources, and pronunciations](manifests-and-sources.md)

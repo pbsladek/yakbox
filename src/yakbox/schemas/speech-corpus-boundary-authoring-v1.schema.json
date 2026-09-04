@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-corpus-boundary-authoring-v1.schema.json",
+  "title": "Yakbox private corpus word-boundary authoring source",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "transcript_truth_fingerprint", "partition_fingerprint", "review_status", "case_count", "cases"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-corpus-boundary-authoring-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "transcript_truth_fingerprint": {"$ref": "#/$defs/sha256"},
+    "partition_fingerprint": {"$ref": "#/$defs/sha256"},
+    "review_status": {"enum": ["pending", "approved"]},
+    "case_count": {"type": "integer", "minimum": 1},
+    "cases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/case"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sha256-or-empty": {"type": "string", "pattern": "^(|[0-9a-f]{64})$"},
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token_index", "start_frame", "end_frame"],
+      "properties": {
+        "token_index": {"type": "integer", "minimum": 0},
+        "start_frame": {"type": "integer", "minimum": 0},
+        "end_frame": {"type": "integer", "minimum": 1}
+      }
+    },
+    "token": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token_index", "text", "text_hash", "proposed_start_frame", "proposed_end_frame"],
+      "properties": {
+        "token_index": {"type": "integer", "minimum": 0},
+        "text": {"type": "string", "minLength": 1},
+        "text_hash": {"$ref": "#/$defs/sha256"},
+        "proposed_start_frame": {"type": "integer", "minimum": 0},
+        "proposed_end_frame": {"type": "integer", "minimum": 1}
+      }
+    },
+    "pass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass_index", "reviewer_fingerprint", "boundaries"],
+      "properties": {
+        "pass_index": {"enum": [1, 2]},
+        "reviewer_fingerprint": {"$ref": "#/$defs/sha256-or-empty"},
+        "boundaries": {"type": "array", "items": {"$ref": "#/$defs/boundary"}}
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "source_passage_group", "voice", "partition", "audio_digest", "sample_rate", "frame_count", "alignment_fingerprint", "tokens", "passes", "accepted_boundaries", "adjudicator_fingerprint", "review_status", "fingerprint"],
+      "properties": {
+        "case_id": {"type": "string", "minLength": 1},
+        "source_passage_group": {"type": "string", "minLength": 1},
+        "voice": {"type": "string", "minLength": 1},
+        "partition": {"enum": ["calibration", "held_out"]},
+        "audio_digest": {"$ref": "#/$defs/sha256"},
+        "sample_rate": {"type": "integer", "minimum": 1},
+        "frame_count": {"type": "integer", "minimum": 1},
+        "alignment_fingerprint": {"$ref": "#/$defs/sha256"},
+        "tokens": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/token"}},
+        "passes": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/pass"}},
+        "accepted_boundaries": {"type": "array", "items": {"$ref": "#/$defs/boundary"}},
+        "adjudicator_fingerprint": {"$ref": "#/$defs/sha256-or-empty"},
+        "review_status": {"enum": ["pending", "approved"]},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

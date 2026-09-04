@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-analysis-runtimes-v1.schema.json",
+  "title": "yakbox installed speech-analysis runtimes",
+  "type": "object",
+  "required": [
+    "$schema",
+    "schema_version",
+    "yakbox_version",
+    "timestamp",
+    "verified",
+    "runtimes"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://yakbox.dev/schemas/speech-analysis-runtimes-v1.schema.json"
+    },
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "verified": {"type": "boolean"},
+    "runtimes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "family",
+          "install_fingerprint",
+          "lock_digest",
+          "worker_artifact_digest",
+          "verified",
+          "issues"
+        ],
+        "properties": {
+          "family": {"enum": ["whisper", "parakeet", "qwen"]},
+          "install_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "lock_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "worker_artifact_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "verified": {"type": "boolean"},
+          "issues": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]*$"},
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

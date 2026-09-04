@@ -1,0 +1,40 @@
+version = 1
+partition = "held_out"
+
+# These are one-sided, cluster-level safety bounds. With zero false acceptances,
+# 52 independent source-passage/voice clusters are the minimum needed for a 95%
+# Wilson upper bound no greater than 5%. Both individual candidates and the
+# complete candidate-generation and ranking workflow must satisfy the bound.
+confidence_level = 0.95
+maximum_false_accept_cluster_rate = 0.05
+maximum_false_rejection_increase = 0
+maximum_crop_contamination_increase = 0
+maximum_clipped_word_increase = 0
+require_forced_boundary_improvement = true
+
+# These classes must reject every known-defective case automatically even when
+# the Whisper baseline accepted the same defect.
+mandatory_rejection_risks = [
+  "clipped_boundary",
+  "damaged_join",
+  "extra_syllable",
+  "isolated_word",
+]
+
+# Every case in these classes must carry paired baseline/proposed correctness
+# observations. The proposed aggregate accuracy may not be lower.
+name_number_risks = ["number_code", "proper_name"]
+
+[minimum_defect_clusters_by_risk]
+carrier = 52
+chapter = 52
+clipped_boundary = 52
+damaged_join = 52
+delivery_encode = 52
+extra_syllable = 52
+isolated_word = 52
+number_code = 52
+pause = 52
+proper_name = 52
+repaired_region = 52
+short_question = 52

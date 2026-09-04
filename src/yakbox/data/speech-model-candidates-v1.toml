@@ -1,0 +1,147 @@
+schema_version = 1
+qualification_language = "en"
+reviewed_at = "2026-08-13"
+
+[[models]]
+engine = "qwen-8bit"
+backend_package = "mlx-audio"
+converted_repository = "mlx-community/Qwen3-ASR-1.7B-8bit"
+converted_revision = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
+upstream_repository = "Qwen/Qwen3-ASR-1.7B"
+upstream_revision = "7278e1e70fe206f11671096ffdd38061171dd6e5"
+license = "Apache-2.0"
+source_url = "https://huggingface.co/Qwen/Qwen3-ASR-1.7B"
+converted_url = "https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit"
+conversion_source = "https://github.com/Blaizzy/mlx-audio/tree/v0.3.1"
+conversion_tool = "mlx-audio"
+conversion_tool_version = "0.3.1"
+conversion_recipe_fingerprint = "b0c98289b8541730e5c673b6e96d0913df1305c02c77ff1aaf035d3bb1d68347"
+precision = "8bit-affine-group64"
+conversion_verified = true
+total_size_bytes = 2467856503
+
+[[models.files]]
+path = "chat_template.json"
+size_bytes = 1161
+digest_kind = "sha256"
+digest = "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"
+
+[[models.files]]
+path = "config.json"
+size_bytes = 7188
+digest_kind = "sha256"
+digest = "1b76b3b6c655fc54595da025f7a96474ad9fa86363303fbdd61a7d8483ccfaf7"
+
+[[models.files]]
+path = "generation_config.json"
+size_bytes = 142
+digest_kind = "sha256"
+digest = "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c"
+
+[[models.files]]
+path = "merges.txt"
+size_bytes = 1671853
+digest_kind = "sha256"
+digest = "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+
+[[models.files]]
+path = "model.safetensors"
+size_bytes = 2463307541
+digest_kind = "sha256"
+digest = "bf304b009cc7eca79283056f787b44c952d24ac22cec787b39732bba3c23c13c"
+
+[[models.files]]
+path = "model.safetensors.index.json"
+size_bytes = 78968
+digest_kind = "sha256"
+digest = "0a5d0ec11188602242ff81a9969883d0fdeb98cd5d85cd1413089d897c201af5"
+
+[[models.files]]
+path = "preprocessor_config.json"
+size_bytes = 330
+digest_kind = "sha256"
+digest = "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"
+
+[[models.files]]
+path = "tokenizer_config.json"
+size_bytes = 12487
+digest_kind = "sha256"
+digest = "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"
+
+[[models.files]]
+path = "vocab.json"
+size_bytes = 2776833
+digest_kind = "sha256"
+digest = "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+
+[[models]]
+engine = "qwen-forced-8bit"
+backend_package = "mlx-audio"
+converted_repository = "mlx-community/Qwen3-ForcedAligner-0.6B-8bit"
+converted_revision = "0e1a68e91d815300c7c9754b2a7639378b23db15"
+upstream_repository = "Qwen/Qwen3-ForcedAligner-0.6B"
+upstream_revision = "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
+license = "Apache-2.0"
+source_url = "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B"
+converted_url = "https://huggingface.co/mlx-community/Qwen3-ForcedAligner-0.6B-8bit"
+conversion_source = "https://github.com/Blaizzy/mlx-audio/tree/v0.3.1"
+conversion_tool = "mlx-audio"
+conversion_tool_version = "0.3.1"
+conversion_recipe_fingerprint = "ac89cef858c85723bbb97e6566bcac39b86418d6237cdbc50466d6c446817f48"
+precision = "8bit-affine-group64"
+conversion_verified = true
+total_size_bytes = 1276473392
+
+[[models.files]]
+path = "chat_template.json"
+size_bytes = 1161
+digest_kind = "sha256"
+digest = "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"
+
+[[models.files]]
+path = "config.json"
+size_bytes = 6940
+digest_kind = "sha256"
+digest = "8dc126e1a4ac001acb02f3a9ca6277c8a20a25485fde293bc99eeab3aedc604d"
+
+[[models.files]]
+path = "generation_config.json"
+size_bytes = 115
+digest_kind = "sha256"
+digest = "948d089b23bca1d214e768d59c4438365665f52ec6d33678f4062206b3fbbb8c"
+
+[[models.files]]
+path = "merges.txt"
+size_bytes = 1671853
+digest_kind = "sha256"
+digest = "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+
+[[models.files]]
+path = "model.safetensors"
+size_bytes = 1271924386
+digest_kind = "sha256"
+digest = "be19ef8ac4326d032e7673342930b14c2df30bd68c1632493b0f563e30829f91"
+
+[[models.files]]
+path = "model.safetensors.index.json"
+size_bytes = 79108
+digest_kind = "sha256"
+digest = "766eb50873855eeb4d95ab92def358cfd173bfc8c7aabd8635ababa1edf6db79"
+
+[[models.files]]
+path = "preprocessor_config.json"
+size_bytes = 330
+digest_kind = "sha256"
+digest = "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"
+
+[[models.files]]
+path = "tokenizer_config.json"
+size_bytes = 12666
+digest_kind = "sha256"
+digest = "3ab80063f8511deb9566e6ad438d17b7a6277fcffd52d92854112f19d36bd81c"
+
+[[models.files]]
+path = "vocab.json"
+size_bytes = 2776833
+digest_kind = "sha256"
+digest = "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"

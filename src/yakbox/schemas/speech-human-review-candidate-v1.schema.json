@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-human-review-candidate-v1.schema.json",
+  "title": "Yakbox review-eligible speech-analysis candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "review_id", "fingerprint", "audio_digest", "spoken_text_plan_fingerprint", "expected_span_hash", "policy_fingerprint", "evidence_fingerprints", "reason_codes", "review_eligible", "hard_failure_codes", "bound_files"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-human-review-candidate-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "review_id": {"$ref": "#/$defs/identifier"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "audio_digest": {"$ref": "#/$defs/sha256"},
+    "spoken_text_plan_fingerprint": {"$ref": "#/$defs/sha256"},
+    "expected_span_hash": {"$ref": "#/$defs/sha256"},
+    "policy_fingerprint": {"$ref": "#/$defs/sha256"},
+    "evidence_fingerprints": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/sha256"}},
+    "reason_codes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}},
+    "review_eligible": {"type": "boolean"},
+    "hard_failure_codes": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}},
+    "bound_files": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/boundFile"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "identifier": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$"},
+    "boundFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "relative_path", "sha256", "evidence_fingerprint"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/identifier"},
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "evidence_fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

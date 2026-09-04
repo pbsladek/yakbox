@@ -104,6 +104,9 @@ class ShortUtteranceMarker:
     word_count: int
     reason: str
     policy_fingerprint: str
+    generation_fingerprint: str
+    extraction_fingerprint: str
+    evaluation_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,11 +353,6 @@ def plan_audiobook(
             profiles=tuple(routed_profiles),
             configured_chunk_limit=target.chunk_chars,
             routed_chunk_limits=tuple(routed_chunk_limits),
-            qa_fingerprint=_fingerprint(
-                "speech-qa-v1",
-                manifest.short_utterances.fingerprint,
-                json.dumps(asdict(manifest.whisper_qa), sort_keys=True, default=str),
-            ),
         )
         raw_output = target.output_root / "raw" / f"{chapter.id}.wav"
         synth_id = f"{chapter.id}:synthesize"
@@ -476,13 +474,10 @@ def _append_verification_node(
         return master_id, master_fingerprint
     verification_id = f"{chapter.id}:verify_manuscript"
     fingerprint = _fingerprint(
-        "verify-manuscript-v1",
+        "verify-manuscript-v2",
         master_fingerprint,
-        manifest.short_utterances.alignment_backend,
-        manifest.short_utterances.alignment_model,
-        str(manifest.short_utterances.alignment_revision),
-        str(manifest.short_utterances.decode_consensus),
-        str(manifest.short_utterances.maximum_consensus_timing_delta_ms),
+        json.dumps(asdict(manifest.whisper_qa), sort_keys=True, default=str),
+        manifest.short_utterances.join_fingerprint,
     )
     node = PlanNode(
         id=verification_id,
@@ -511,8 +506,18 @@ def _synthesis_fingerprint(
     profiles: tuple[BackendProfile, ...],
     configured_chunk_limit: int,
     routed_chunk_limits: tuple[int, ...],
-    qa_fingerprint: str,
 ) -> str:
+    def short_identity(marker: ShortUtteranceMarker | None) -> object:
+        if marker is None:
+            return None
+        return {
+            "word_count": marker.word_count,
+            "reason": marker.reason,
+            "generation_fingerprint": marker.generation_fingerprint,
+            "extraction_fingerprint": marker.extraction_fingerprint,
+            "evaluation_fingerprint": marker.evaluation_fingerprint,
+        }
+
     routing_payload = json.dumps(
         tuple(
             (
@@ -520,7 +525,7 @@ def _synthesis_fingerprint(
                 chunk,
                 boundary,
                 asdict(route),
-                asdict(short) if short else None,
+                short_identity(short),
                 tuple(asdict(context) for context in context_items),
                 repair,
             )
@@ -554,14 +559,13 @@ def _synthesis_fingerprint(
         sorted({backend_fingerprint(item) for item in profiles})
     )
     return _fingerprint(
-        "synthesis-v4",
+        "synthesis-v5",
         chapter_id,
         routing_payload,
         profile_payload,
         synthesis_runtime,
         str(configured_chunk_limit),
         json.dumps(routed_chunk_limits),
-        qa_fingerprint,
     )
 
 
@@ -778,6 +782,9 @@ def _short_utterance_marker(
         word_count=risk.word_count,
         reason=risk.reason,
         policy_fingerprint=manifest.short_utterances.fingerprint,
+        generation_fingerprint=manifest.short_utterances.generation_fingerprint,
+        extraction_fingerprint=manifest.short_utterances.extraction_fingerprint,
+        evaluation_fingerprint=manifest.short_utterances.evaluation_fingerprint,
     )
 
 

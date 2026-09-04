@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/audiobook-manifest-migration-preview-v1.schema.json",
+  "title": "yakbox audiobook manifest migration preview",
+  "type": "object",
+  "required": [
+    "$schema",
+    "schema_version",
+    "yakbox_version",
+    "timestamp",
+    "preview_version",
+    "source_manifest_digest",
+    "preview_fingerprint",
+    "target_schema_version",
+    "review_required",
+    "findings",
+    "preserved_repair_count",
+    "pronunciation_count"
+  ],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/audiobook-manifest-migration-preview-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "preview_version": {"const": 1},
+    "source_manifest_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "preview_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "target_schema_version": {"const": 2},
+    "review_required": {"type": "boolean"},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "path", "detail", "lossy", "review_required"],
+        "properties": {
+          "code": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_]*$"},
+          "path": {"type": "string", "minLength": 1},
+          "detail": {"type": "string", "minLength": 1, "maxLength": 2048},
+          "lossy": {"type": "boolean"},
+          "review_required": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "preserved_repair_count": {"type": "integer", "minimum": 0},
+    "pronunciation_count": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": false
+}

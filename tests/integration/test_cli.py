@@ -14,6 +14,7 @@ from tests.schema_helpers import validate_contract
 from yakbox.cli import main
 from yakbox.cloud import Page
 from yakbox.speech import AudioFormat, SpeechArtifact
+from yakbox.speech.analysis_migration import preview_manifest_migration
 
 
 def test_help_does_not_import_torch() -> None:
@@ -52,6 +53,130 @@ def test_whisper_and_short_review_commands_are_discoverable() -> None:
     }.issubset(set(whisper.output.split()))
     assert review.exit_code == 0
     assert {"list", "play", "approve", "reject"}.issubset(set(review.output.split()))
+
+
+def test_manifest_migration_cli_checks_then_writes_explicitly(
+    book_workspace: Path,
+) -> None:
+    runner = CliRunner()
+    manifest = book_workspace / "yakbox.toml"
+    before = manifest.read_bytes()
+
+    checked = runner.invoke(
+        main,
+        ["--json", "migrate", "manifest", str(manifest), "--check"],
+    )
+    assert checked.exit_code == 0, checked.output
+    report = json.loads(checked.output)
+    validate_contract("cli-output", report)
+    validate_contract("audiobook-manifest-migration-preview", report["data"])
+    assert report["data"]["target_schema_version"] == 2
+    assert report["data"]["review_required"] is True
+    assert manifest.read_bytes() == before
+    assert "draft_manifest" not in report["data"]
+
+    preview = preview_manifest_migration(manifest)
+    destination = book_workspace / "migrated" / "yakbox.toml"
+    arguments = [
+        "--json",
+        "migrate",
+        "manifest",
+        str(manifest),
+        "--write",
+        "--destination",
+        str(destination),
+    ]
+    for finding in preview.findings:
+        if finding.review_required:
+            arguments.extend(("--resolve", finding.code))
+    written = runner.invoke(main, arguments)
+
+    assert written.exit_code == 0, written.output
+    payload = json.loads(written.output)
+    validate_contract("cli-output", payload)
+    validate_contract("audiobook-manifest-migration", payload["data"])
+    assert payload["data"]["manifest_path"] == destination.resolve().as_posix()
+    assert tomllib.loads(destination.read_text(encoding="utf-8"))["schema_version"] == 2
+
+
+def test_manifest_migration_cli_requires_one_explicit_mode(
+    book_workspace: Path,
+) -> None:
+    result = CliRunner().invoke(
+        main,
+        ["--json", "migrate", "manifest", str(book_workspace / "yakbox.toml")],
+    )
+
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    validate_contract("cli-output", payload)
+    assert payload["error"]["code"] == "usage_error"
+
+
+def test_analysis_runtime_cli_installs_explicitly_and_verifies_without_installing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    class FakeInstaller:
+        def __init__(self, root: Path) -> None:
+            assert root == tmp_path / "runtimes"
+
+        def install(self, families: tuple[str, ...]) -> object:
+            calls.append(("install", families))
+            return SimpleNamespace(
+                verified=True,
+                runtimes=tuple(families),
+                to_dict=lambda: {
+                    "schema_version": 1,
+                    "verified": True,
+                    "runtimes": [{"family": family} for family in families],
+                },
+            )
+
+        def verify(self, families: tuple[str, ...]) -> object:
+            calls.append(("verify", families))
+            return SimpleNamespace(
+                verified=True,
+                runtimes=tuple(families),
+                to_dict=lambda: {
+                    "schema_version": 1,
+                    "verified": True,
+                    "runtimes": [{"family": family} for family in families],
+                },
+            )
+
+    monkeypatch.setattr("yakbox.cli_runtime.AnalysisRuntimeInstaller", FakeInstaller)
+    runner = CliRunner()
+    root = tmp_path / "runtimes"
+
+    installed = runner.invoke(
+        main,
+        [
+            "--json",
+            "runtimes",
+            "install",
+            "whisper",
+            "parakeet",
+            "qwen",
+            "--root",
+            str(root),
+        ],
+    )
+    verified = runner.invoke(
+        main,
+        ["--json", "runtimes", "verify", "--root", str(root)],
+    )
+
+    assert installed.exit_code == 0, installed.output
+    assert verified.exit_code == 0, verified.output
+    assert calls == [
+        ("install", ("whisper", "parakeet", "qwen")),
+        ("verify", ("whisper", "parakeet", "qwen")),
+    ]
+    assert json.loads(installed.output)["data"]["verified"] is True
+    assert json.loads(verified.output)["data"]["verified"] is True
 
 
 def test_localized_repair_cli_generates_approves_and_explains(
@@ -133,6 +258,77 @@ def test_localized_repair_cli_generates_approves_and_explains(
     )
     assert located.exit_code == 0, located.output
     validate_contract("audiobook-repair-location", json.loads(located.output)["data"])
+
+
+def test_repair_batch_cli_stages_and_finalizes_without_rebuilding(
+    book_workspace: Path,
+) -> None:
+    runner = CliRunner()
+    manifest = book_workspace / "yakbox.toml"
+    planned = runner.invoke(main, ["--json", "plan", str(manifest)])
+    synthesis = next(
+        node
+        for node in json.loads(planned.output)["data"]["nodes"]
+        if node["stage"] == "synthesize"
+    )
+    generated = runner.invoke(
+        main,
+        [
+            "--json",
+            "repair",
+            "generate",
+            str(manifest),
+            "--chunk-id",
+            synthesis["chunks"][0]["id"],
+            "--mode",
+            "target-only",
+            "--takes",
+            "1",
+            "--no-whisper",
+        ],
+    )
+    assert generated.exit_code == 0, generated.output
+    repair_id = json.loads(generated.output)["data"]["repair_id"]
+    begun = runner.invoke(
+        main,
+        ["--json", "repair", "batch", "begin", str(manifest)],
+    )
+    assert begun.exit_code == 0, begun.output
+    batch = json.loads(begun.output)["data"]
+    validate_contract("audiobook-repair-batch", batch)
+
+    staged = runner.invoke(
+        main,
+        [
+            "--json",
+            "repair",
+            "batch",
+            "approve",
+            batch["batch_id"],
+            repair_id,
+            str(manifest),
+            "--take",
+            "1",
+        ],
+    )
+    assert staged.exit_code == 0, staged.output
+    validate_contract("audiobook-repair-batch", json.loads(staged.output)["data"])
+    finalized = runner.invoke(
+        main,
+        [
+            "--json",
+            "repair",
+            "batch",
+            "finalize",
+            batch["batch_id"],
+            str(manifest),
+            "--no-rebuild",
+        ],
+    )
+    assert finalized.exit_code == 0, finalized.output
+    data = json.loads(finalized.output)["data"]
+    assert data["rebuild_run_id"] is None
+    assert len(data["approved_chunks"]) == 1
 
 
 def test_new_whisper_qa_commands_emit_observable_json_contracts(

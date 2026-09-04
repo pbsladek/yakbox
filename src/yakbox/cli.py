@@ -55,6 +55,7 @@ from yakbox.audiobook.artifacts import verify_artifact
 from yakbox.audiobook.manifest import AudiobookManifest, BuildTarget
 from yakbox.cli_dialogue import register_dialogue_commands
 from yakbox.cli_help import configure_cli_help
+from yakbox.cli_migrate import register_migration_commands
 from yakbox.cli_options import (
     audio_output_options,
     deprecated_api_key_option,
@@ -63,6 +64,7 @@ from yakbox.cli_options import (
     text_file_option,
 )
 from yakbox.cli_repair import register_repair_commands
+from yakbox.cli_runtime import register_runtime_commands
 from yakbox.cli_whisper import register_whisper_commands
 from yakbox.cloud import (
     AudioFormat as CloudAudioFormat,
@@ -2968,6 +2970,8 @@ def _keyring_password(profile: str) -> str | None:
 
 
 register_dialogue_commands(main, emit=_emit, fail=_fail)
+register_migration_commands(main, emit=_emit, fail=_fail)
 register_repair_commands(main, emit=_emit, fail=_fail)
+register_runtime_commands(main, emit=_emit, fail=_fail)
 register_whisper_commands(main, emit=_emit, fail=_fail)
 configure_cli_help(main)

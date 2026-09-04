@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-recognition-v1.schema.json",
+  "title": "Yakbox independent speech recognition evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "engine", "model", "execution", "span", "requested_language", "detected_language", "normalized_transcript_hash", "raw_transcript_hash", "score_calibration_fingerprint", "tokens", "evidence", "issues"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-recognition-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "engine": {"enum": ["whisper", "parakeet", "qwen"]},
+    "model": {"$ref": "#/$defs/model"},
+    "execution": {"$ref": "#/$defs/execution"},
+    "span": {"$ref": "#/$defs/audio_span"},
+    "requested_language": {"const": "en"},
+    "detected_language": {"type": ["string", "null"]},
+    "normalized_transcript_hash": {"$ref": "#/$defs/sha256"},
+    "raw_transcript_hash": {"$ref": "#/$defs/sha256"},
+    "score_calibration_fingerprint": {"$ref": "#/$defs/sha256"},
+    "tokens": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/token"}},
+    "evidence": {"oneOf": [{"$ref": "#/$defs/whisper"}, {"$ref": "#/$defs/parakeet"}, {"$ref": "#/$defs/qwen"}]},
+    "issues": {"$ref": "#/$defs/reasons"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reasons": {"type": "array", "uniqueItems": true, "items": {"enum": ["ambiguous_target_projection", "engine_decode_invalid", "engine_result_missing", "forced_alignment_incomplete", "invalid_engine_result", "lexical_deletion", "lexical_insertion", "lexical_substitution", "missing_required_engine", "persistent_valid_dissent", "recognition_match", "recognition_not_run", "unexpected_speech"]}},
+    "audio_span": {
+      "type": "object", "additionalProperties": false,
+      "required": ["audio_digest", "start_frame", "end_frame", "sample_rate"],
+      "properties": {
+        "audio_digest": {"$ref": "#/$defs/sha256"},
+        "start_frame": {"type": "integer", "minimum": 0},
+        "end_frame": {"type": "integer", "minimum": 1},
+        "sample_rate": {"type": "integer", "minimum": 1}
+      }
+    },
+    "conversion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "tool", "tool_version", "recipe_fingerprint", "precision_policy", "verified"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1},
+        "tool": {"type": "string", "minLength": 1},
+        "tool_version": {"type": "string", "minLength": 1},
+        "recipe_fingerprint": {"$ref": "#/$defs/sha256"},
+        "precision_policy": {"type": "string", "minLength": 1},
+        "verified": {"type": "boolean"}
+      }
+    },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["engine", "backend_package", "backend_version", "adapter_version", "worker_protocol_version", "converted_repository", "converted_revision", "converted_directory_fingerprint", "upstream_repository", "upstream_revision", "conversion", "precision", "decode_fingerprint"],
+      "properties": {
+        "engine": {"type": "string", "minLength": 1},
+        "backend_package": {"type": "string", "minLength": 1},
+        "backend_version": {"type": "string", "minLength": 1},
+        "adapter_version": {"type": "integer", "minimum": 1},
+        "worker_protocol_version": {"type": "integer", "minimum": 1},
+        "converted_repository": {"type": "string", "minLength": 1},
+        "converted_revision": {"type": "string", "minLength": 1},
+        "converted_directory_fingerprint": {"$ref": "#/$defs/sha256"},
+        "upstream_repository": {"type": "string", "minLength": 1},
+        "upstream_revision": {"type": "string", "minLength": 1},
+        "conversion": {"$ref": "#/$defs/conversion"},
+        "precision": {"type": "string", "minLength": 1},
+        "decode_fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "execution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["worker_artifact_digest", "lock_digest", "python_version", "os_family", "os_version", "architecture", "mlx_version", "metal_version", "device_class", "determinism_mode", "decode_seeds"],
+      "properties": {
+        "worker_artifact_digest": {"$ref": "#/$defs/sha256"},
+        "lock_digest": {"$ref": "#/$defs/sha256"},
+        "python_version": {"type": "string", "minLength": 1},
+        "os_family": {"type": "string", "minLength": 1},
+        "os_version": {"type": "string"},
+        "architecture": {"type": "string", "minLength": 1},
+        "mlx_version": {"type": ["string", "null"]},
+        "metal_version": {"type": ["string", "null"]},
+        "device_class": {"type": "string", "minLength": 1},
+        "determinism_mode": {"type": "string", "minLength": 1},
+        "decode_seeds": {"type": "array", "items": {"type": "integer"}}
+      }
+    },
+    "token": {
+      "type": "object", "additionalProperties": false,
+      "required": ["text", "start_frame", "end_frame", "score", "score_kind", "calibration_fingerprint"],
+      "properties": {
+        "text": {"type": "string", "minLength": 1},
+        "start_frame": {"type": ["integer", "null"], "minimum": 0},
+        "end_frame": {"type": ["integer", "null"], "minimum": 1},
+        "score": {"type": ["number", "null"]},
+        "score_kind": {"enum": ["probability", "log_probability", "tdt_confidence", "unavailable"]},
+        "calibration_fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "whisper": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "average_log_probability", "compression_ratio", "no_speech_probability", "temperature"],
+      "properties": {
+        "kind": {"const": "whisper"},
+        "average_log_probability": {"type": ["number", "null"]},
+        "compression_ratio": {"type": ["number", "null"]},
+        "no_speech_probability": {"type": ["number", "null"]},
+        "temperature": {"type": ["number", "null"]}
+      }
+    },
+    "parakeet": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "sentence_confidence", "decoding", "chunk_duration_frames", "overlap_frames"],
+      "properties": {
+        "kind": {"const": "parakeet"},
+        "sentence_confidence": {"type": ["number", "null"]},
+        "decoding": {"type": "string", "minLength": 1},
+        "chunk_duration_frames": {"type": "integer", "minimum": 1},
+        "overlap_frames": {"type": "integer", "minimum": 0}
+      }
+    },
+    "qwen": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "finish_reason", "prompt_tokens", "generation_tokens"],
+      "properties": {
+        "kind": {"const": "qwen"},
+        "finish_reason": {"type": "string", "minLength": 1},
+        "prompt_tokens": {"type": "integer", "minimum": 0},
+        "generation_tokens": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

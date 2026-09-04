@@ -209,6 +209,17 @@ class RepairPolicy:
     takes: int = 4
     whisper_qa: bool = True
     rebuild_on_approval: bool = True
+    minimum_passing_takes: int = 2
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimePolicy:
+    """Opt-in persistent local-model runtime controls."""
+
+    enabled: bool = False
+    idle_timeout_seconds: float = 900.0
+    conditioning_cache_size: int = 8
+    maximum_memory_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +240,7 @@ class AudiobookManifest:
     targets: tuple[BuildTarget, ...]
     retention: RetentionPolicy
     repairs: RepairPolicy = RepairPolicy()
+    runtime: RuntimePolicy = RuntimePolicy()
     max_pause_ms: int = 30_000
 
     @property
@@ -320,6 +332,7 @@ _ROOT_KEYS = {
     "whisper_qa",
     "short_utterances",
     "repairs",
+    "runtime",
     "targets",
     "source",
     "retention",
@@ -360,6 +373,7 @@ def load_manifest(path: Path) -> AudiobookManifest:
         targets=targets,
         retention=_parse_retention(raw.get("retention")),
         repairs=_parse_repairs(raw.get("repairs")),
+        runtime=_parse_runtime(raw.get("runtime")),
         max_pause_ms=_parse_source_options(raw),
     )
 
@@ -1555,24 +1569,81 @@ def _parse_repairs(value: object) -> RepairPolicy:
     table = cast(dict[str, object], value)
     _reject_unknown(
         table,
-        {"mode", "takes", "whisper_qa", "rebuild_on_approval"},
+        {
+            "mode",
+            "takes",
+            "minimum_passing_takes",
+            "whisper_qa",
+            "rebuild_on_approval",
+        },
         "repairs",
     )
     mode = _string_or_default(table.get("mode"), "repairs.mode", "context")
-    if mode not in {"target-only", "context", "neighbors", "paragraph", "scene"}:
+    if mode not in {
+        "target-only",
+        "context",
+        "sentence",
+        "clause",
+        "neighbors",
+        "paragraph",
+        "scene",
+    }:
         raise ValidationError(
-            "repairs.mode must be target-only, context, neighbors, paragraph, or scene"
+            "repairs.mode must be target-only, context, sentence, clause, "
+            "neighbors, paragraph, or scene"
         )
     takes = _positive_int(table.get("takes", 4), "repairs.takes")
     if takes > _MAXIMUM_REPAIR_TAKES:
         raise ValidationError("repairs.takes must not exceed 20")
+    minimum_passing_takes = _positive_int(
+        table.get("minimum_passing_takes", min(2, takes)),
+        "repairs.minimum_passing_takes",
+    )
+    if minimum_passing_takes > takes:
+        raise ValidationError(
+            "repairs.minimum_passing_takes must not exceed repairs.takes"
+        )
     return RepairPolicy(
         mode=mode,
         takes=takes,
+        minimum_passing_takes=minimum_passing_takes,
         whisper_qa=_boolean(table.get("whisper_qa", True), "repairs.whisper_qa"),
         rebuild_on_approval=_boolean(
             table.get("rebuild_on_approval", True),
             "repairs.rebuild_on_approval",
+        ),
+    )
+
+
+def _parse_runtime(value: object) -> RuntimePolicy:
+    if value is None:
+        return RuntimePolicy()
+    if not isinstance(value, dict):
+        raise ValidationError("runtime must be a TOML table")
+    table = cast(dict[str, object], value)
+    _reject_unknown(
+        table,
+        {
+            "enabled",
+            "idle_timeout_seconds",
+            "conditioning_cache_size",
+            "maximum_memory_bytes",
+        },
+        "runtime",
+    )
+    return RuntimePolicy(
+        enabled=_boolean(table.get("enabled", False), "runtime.enabled"),
+        idle_timeout_seconds=_positive_float(
+            table.get("idle_timeout_seconds", 900),
+            "runtime.idle_timeout_seconds",
+        ),
+        conditioning_cache_size=_positive_int(
+            table.get("conditioning_cache_size", 8),
+            "runtime.conditioning_cache_size",
+        ),
+        maximum_memory_bytes=_positive_int_or_none(
+            table.get("maximum_memory_bytes"),
+            "runtime.maximum_memory_bytes",
         ),
     )
 

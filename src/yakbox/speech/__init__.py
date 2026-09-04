@@ -1,5 +1,6 @@
 """Typed speech-service boundary shared by direct and audiobook workflows."""
 
+from yakbox.speech.accelerator import AcceleratorLease
 from yakbox.speech.capabilities import BackendCapabilities
 from yakbox.speech.guardrails import (
     HostedWorkEstimate,
@@ -34,6 +35,7 @@ from yakbox.speech.services import (
 )
 
 __all__ = [
+    "AcceleratorLease",
     "AudioFormat",
     "BackendCapabilities",
     "BatchTextToSpeechService",

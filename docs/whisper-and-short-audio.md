@@ -247,7 +247,18 @@ phoneme_language = "en-us"
 
 A candidate must pass Whisper, waveform and acoustic checks, plus the final
 phoneme-boundary gate. Evidence for every phoneme is written into the
-short-utterance QA report and participates in the synthesis fingerprint.
+short-utterance QA report and participates in the evaluation fingerprint.
+Generation, extraction, evaluation, join inspection, and chapter verification
+use separate identities, so changing a QA threshold cannot invalidate ordinary
+narration.
+
+Full carrier waveforms, extracted target WAVs, evaluated candidates, phoneme
+alignments, and Whisper alignments use separate content-addressed caches. An
+evaluation-threshold change reuses the exact extracted bytes; a ranking-only
+change reuses complete evaluations and performs no alignment. The QA report
+exposes generation, extraction, and evaluation cache hits for each candidate.
+Risky clips run as a chapter preflight before long narration, and all failures
+are reported together.
 
 The exact-text gate is necessary but not sufficient. Yakbox also rejects low
 confidence, suspicious Whisper segments, unexpected speech before or after the

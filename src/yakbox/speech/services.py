@@ -12,6 +12,7 @@ from typing import Protocol, runtime_checkable
 
 from yakbox._files import atomic_write_bytes, sha256_file
 from yakbox.errors import BackendUnavailableError
+from yakbox.speech.accelerator import AcceleratorLease
 from yakbox.speech.capabilities import BackendCapabilities
 from yakbox.speech.models import (
     AudioFormat,
@@ -183,6 +184,11 @@ async def open_speech_backend(
     local_worker_timeout_seconds: float = 3_600,
     local_threads_per_process: int = 1,
     local_worker_log_path: Path | None = None,
+    local_runtime_workspace: Path | None = None,
+    local_runtime_idle_timeout_seconds: float = 900.0,
+    local_conditioning_cache_size: int = 8,
+    local_runtime_maximum_memory_bytes: int | None = None,
+    accelerator_lease: AcceleratorLease | None = None,
 ) -> AsyncIterator[TextToSpeechService]:
     """Open one backend service and close resources when the context exits."""
     normalized = name.casefold()
@@ -190,7 +196,25 @@ async def open_speech_backend(
         yield FakeSpeechService()
         return
     if normalized in {"local", "chatterbox", "chatterbox-local"}:
-        if isolated_local:
+        if isolated_local and local_runtime_workspace is not None:
+            from yakbox.local_runtime import (  # noqa: PLC0415 - optional backend
+                LocalRuntimeOptions,
+                PersistentLocalSpeechService,
+            )
+
+            service = PersistentLocalSpeechService(
+                local_runtime_workspace,
+                device=device or "cpu",
+                options=LocalRuntimeOptions(
+                    idle_timeout_seconds=local_runtime_idle_timeout_seconds,
+                    conditioning_cache_size=local_conditioning_cache_size,
+                    maximum_memory_bytes=local_runtime_maximum_memory_bytes,
+                ),
+                request_timeout_seconds=local_worker_timeout_seconds,
+                accelerator_lease=accelerator_lease,
+            )
+            yield service
+        elif isolated_local:
             from yakbox.speech.workers import (  # noqa: PLC0415 - optional backend
                 IsolatedLocalSpeechService,
             )
@@ -200,6 +224,7 @@ async def open_speech_backend(
                 timeout_seconds=local_worker_timeout_seconds,
                 threads_per_process=local_threads_per_process,
                 log_path=local_worker_log_path,
+                accelerator_lease=accelerator_lease,
             )
             try:
                 yield service

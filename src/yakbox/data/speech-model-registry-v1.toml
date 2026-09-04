@@ -1,0 +1,270 @@
+schema_version = 1
+qualification_language = "en"
+reviewed_at = "2026-08-13"
+
+[[packages]]
+name = "mlx-whisper"
+version = "0.4.3"
+license = "MIT"
+source_url = "https://github.com/ml-explore/mlx-examples/tree/main/whisper"
+source_revision = "c1af8c46bd4c4704cff1561736a634cee38efc6c"
+wheel_sha256 = "6b82b6597a994643a3e5496c7bc229a672e5ca308458455bfe276e76ae024489"
+sdist_sha256 = ""
+source_verified = true
+has_ci = true
+has_tests = true
+has_security_policy = false
+signed_releases = true
+trusted_publishing = false
+
+[[packages]]
+name = "parakeet-mlx"
+version = "0.5.2"
+license = "Apache-2.0"
+source_url = "https://github.com/senstella/parakeet-mlx"
+source_revision = "23a799adfdb12a47f82e04d666f787e1cc7d7321"
+wheel_sha256 = "50afb6ddb62237a6486e214482c25ef12759832fda3cd514e159938fa5970d9c"
+sdist_sha256 = "6c6ba3c4d42ebf015dde515e5a83858a516add3f5b2c6bd4a7be5c4ba8bd4d02"
+source_verified = true
+has_ci = false
+has_tests = false
+has_security_policy = false
+signed_releases = false
+trusted_publishing = false
+
+[[packages]]
+name = "mlx-audio"
+version = "0.4.8"
+license = "MIT"
+source_url = "https://github.com/Blaizzy/mlx-audio"
+source_revision = "49596ac8b69b9ed377db311a73df838795f38a3d"
+wheel_sha256 = "e62859facd7ae8a93c13870921dfab03db483fe3c34b66384cb865b980f8ebe6"
+sdist_sha256 = "898b999a1deb1aeaa9dad06d62b0c5973e966586ee8d79b74474b9520c9f7b18"
+source_verified = true
+has_ci = true
+has_tests = true
+has_security_policy = false
+signed_releases = true
+trusted_publishing = false
+
+[[models]]
+engine = "whisper"
+backend_package = "mlx-whisper"
+converted_repository = "mlx-community/whisper-large-v3-turbo"
+converted_revision = "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+upstream_repository = "openai/whisper-large-v3-turbo"
+upstream_revision = "41f01f3fe87f28c78e2fbf8b568835947dd65ed9"
+license = "MIT"
+source_url = "https://huggingface.co/openai/whisper-large-v3-turbo"
+converted_url = "https://huggingface.co/mlx-community/whisper-large-v3-turbo"
+conversion_source = "https://github.com/ml-explore/mlx-examples/tree/8160e0c4e56df261d0c8406f68d40b42ef0a188b/whisper"
+conversion_tool = "mlx-whisper"
+conversion_tool_version = "0.4.0"
+conversion_recipe_fingerprint = "3c66aa62f74d2b324a670416cf53d92007a1795fe76f9c287e4d410e71cb0290"
+precision = "fp16"
+conversion_verified = true
+total_size_bytes = 1613977880
+
+[[models.files]]
+path = "config.json"
+size_bytes = 268
+digest_kind = "git-sha1"
+digest = "6ac9a52a28f70a2e5681c250a470eca6e9c8cc3e"
+
+[[models.files]]
+path = "weights.safetensors"
+size_bytes = 1613977612
+digest_kind = "sha256"
+digest = "951ed3fc1203e6a62467abb2144a96ce7eafca8fa77e3704fdb8635ff3e7f8a6"
+
+[[models]]
+engine = "parakeet"
+backend_package = "parakeet-mlx"
+converted_repository = "mlx-community/parakeet-tdt-0.6b-v3"
+converted_revision = "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15"
+upstream_repository = "nvidia/parakeet-tdt-0.6b-v3"
+upstream_revision = "541d1f99c6b0c3cd0b11a95167540bb8edefd82b"
+license = "CC-BY-4.0"
+source_url = "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3"
+converted_url = "https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3"
+conversion_source = "https://gist.github.com/senstella/77178bb5d6ec67bf8c54705a5f490bed/32de828c9176f590572737ce7f9d209ac980a08e"
+conversion_tool = "parakeet-nemo-to-mlx.py"
+conversion_tool_version = "32de828c9176f590572737ce7f9d209ac980a08e"
+conversion_recipe_fingerprint = "d47ce21dd8bce363217ba6842562bf5ef6f7c64c8795f8ac045f2cd027f9e1c8"
+precision = "fp32"
+conversion_verified = true
+total_size_bytes = 2509041541
+
+[[models.files]]
+path = "config.json"
+size_bytes = 244093
+digest_kind = "git-sha1"
+digest = "4f469c2e92c981861f7ce6bcd940e608401d931e"
+
+[[models.files]]
+path = "model.safetensors"
+size_bytes = 2508288736
+digest_kind = "sha256"
+digest = "05e01c7f396c298cf7d23f61da7b504adeab698f0aaeafd9c82d198625464592"
+
+[[models.files]]
+path = "tokenizer.model"
+size_bytes = 360916
+digest_kind = "sha256"
+digest = "eacec2b0a77f336d4a2ca4a25a7047575d3c2b74de47e997f4c205126ed3135e"
+
+[[models.files]]
+path = "tokenizer.vocab"
+size_bytes = 101024
+digest_kind = "git-sha1"
+digest = "3fa4c819f33b03e876ce33c0aa34866ed2b5e17a"
+
+[[models.files]]
+path = "vocab.txt"
+size_bytes = 46772
+digest_kind = "git-sha1"
+digest = "d2fc51742d86127c241018b728e72b3a336225a1"
+
+[[models]]
+engine = "qwen"
+backend_package = "mlx-audio"
+converted_repository = "mlx-community/Qwen3-ASR-1.7B-bf16"
+converted_revision = "e1f6c266914abc5a46e8756e02580f834a6cf8a7"
+upstream_repository = "Qwen/Qwen3-ASR-1.7B"
+upstream_revision = "7278e1e70fe206f11671096ffdd38061171dd6e5"
+license = "Apache-2.0"
+source_url = "https://huggingface.co/Qwen/Qwen3-ASR-1.7B"
+converted_url = "https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-bf16"
+conversion_source = "https://github.com/Blaizzy/mlx-audio/tree/v0.3.1"
+conversion_tool = "mlx-audio"
+conversion_tool_version = "0.3.1"
+conversion_recipe_fingerprint = "c29f69a0d6e3f805fcdd0dcb61cdce3409e31d5bad13e4bffb20f14c145830d4"
+precision = "bf16"
+conversion_verified = true
+total_size_bytes = 4080707826
+
+[[models.files]]
+path = "chat_template.json"
+size_bytes = 1161
+digest_kind = "git-sha1"
+digest = "c44736493efd71ec96218cc626904698cdb13235"
+
+[[models.files]]
+path = "config.json"
+size_bytes = 6983
+digest_kind = "git-sha1"
+digest = "37b61780349564636d63dccd167b26e14d590c48"
+
+[[models.files]]
+path = "generation_config.json"
+size_bytes = 142
+digest_kind = "git-sha1"
+digest = "7382a4d347c0a865b76bb1b8277f66a5ac312854"
+
+[[models.files]]
+path = "merges.txt"
+size_bytes = 1671853
+digest_kind = "git-sha1"
+digest = "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+
+[[models.files]]
+path = "model.safetensors"
+size_bytes = 4076186653
+digest_kind = "sha256"
+digest = "2f080a3b769ae469aeaaa2dcb9e13a94141e54c9e6d5a7aa63392e0dc5a51789"
+
+[[models.files]]
+path = "model.safetensors.index.json"
+size_bytes = 51384
+digest_kind = "git-sha1"
+digest = "0ed946ae9d91b091a0f6ff1f12398787e4984a3f"
+
+[[models.files]]
+path = "preprocessor_config.json"
+size_bytes = 330
+digest_kind = "git-sha1"
+digest = "8f7f07346466d5d494ec0d4969d1c3d0190eed72"
+
+[[models.files]]
+path = "tokenizer_config.json"
+size_bytes = 12487
+digest_kind = "git-sha1"
+digest = "b93109843922a40c6654c5449d3bf95372267c66"
+
+[[models.files]]
+path = "vocab.json"
+size_bytes = 2776833
+digest_kind = "git-sha1"
+digest = "4783fe10ac3adce15ac8f358ef5462739852c569"
+
+[[models]]
+engine = "qwen-forced"
+backend_package = "mlx-audio"
+converted_repository = "mlx-community/Qwen3-ForcedAligner-0.6B-bf16"
+converted_revision = "53c8c0e46733eec430e4b53dd6471d0e5dee45f8"
+upstream_repository = "Qwen/Qwen3-ForcedAligner-0.6B"
+upstream_revision = "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
+license = "Apache-2.0"
+source_url = "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B"
+converted_url = "https://huggingface.co/mlx-community/Qwen3-ForcedAligner-0.6B-bf16"
+conversion_source = "https://github.com/Blaizzy/mlx-audio/tree/v0.3.1"
+conversion_tool = "mlx-audio"
+conversion_tool_version = "0.3.1"
+conversion_recipe_fingerprint = "ca5996f94c9d924e52436a468c6740a1d0b61d20936bef8168ac326ce08f1212"
+precision = "bf16"
+conversion_verified = true
+total_size_bytes = 1840060363
+
+[[models.files]]
+path = "chat_template.json"
+size_bytes = 1161
+digest_kind = "git-sha1"
+digest = "c44736493efd71ec96218cc626904698cdb13235"
+
+[[models.files]]
+path = "config.json"
+size_bytes = 6735
+digest_kind = "git-sha1"
+digest = "d37a92d4b3792df0abcefd60c20e63f404216925"
+
+[[models.files]]
+path = "generation_config.json"
+size_bytes = 115
+digest_kind = "git-sha1"
+digest = "b0a540032cf7b6b5ba1438d04ab69b7e787d9b8e"
+
+[[models.files]]
+path = "merges.txt"
+size_bytes = 1671853
+digest_kind = "git-sha1"
+digest = "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+
+[[models.files]]
+path = "model.safetensors"
+size_bytes = 1835539240
+digest_kind = "sha256"
+digest = "9d0728e17e28ee122c366bfaa9748ccbbb8fc3df4c0ce09dd8a5eac8202989e8"
+
+[[models.files]]
+path = "model.safetensors.index.json"
+size_bytes = 51430
+digest_kind = "git-sha1"
+digest = "31f1561137d88a00691b2c3569963d9de1b52ef3"
+
+[[models.files]]
+path = "preprocessor_config.json"
+size_bytes = 330
+digest_kind = "git-sha1"
+digest = "8f7f07346466d5d494ec0d4969d1c3d0190eed72"
+
+[[models.files]]
+path = "tokenizer_config.json"
+size_bytes = 12666
+digest_kind = "git-sha1"
+digest = "3df92df83b22342e36a7b11cf9a70de2a2996bec"
+
+[[models.files]]
+path = "vocab.json"
+size_bytes = 2776833
+digest_kind = "git-sha1"
+digest = "4783fe10ac3adce15ac8f358ef5462739852c569"

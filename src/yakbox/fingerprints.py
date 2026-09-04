@@ -7,9 +7,12 @@ import json
 import subprocess
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING
 
 from yakbox import __version__
-from yakbox.audiobook.manifest import BackendProfile
+
+if TYPE_CHECKING:
+    from yakbox.audiobook.manifest import BackendProfile
 
 
 def backend_fingerprint(profile: BackendProfile) -> str:

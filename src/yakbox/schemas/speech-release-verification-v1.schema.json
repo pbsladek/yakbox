@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-release-verification-v1.schema.json",
+  "title": "Yakbox exact release speech verification",
+  "type": "object",
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "release_id", "fingerprint", "state", "accepted", "mastering_identity", "master", "deliveries", "reason_codes", "master_cache_hit", "delivery_cache_hits"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-release-verification-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "release_id": {"type": "string", "minLength": 1},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "state": {"enum": ["repair_candidate", "release_verified"]},
+    "accepted": {"type": "boolean"},
+    "mastering_identity": {"$ref": "#/$defs/mastering_identity"},
+    "master": {"$ref": "#/$defs/chapter"},
+    "deliveries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["identity", "technical", "verification_fingerprint", "accepted", "reused_lexical_evidence"],
+        "properties": {
+          "identity": {"$ref": "#/$defs/delivery_identity"},
+          "technical": {"$ref": "#/$defs/delivery_technical"},
+          "verification_fingerprint": {"$ref": "#/$defs/sha256"},
+          "accepted": {"type": "boolean"},
+          "reused_lexical_evidence": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "reason_codes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "master_cache_hit": {"type": "boolean"},
+    "delivery_cache_hits": {"type": "array", "items": {"type": "boolean"}}
+  },
+  "allOf": [
+    {"if": {"properties": {"state": {"const": "release_verified"}}}, "then": {"properties": {"accepted": {"const": true}, "reason_codes": {"maxItems": 0}}}},
+    {"if": {"properties": {"state": {"const": "repair_candidate"}}}, "then": {"properties": {"accepted": {"const": false}, "reason_codes": {"minItems": 1}}}}
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "timing_map": {
+      "type": "object",
+      "required": ["source_rate", "destination_rate", "source_frame_count", "destination_frame_count", "source_origin_frame", "destination_origin_frame", "scale_numerator", "scale_denominator", "delay_frames", "uncertainty_frames", "monotonic", "qualified", "calibration_fingerprint"],
+      "properties": {
+        "source_rate": {"type": "integer", "minimum": 1},
+        "destination_rate": {"type": "integer", "minimum": 1},
+        "source_frame_count": {"type": "integer", "minimum": 1},
+        "destination_frame_count": {"type": "integer", "minimum": 1},
+        "source_origin_frame": {"type": "integer", "minimum": 0},
+        "destination_origin_frame": {"type": "integer", "minimum": 0},
+        "scale_numerator": {"type": "integer", "minimum": 1},
+        "scale_denominator": {"type": "integer", "minimum": 1},
+        "delay_frames": {"type": "integer"},
+        "uncertainty_frames": {"type": "integer", "minimum": 0},
+        "monotonic": {"type": "boolean"},
+        "qualified": {"type": "boolean"},
+        "calibration_fingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "mastering_identity": {
+      "type": "object",
+      "required": ["raw_assembly_digest", "mastered_digest", "raw_format", "mastered_format", "raw_frame_count", "mastered_frame_count", "ffmpeg_fingerprint", "filter_graph_fingerprint", "timing_map", "mapping_validation_fingerprint", "fingerprint"],
+      "properties": {
+        "raw_assembly_digest": {"$ref": "#/$defs/sha256"},
+        "mastered_digest": {"$ref": "#/$defs/sha256"},
+        "raw_format": {"type": "string", "minLength": 1},
+        "mastered_format": {"type": "string", "minLength": 1},
+        "raw_frame_count": {"type": "integer", "minimum": 1},
+        "mastered_frame_count": {"type": "integer", "minimum": 1},
+        "ffmpeg_fingerprint": {"$ref": "#/$defs/sha256"},
+        "filter_graph_fingerprint": {"$ref": "#/$defs/sha256"},
+        "timing_map": {"$ref": "#/$defs/timing_map"},
+        "mapping_validation_fingerprint": {"$ref": "#/$defs/sha256"},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "delivery_identity": {
+      "type": "object",
+      "required": ["mastered_digest", "container_digest", "stream_index", "stream_codec", "encoder_fingerprint", "decoder_fingerprint", "decoded_pcm_digest", "decoded_format", "decoded_frame_count", "timing_map", "metadata_fingerprint", "container_inspection_fingerprint", "codec_equivalence_fingerprint", "fingerprint"],
+      "properties": {
+        "mastered_digest": {"$ref": "#/$defs/sha256"},
+        "container_digest": {"$ref": "#/$defs/sha256"},
+        "stream_index": {"type": "integer", "minimum": 0},
+        "stream_codec": {"type": "string", "minLength": 1},
+        "encoder_fingerprint": {"$ref": "#/$defs/sha256"},
+        "decoder_fingerprint": {"$ref": "#/$defs/sha256"},
+        "decoded_pcm_digest": {"$ref": "#/$defs/sha256"},
+        "decoded_format": {"type": "string", "minLength": 1},
+        "decoded_frame_count": {"type": "integer", "minimum": 1},
+        "timing_map": {"$ref": "#/$defs/timing_map"},
+        "metadata_fingerprint": {"$ref": "#/$defs/sha256"},
+        "container_inspection_fingerprint": {"$ref": "#/$defs/sha256"},
+        "codec_equivalence_fingerprint": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "delivery_technical": {
+      "type": "object",
+      "required": ["decoded_pcm_digest", "selected_stream_index", "channel_count", "duration_delta_frames", "codec_delay_frames", "leading_audio_accepted", "trailing_audio_accepted", "clipping_accepted", "chapter_boundaries_accepted", "inspection_fingerprint"],
+      "properties": {
+        "decoded_pcm_digest": {"$ref": "#/$defs/sha256"},
+        "selected_stream_index": {"type": "integer", "minimum": 0},
+        "channel_count": {"type": "integer", "minimum": 1},
+        "duration_delta_frames": {"type": "integer"},
+        "codec_delay_frames": {"type": "integer"},
+        "leading_audio_accepted": {"type": "boolean"},
+        "trailing_audio_accepted": {"type": "boolean"},
+        "clipping_accepted": {"type": "boolean"},
+        "chapter_boundaries_accepted": {"type": "boolean"},
+        "inspection_fingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "chapter": {
+      "type": "object",
+      "required": ["chapter_id", "audio_digest", "fingerprint", "verification_fingerprint", "accepted", "defects"],
+      "properties": {
+        "chapter_id": {"type": "string", "minLength": 1},
+        "audio_digest": {"$ref": "#/$defs/sha256"},
+        "fingerprint": {"$ref": "#/$defs/sha256"},
+        "verification_fingerprint": {"$ref": "#/$defs/sha256"},
+        "accepted": {"type": "boolean"},
+        "defects": {"type": "array", "items": {"type": "object"}}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-corpus-boundary-truth-v1.schema.json",
+  "title": "Yakbox approved corpus word-boundary truth",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "transcript_truth_fingerprint", "partition_fingerprint", "draft_fingerprint", "case_count", "cases"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-corpus-boundary-truth-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "transcript_truth_fingerprint": {"$ref": "#/$defs/sha256"},
+    "partition_fingerprint": {"$ref": "#/$defs/sha256"},
+    "draft_fingerprint": {"$ref": "#/$defs/sha256"},
+    "case_count": {"type": "integer", "minimum": 1},
+    "cases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/case"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "review_pass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass_index", "reviewer_fingerprint", "fingerprint"],
+      "properties": {
+        "pass_index": {"enum": [1, 2]},
+        "reviewer_fingerprint": {"$ref": "#/$defs/sha256"},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "disagreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token_index", "start_difference_frames", "end_difference_frames"],
+      "properties": {
+        "token_index": {"type": "integer", "minimum": 0},
+        "start_difference_frames": {"type": "integer", "minimum": 0},
+        "end_difference_frames": {"type": "integer", "minimum": 0}
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "source_passage_group", "voice", "partition", "audio_digest", "sample_rate", "frame_count", "token_hashes", "alignment_fingerprint", "draft_case_fingerprint", "review_passes", "boundary_disagreement", "accepted_boundaries_fingerprint", "adjudicator_fingerprint", "fingerprint"],
+      "properties": {
+        "case_id": {"type": "string", "minLength": 1},
+        "source_passage_group": {"type": "string", "minLength": 1},
+        "voice": {"type": "string", "minLength": 1},
+        "partition": {"enum": ["calibration", "held_out"]},
+        "audio_digest": {"$ref": "#/$defs/sha256"},
+        "sample_rate": {"type": "integer", "minimum": 1},
+        "frame_count": {"type": "integer", "minimum": 1},
+        "token_hashes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/sha256"}},
+        "alignment_fingerprint": {"$ref": "#/$defs/sha256"},
+        "draft_case_fingerprint": {"$ref": "#/$defs/sha256"},
+        "review_passes": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/review_pass"}},
+        "boundary_disagreement": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/disagreement"}},
+        "accepted_boundaries_fingerprint": {"$ref": "#/$defs/sha256"},
+        "adjudicator_fingerprint": {"$ref": "#/$defs/sha256"},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

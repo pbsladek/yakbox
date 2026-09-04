@@ -65,9 +65,11 @@ uv run yakbox-release-preflight --tag vX.Y.Z
 
 The command requires a clean worktree; validates the version and proposed tag;
 runs the lock, formatting, lint, typing, test, and universal dependency-audit
-gates—including optional local-model dependencies; builds the wheel and source
-archive once; isolated-install tests both; exports a CycloneDX 1.5 SBOM; and
-writes `SHA256SUMS` plus a JSON preflight report under `release-metadata/`.
+gates—including exact audits for the Whisper, Parakeet, and Qwen worker
+dependency slices; builds the wheel and source archive once; isolated-install
+tests both; exports the package CycloneDX 1.5 SBOM plus one SBOM for each worker
+slice; and writes `SHA256SUMS` plus a JSON preflight report under
+`release-metadata/`.
 
 After reviewing that evidence, create the tag:
 
@@ -78,8 +80,8 @@ git push origin vX.Y.Z
 
 The tagged workflow reruns preflight while additionally proving that the tag
 points to the tested commit. It publishes through PyPI Trusted Publishing and
-creates a GitHub Release containing the exact distributions, checksums, SBOM,
-and preflight report. GitHub produces both build-provenance and SBOM
+creates a GitHub Release containing the exact distributions, checksums, four
+SBOM documents, and preflight report. GitHub produces both build-provenance and SBOM
 attestations with short-lived OIDC credentials.
 
 Consumers can verify a downloaded distribution against this repository:

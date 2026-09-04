@@ -77,6 +77,18 @@
                         "policy_fingerprint": {
                           "type": "string",
                           "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "generation_fingerprint": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "extraction_fingerprint": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "evaluation_fingerprint": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
                         }
                       },
                       "additionalProperties": false

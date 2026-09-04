@@ -12,6 +12,10 @@
     "kind": {"const": "short_utterance_qa"},
     "target_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "policy_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "generation_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "extraction_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "evaluation_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "selection_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "aligner_fingerprint": {"type": "string"},
     "selected_candidate": {"type": ["integer", "null"]},
     "candidates": {"type": "array", "items": {"type": "object"}}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yakbox.dev/schemas/speech-analysis-preflight-v1.schema.json",
+  "title": "Yakbox speech-analysis preflight",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "yakbox_version", "timestamp", "fingerprint", "ready", "request_fingerprint", "policy_fingerprint", "capability_fingerprint", "calibration_disposition_fingerprint", "runtime_install_fingerprints", "model_directory_fingerprints", "issue_codes"],
+  "properties": {
+    "$schema": {"const": "https://yakbox.dev/schemas/speech-analysis-preflight-v1.schema.json"},
+    "schema_version": {"const": 1},
+    "yakbox_version": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "ready": {"type": "boolean"},
+    "request_fingerprint": {"$ref": "#/$defs/sha256"},
+    "policy_fingerprint": {"$ref": "#/$defs/sha256"},
+    "capability_fingerprint": {"$ref": "#/$defs/sha256"},
+    "calibration_disposition_fingerprint": {"$ref": "#/$defs/sha256"},
+    "runtime_install_fingerprints": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/sha256"}},
+    "model_directory_fingerprints": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/sha256"}},
+    "issue_codes": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/issue"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "issue": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,127}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"ready": {"const": true}}},
+      "then": {"properties": {"issue_codes": {"maxItems": 0}}},
+      "else": {"properties": {"issue_codes": {"minItems": 1}}}
+    }
+  ]
+}

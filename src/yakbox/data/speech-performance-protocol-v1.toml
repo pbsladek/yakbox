@@ -1,0 +1,24 @@
+version = 1
+minimum_measured_runs = 5
+minimum_p95_runs = 20
+maximum_localized_repair_fraction = 0.25
+maximum_model_loads_per_engine = 1
+
+required_workflows = [
+  "delivery_verification",
+  "full_chapter_verification",
+  "localized_repair",
+  "mastered_release_promotion",
+  "multi_repair",
+  "unchanged_build",
+]
+
+required_cache_states = [
+  "cold_process_cold_cache",
+  "fully_repeated_cache_hit",
+  "warm_process_cold_evidence",
+]
+
+# These bounded cache operations may report a P95 only after this protocol's
+# larger sample requirement is met.
+p95_workflows = ["unchanged_build"]

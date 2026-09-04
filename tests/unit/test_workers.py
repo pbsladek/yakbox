@@ -9,10 +9,12 @@ from typing import cast
 import pytest
 
 from yakbox.errors import BuildError, ValidationError
+from yakbox.speech.accelerator import AcceleratorLease
 from yakbox.speech.models import SpeechSynthesisRequest
 from yakbox.speech.workers import (
     WORKER_PROTOCOL_VERSION,
     IsolatedLocalSpeechService,
+    LocalWorkerRequest,
     _read_request,
     _remove_stale_part_files,
 )
@@ -196,6 +198,29 @@ async def test_local_worker_process_is_reused_until_service_closes(
     assert starts == 1
     assert process.returncode == 0
     assert process.stdin.payloads[-1] == b'{"operation":"shutdown"}\n'
+
+
+@pytest.mark.asyncio
+async def test_local_accelerator_synthesis_holds_shared_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lease = AcceleratorLease()
+    service = IsolatedLocalSpeechService(device="mps", accelerator_lease=lease)
+    observed_owner: str | None = None
+
+    async def run_with_lease(
+        _request: LocalWorkerRequest,
+    ) -> tuple[dict[str, object], ...]:
+        nonlocal observed_owner
+        observed_owner = lease.owner
+        return ()
+
+    monkeypatch.setattr(service, "_run_worker_with_lease", run_with_lease)
+    request = LocalWorkerRequest(1, "synthesize_many", "mps", (), False)
+
+    assert await service._run_worker(request) == ()
+    assert observed_owner == "tts:chatterbox"
+    assert lease.owner is None
 
 
 @pytest.mark.asyncio

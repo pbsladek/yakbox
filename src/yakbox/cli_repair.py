@@ -6,7 +6,7 @@ import asyncio
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import NoReturn, Protocol
+from typing import NoReturn, Protocol, cast
 
 import click
 
@@ -15,10 +15,16 @@ from yakbox.audiobook.assembly_manifest import locate_assembly_time
 from yakbox.audiobook.repair import (
     RepairMode,
     approve_repair_session,
+    begin_repair_batch,
+    finalize_repair_batch,
+    generate_repair_batch,
     generate_repair_session,
     plan_repair,
+    stage_repair_batch_entry,
 )
+from yakbox.audiobook.repair_cache import load_cache_events
 from yakbox.errors import YakboxError
+from yakbox.yaml_config import load_yaml
 
 
 class _Emit(Protocol):
@@ -146,6 +152,11 @@ def repair_plan_command(  # noqa: PLR0917 - Click option boundary.
     help="Override the [repairs] number of audition takes.",
 )
 @click.option(
+    "--minimum-passing",
+    type=click.IntRange(min=1, max=20),
+    help="Stop once this many QA-passing takes exist.",
+)
+@click.option(
     "--whisper/--no-whisper",
     "use_whisper",
     default=None,
@@ -161,6 +172,7 @@ def repair_generate_command(  # noqa: PLR0917 - Click option boundary.
     target_name: str,
     mode: str | None,
     takes: int | None,
+    minimum_passing: int | None,
     use_whisper: bool | None,
 ) -> None:
     """Generate multiple deterministic takes in one warm backend session."""
@@ -180,7 +192,12 @@ def repair_generate_command(  # noqa: PLR0917 - Click option boundary.
             generate_repair_session(
                 loaded,
                 plan,
-                takes=takes or loaded.repairs.takes,
+                takes=(effective_takes := takes or loaded.repairs.takes),
+                minimum_passing_takes=(
+                    minimum_passing
+                    if minimum_passing is not None
+                    else min(loaded.repairs.minimum_passing_takes, effective_takes)
+                ),
                 whisper_qa=(
                     loaded.repairs.whisper_qa if use_whisper is None else use_whisper
                 ),
@@ -254,6 +271,176 @@ def repair_approve_command(
     )
 
 
+@repair_group.group("batch")
+def repair_batch_group() -> None:
+    """Stage several localized approvals and rebuild once."""
+
+
+@repair_batch_group.command("begin")
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+def repair_batch_begin_command(manifest: Path) -> None:
+    """Create an empty repair-approval batch."""
+    try:
+        loaded = load_manifest(manifest)
+        batch = begin_repair_batch(loaded)
+    except (YakboxError, OSError, ValueError) as error:
+        _fail(error)
+    value = batch.to_dict(workspace=loaded.root)
+    value["report_path"] = batch.report_path.relative_to(loaded.root).as_posix()
+    _emit(value, f"Created repair batch {batch.id}")
+
+
+@repair_batch_group.command("generate")
+@click.argument("requests", type=click.Path(path_type=Path, exists=True))
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+@click.option(
+    "--takes",
+    type=click.IntRange(min=1, max=20),
+    help="Override the number of audition takes for every request.",
+)
+@click.option(
+    "--minimum-passing",
+    type=click.IntRange(min=1, max=20),
+    help="Stop each request after this many QA-passing takes.",
+)
+@click.option(
+    "--whisper/--no-whisper",
+    "use_whisper",
+    default=None,
+    help="Override Whisper QA for every generated repair.",
+)
+def repair_batch_generate_command(
+    requests: Path,
+    manifest: Path,
+    takes: int | None,
+    minimum_passing: int | None,
+    use_whisper: bool | None,
+) -> None:
+    """Generate a YAML list of locations in one warm, reviewable batch."""
+    try:
+        loaded = load_manifest(manifest)
+        selectors = _batch_selectors(requests)
+        plans = tuple(
+            plan_repair(
+                loaded,
+                target_name=_selector_string(item, "target") or "default",
+                chapter_selector=_selector_string(item, "chapter"),
+                chunk_id=_selector_string(item, "chunk_id"),
+                source_line=_selector_int(item, "line"),
+                text_match=_selector_string(item, "text"),
+                speaker=_selector_string(item, "speaker"),
+                mode=_selector_string(item, "mode") or loaded.repairs.mode,
+            )
+            for item in selectors
+        )
+        effective_takes = takes or loaded.repairs.takes
+        result = asyncio.run(
+            generate_repair_batch(
+                loaded,
+                plans,
+                takes=effective_takes,
+                minimum_passing_takes=(
+                    minimum_passing
+                    if minimum_passing is not None
+                    else min(
+                        loaded.repairs.minimum_passing_takes,
+                        effective_takes,
+                    )
+                ),
+                whisper_qa=(
+                    loaded.repairs.whisper_qa if use_whisper is None else use_whisper
+                ),
+                api_key=os.environ.get("RESEMBLE_API_KEY"),
+            )
+        )
+    except (YakboxError, OSError, TypeError, ValueError) as error:
+        _fail(error)
+    value = result.to_dict(workspace=loaded.root)
+    value["report_path"] = result.report_path.relative_to(loaded.root).as_posix()
+    _emit(
+        value,
+        f"Generated {len(result.sessions)} repair sessions in batch "
+        f"{result.batch.id}\n{result.review_playlist}",
+    )
+
+
+@repair_batch_group.command("approve")
+@click.argument("batch_id")
+@click.argument("repair_id")
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+@click.option(
+    "--take",
+    type=click.IntRange(min=1),
+    required=True,
+    help="Stage this one-based QA-passing take number.",
+)
+def repair_batch_approve_command(
+    batch_id: str,
+    repair_id: str,
+    manifest: Path,
+    take: int,
+) -> None:
+    """Stage one QA-passing take without rebuilding the chapter."""
+    try:
+        loaded = load_manifest(manifest)
+        batch = stage_repair_batch_entry(
+            loaded,
+            batch_id=batch_id,
+            repair_id=repair_id,
+            take=take,
+        )
+    except (YakboxError, OSError, ValueError) as error:
+        _fail(error)
+    _emit(
+        batch.to_dict(workspace=loaded.root),
+        f"Staged repair {repair_id} in batch {batch_id}",
+    )
+
+
+@repair_batch_group.command("finalize")
+@click.argument("batch_id")
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+@click.option(
+    "--rebuild/--no-rebuild",
+    default=True,
+    help="Rebuild and verify the affected chapter once after the atomic commit.",
+)
+def repair_batch_finalize_command(
+    batch_id: str,
+    manifest: Path,
+    rebuild: bool,
+) -> None:
+    """Commit every staged repair atomically, then rebuild at most once."""
+    try:
+        loaded = load_manifest(manifest)
+        approval = finalize_repair_batch(loaded, batch_id=batch_id)
+        result = (
+            asyncio.run(
+                build_audiobook(
+                    loaded,
+                    target_name=approval.target,
+                    chapter_selector=approval.chapter_id,
+                )
+            )
+            if rebuild
+            else None
+        )
+    except (YakboxError, OSError, ValueError) as error:
+        _fail(error)
+    _emit(
+        {
+            "batch_id": batch_id,
+            "target": approval.target,
+            "chapter_id": approval.chapter_id,
+            "approved_chunks": [item.chunk_id for item in approval.repairs],
+            "rebuild_run_id": result.run_id if result is not None else None,
+            "reused_nodes": list(result.reused_nodes) if result is not None else [],
+        },
+        f"Finalized repair batch {batch_id} with {len(approval.repairs)} chunk(s)"
+        + (f"; rebuilt in run {result.run_id}" if result is not None else ""),
+    )
+
+
 @repair_group.command("locate")
 @click.argument("chapter_id")
 @click.argument("at_seconds", type=click.FloatRange(min=0))
@@ -279,3 +466,100 @@ def repair_locate_command(
     chunk = location["chunk"]
     chunk_id = chunk.get("id") if isinstance(chunk, dict) else "unknown"
     _emit(location, f"{chapter_id} at {at_seconds:g}s -> chunk {chunk_id}")
+
+
+@repair_group.group("cache")
+def repair_cache_group() -> None:
+    """Inspect content-addressed repair-stage reuse evidence."""
+
+
+@repair_cache_group.command("why-miss")
+@click.argument("repair_id")
+@click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
+@click.option(
+    "--take",
+    type=click.IntRange(min=1),
+    required=True,
+    help="Inspect cache evidence for this one-based take number.",
+)
+def repair_cache_why_miss_command(
+    repair_id: str,
+    manifest: Path,
+    take: int,
+) -> None:
+    """Explain each repair stage hit or exact cache miss reason."""
+    try:
+        loaded = load_manifest(manifest)
+        report = loaded.root / ".yakbox" / "repair-sessions" / repair_id / "report.json"
+        events = load_cache_events(report, take=take)
+    except (YakboxError, OSError, ValueError) as error:
+        _fail(error)
+    misses = tuple(event for event in events if not event.hit)
+    value: dict[str, object] = {
+        "repair_id": repair_id,
+        "take": take,
+        "reused": not misses,
+        "events": [event.to_dict() for event in events],
+    }
+    _emit(
+        value,
+        (
+            "Every verified candidate was reused"
+            if not misses
+            else f"{len(misses)} repair cache stage(s) missed"
+        ),
+    )
+
+
+def _batch_selectors(path: Path) -> tuple[dict[str, object], ...]:
+    raw = load_yaml(path, description="Repair batch request")
+    if not isinstance(raw, dict):
+        raise ValueError("Repair batch request must be a mapping")
+    values = raw.get("repairs")
+    if not isinstance(values, list) or not values:
+        raise ValueError("Repair batch request requires a non-empty repairs list")
+    result: list[dict[str, object]] = []
+    allowed = {
+        "chunk_id",
+        "line",
+        "text",
+        "speaker",
+        "chapter",
+        "target",
+        "mode",
+    }
+    for index, value in enumerate(values, start=1):
+        if not isinstance(value, dict):
+            raise ValueError(f"Repair batch item {index} must be a mapping")
+        item = cast(dict[str, object], value)
+        unknown = set(item) - allowed
+        if unknown:
+            raise ValueError(
+                f"Repair batch item {index} has unknown fields: "
+                + ", ".join(sorted(unknown))
+            )
+        chosen = sum(item.get(key) is not None for key in ("chunk_id", "line", "text"))
+        if chosen != 1:
+            raise ValueError(
+                f"Repair batch item {index} needs exactly one of chunk_id, line, text"
+            )
+        result.append(item)
+    return tuple(result)
+
+
+def _selector_string(value: dict[str, object], key: str) -> str | None:
+    raw = value.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"Repair batch {key} must be a non-empty string")
+    return raw
+
+
+def _selector_int(value: dict[str, object], key: str) -> int | None:
+    raw = value.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw < 1:
+        raise ValueError(f"Repair batch {key} must be a positive integer")
+    return raw

@@ -9,14 +9,18 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from difflib import SequenceMatcher
 from enum import StrEnum
-from itertools import product
+from itertools import pairwise, product
 from pathlib import Path
+
+import regex
 
 from yakbox.audio.crop import wav_duration_seconds
 from yakbox.contracts import runtime_metadata
 from yakbox.errors import ArtifactError, ValidationError
 from yakbox.local_alignment import MlxWhisperAligner
 from yakbox.speech.alignment import (
+    INTERNAL_CLAUSE_BOUNDARY_PAUSE_MS,
+    INTERNAL_SENTENCE_BOUNDARY_PAUSE_MS,
     MINIMUM_CONSENSUS_DECODE_PASSES,
     AlignmentResult,
     AlignmentToken,
@@ -35,6 +39,9 @@ _MAXIMUM_IGNORED_INSERT_DURATION_SECONDS = 0.2
 _MAXIMUM_NEAR_ZERO_INSERT_CONFIDENCE = 0.05
 _MAXIMUM_REPEATED_INSERT_CONFIDENCE = 0.35
 _MANUSCRIPT_RECHECK_CONTEXT_TOKENS = 8
+_MANUSCRIPT_NARROW_RECHECK_CONTEXT_TOKENS = 2
+_MANUSCRIPT_WIDE_RECHECK_CONTEXT_TOKENS = 16
+_MANUSCRIPT_VERY_WIDE_RECHECK_CONTEXT_TOKENS = 32
 _MANUSCRIPT_RECHECK_GUARD_SECONDS = 0.25
 
 
@@ -118,6 +125,8 @@ class ManuscriptVerification:
     reason_codes: tuple[str, ...]
     diagnostic_reason_codes: tuple[str, ...]
     confidence: AlignmentEvaluation
+    alignment_cache_hits: int = 0
+    alignment_cache_misses: int = 0
 
     @property
     def accepted(self) -> bool:
@@ -139,6 +148,10 @@ class ManuscriptVerification:
             "mismatches": [asdict(item) for item in self.mismatches],
             "alignment": alignment_evidence(self.result, include_transcripts=False),
             "confidence_profile": asdict(self.confidence.profile),
+            "alignment_cache": {
+                "hits": self.alignment_cache_hits,
+                "misses": self.alignment_cache_misses,
+            },
         }
 
 
@@ -277,20 +290,12 @@ def evaluate_alignment(
         reasons.append("expected_transcript_mismatch")
     if not result.tokens:
         reasons.append("target_missing")
-    if clip_type is not WhisperClipType.ONE_WORD:
-        maximum_gap = max(
-            (
-                following.start_seconds - previous.end_seconds
-                for previous, following in zip(
-                    result.tokens,
-                    result.tokens[1:],
-                    strict=False,
-                )
-            ),
-            default=0.0,
-        )
-        if maximum_gap * 1_000 > profile.maximum_internal_gap_ms:
-            reasons.append("excessive_internal_pause")
+    if clip_type is not WhisperClipType.ONE_WORD and _has_unexpected_internal_pause(
+        result.tokens,
+        expected_text,
+        baseline_ms=profile.maximum_internal_gap_ms,
+    ):
+        reasons.append("excessive_internal_pause")
     return AlignmentEvaluation(
         clip_type=clip_type,
         accepted=not reasons,
@@ -298,6 +303,35 @@ def evaluate_alignment(
         minimum_word_confidence=minimum,
         profile=profile,
     )
+
+
+def _has_unexpected_internal_pause(
+    tokens: tuple[AlignmentToken, ...],
+    expected_text: str | None,
+    *,
+    baseline_ms: int,
+) -> bool:
+    gaps = tuple(
+        max(0.0, following.start_seconds - previous.end_seconds) * 1_000
+        for previous, following in pairwise(tokens)
+    )
+    if not gaps:
+        return False
+    words = tuple(regex.finditer(r"[\p{L}\p{M}\p{N}]+", expected_text or ""))
+    if len(words) != len(tokens):
+        return max(gaps) > baseline_ms
+    for index, gap in enumerate(gaps):
+        punctuation = (expected_text or "")[
+            words[index].end() : words[index + 1].start()
+        ]
+        limit = baseline_ms
+        if regex.search(r"[.!?]", punctuation):
+            limit = max(limit, INTERNAL_SENTENCE_BOUNDARY_PAUSE_MS)
+        elif regex.search(r"[,;:]|[\u2013\u2014]", punctuation):
+            limit = max(limit, INTERNAL_CLAUSE_BOUNDARY_PAUSE_MS)
+        if gap > limit:
+            return True
+    return False
 
 
 async def verify_manuscript(
@@ -321,6 +355,12 @@ async def verify_manuscript(
         decode_consensus=True,
     )
     cached_aligner = _with_cache(resolved_aligner, cache_root)
+    cache_hits_before = (
+        cached_aligner.hits if isinstance(cached_aligner, CachedWhisperAligner) else 0
+    )
+    cache_misses_before = (
+        cached_aligner.misses if isinstance(cached_aligner, CachedWhisperAligner) else 0
+    )
     result = await cached_aligner.align(audio, expected_text, language=language)
     expected = canonical_tokens(_expanded_lexical_tokens(expected_text), token_aliases)
     comparison_tokens = tuple(
@@ -332,6 +372,11 @@ async def verify_manuscript(
     )
     expected, comparison_tokens = _coalesce_digit_sequences(expected, comparison_tokens)
     expected, comparison_tokens = _coalesce_compound_equivalents(
+        expected,
+        comparison_tokens,
+        token_aliases=token_aliases,
+    )
+    comparison_tokens = _coalesce_directional_alias_equivalents(
         expected,
         comparison_tokens,
         token_aliases=token_aliases,
@@ -392,6 +437,16 @@ async def verify_manuscript(
         reason_codes=tuple(dict.fromkeys(reasons)),
         diagnostic_reason_codes=tuple(dict.fromkeys(diagnostic_reasons)),
         confidence=confidence,
+        alignment_cache_hits=(
+            cached_aligner.hits - cache_hits_before
+            if isinstance(cached_aligner, CachedWhisperAligner)
+            else 0
+        ),
+        alignment_cache_misses=(
+            cached_aligner.misses - cache_misses_before
+            if isinstance(cached_aligner, CachedWhisperAligner)
+            else 0
+        ),
     )
 
 
@@ -409,53 +464,130 @@ async def _unresolved_manuscript_mismatches(
     if not mismatches or not recognized:
         return mismatches
     duration = wav_duration_seconds(audio)
-    unresolved: list[ManuscriptMismatch] = []
-    for mismatch in mismatches:
-        expected_start = max(
-            0, mismatch.expected_start - _MANUSCRIPT_RECHECK_CONTEXT_TOKENS
-        )
-        expected_end = min(
-            len(expected),
-            mismatch.expected_end + _MANUSCRIPT_RECHECK_CONTEXT_TOKENS,
-        )
-        recognized_start = max(
-            0, mismatch.recognized_start - _MANUSCRIPT_RECHECK_CONTEXT_TOKENS
-        )
-        recognized_end = min(
-            len(recognized),
-            mismatch.recognized_end + _MANUSCRIPT_RECHECK_CONTEXT_TOKENS,
-        )
-        if expected_start >= expected_end or recognized_start >= recognized_end:
-            unresolved.append(mismatch)
-            continue
-        expected_window = expected[expected_start:expected_end]
-        start_seconds = max(
-            0.0,
-            recognized[recognized_start].start_seconds
-            - _MANUSCRIPT_RECHECK_GUARD_SECONDS,
-        )
-        end_seconds = min(
-            duration,
-            recognized[recognized_end - 1].end_seconds
-            + _MANUSCRIPT_RECHECK_GUARD_SECONDS,
-        )
-        if end_seconds <= start_seconds:
-            unresolved.append(mismatch)
-            continue
-        local = await aligner.align_window(
-            audio,
-            " ".join(expected_window),
-            language=language,
-            start_seconds=start_seconds,
-            end_seconds=end_seconds,
-        )
-        if not _independent_decodes_contain_expected(
-            local,
-            expected_window,
-            token_aliases=token_aliases,
+    unresolved = mismatches
+    for context_tokens in (
+        _MANUSCRIPT_RECHECK_CONTEXT_TOKENS,
+        _MANUSCRIPT_NARROW_RECHECK_CONTEXT_TOKENS,
+        _MANUSCRIPT_WIDE_RECHECK_CONTEXT_TOKENS,
+        _MANUSCRIPT_VERY_WIDE_RECHECK_CONTEXT_TOKENS,
+    ):
+        remaining: list[ManuscriptMismatch] = []
+        for group in _merged_mismatch_groups(
+            unresolved,
+            recognized_count=len(recognized),
+            context_tokens=context_tokens,
         ):
-            unresolved.append(mismatch)
-    return tuple(unresolved)
+            combined = _combined_mismatch(group)
+            resolved = await _manuscript_mismatch_resolved(
+                aligner,
+                audio,
+                language=language,
+                expected=expected,
+                recognized=recognized,
+                mismatch=combined,
+                token_aliases=token_aliases,
+                duration=duration,
+                context_tokens=context_tokens,
+            )
+            if not resolved:
+                remaining.extend(group)
+        unresolved = tuple(remaining)
+        if not unresolved:
+            break
+    return unresolved
+
+
+def _merged_mismatch_groups(
+    mismatches: tuple[ManuscriptMismatch, ...],
+    *,
+    recognized_count: int,
+    context_tokens: int,
+) -> tuple[tuple[ManuscriptMismatch, ...], ...]:
+    """Coalesce edits whose requested decode windows would overlap."""
+    groups: list[list[ManuscriptMismatch]] = []
+    end = -1
+    for mismatch in sorted(mismatches, key=lambda item: item.recognized_start):
+        start = max(0, mismatch.recognized_start - context_tokens)
+        candidate_end = min(
+            recognized_count,
+            mismatch.recognized_end + context_tokens,
+        )
+        if groups and start <= end:
+            groups[-1].append(mismatch)
+            end = max(end, candidate_end)
+        else:
+            groups.append([mismatch])
+            end = candidate_end
+    return tuple(tuple(group) for group in groups)
+
+
+def _combined_mismatch(
+    group: tuple[ManuscriptMismatch, ...],
+) -> ManuscriptMismatch:
+    first, last = group[0], group[-1]
+    return ManuscriptMismatch(
+        operation="merged_recheck",
+        expected_start=min(item.expected_start for item in group),
+        expected_end=max(item.expected_end for item in group),
+        recognized_start=first.recognized_start,
+        recognized_end=last.recognized_end,
+        expected_preview=(),
+        recognized_preview=(),
+        expected_tokens_omitted=0,
+        recognized_tokens_omitted=0,
+        audio_start_seconds=first.audio_start_seconds,
+        audio_end_seconds=last.audio_end_seconds,
+    )
+
+
+async def _manuscript_mismatch_resolved(
+    aligner: WindowSpeechAligner,
+    audio: Path,
+    *,
+    language: str,
+    expected: tuple[str, ...],
+    recognized: tuple[AlignmentToken, ...],
+    mismatch: ManuscriptMismatch,
+    token_aliases: Mapping[str, tuple[str, ...]] | None,
+    duration: float,
+    context_tokens: int,
+) -> bool:
+    """Recheck one mismatch in a bounded context window."""
+    expected_start = max(0, mismatch.expected_start - context_tokens)
+    expected_end = min(
+        len(expected),
+        mismatch.expected_end + context_tokens,
+    )
+    recognized_start = max(0, mismatch.recognized_start - context_tokens)
+    recognized_end = min(
+        len(recognized),
+        mismatch.recognized_end + context_tokens,
+    )
+    if expected_start >= expected_end or recognized_start >= recognized_end:
+        return False
+    expected_window = expected[expected_start:expected_end]
+    start_seconds = max(
+        0.0,
+        recognized[recognized_start].start_seconds - _MANUSCRIPT_RECHECK_GUARD_SECONDS,
+    )
+    end_seconds = min(
+        duration,
+        recognized[recognized_end - 1].end_seconds + _MANUSCRIPT_RECHECK_GUARD_SECONDS,
+    )
+    if end_seconds <= start_seconds:
+        return False
+    local = await aligner.align_window(
+        audio,
+        " ".join(expected_window),
+        language=language,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+    )
+    return _independent_decodes_contain_expected(
+        local,
+        expected_window,
+        token_aliases=token_aliases,
+    )
 
 
 def _independent_decodes_contain_expected(
@@ -500,6 +632,11 @@ def _tokens_contain_expected(
     normalized_expected, normalized = _coalesce_compound_equivalents(
         expected,
         timed,
+        token_aliases=token_aliases,
+    )
+    normalized = _coalesce_directional_alias_equivalents(
+        normalized_expected,
+        normalized,
         token_aliases=token_aliases,
     )
     values = tuple(token.text for token in normalized)
@@ -558,7 +695,11 @@ def _coalesce_compound_equivalents(
             if (
                 len(expected_span) == 1
                 and len(recognized_span) == _COMPOUND_PART_COUNT
-                and expected_span[0] == "".join(token.text for token in recognized_span)
+                and (
+                    expected_span[0] == "".join(token.text for token in recognized_span)
+                    or "".join(token.text for token in recognized_span)
+                    in (token_aliases or {}).get(expected_span[0], ())
+                )
             ):
                 first, last = recognized_span
                 merged = replace(
@@ -578,6 +719,41 @@ def _coalesce_compound_equivalents(
                 break
         if not changed:
             return normalized_expected, normalized_recognized
+
+
+def _coalesce_directional_alias_equivalents(
+    expected: tuple[str, ...],
+    recognized: tuple[AlignmentToken, ...],
+    *,
+    token_aliases: Mapping[str, tuple[str, ...]] | None,
+) -> tuple[AlignmentToken, ...]:
+    """Resolve configured one-way aliases without remapping canonical terms."""
+    if not token_aliases:
+        return recognized
+    normalized = recognized
+    while True:
+        matcher = SequenceMatcher(
+            a=expected,
+            b=tuple(token.text for token in normalized),
+            autojunk=False,
+        )
+        changed = False
+        for operation, start_a, end_a, start_b, end_b in matcher.get_opcodes():
+            if operation != "replace" or end_a - start_a != 1 or end_b - start_b != 1:
+                continue
+            expected_token = expected[start_a]
+            recognized_token = normalized[start_b]
+            if recognized_token.text not in token_aliases.get(expected_token, ()):
+                continue
+            normalized = (
+                *normalized[:start_b],
+                replace(recognized_token, text=expected_token),
+                *normalized[end_b:],
+            )
+            changed = True
+            break
+        if not changed:
+            return normalized
 
 
 def _joined_aliases_match(

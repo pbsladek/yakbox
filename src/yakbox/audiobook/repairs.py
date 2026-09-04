@@ -60,6 +60,21 @@ class ApprovedRepair:
         return value
 
 
+@dataclass(frozen=True, slots=True)
+class RepairInstall:
+    """Validated candidate inputs ready for one atomic approval commit."""
+
+    chunk_id: str
+    text_sha256: str
+    profile: str
+    source_path: str
+    source_start_line: int
+    source_end_line: int
+    repair_id: str
+    take: int
+    candidate_audio: Path
+
+
 def approved_repairs_path(workspace: Path, target: str) -> Path:
     """Return the reviewed replacement store for one target."""
     return workspace.resolve() / ".yakbox" / "repairs" / target / "approved.json"
@@ -147,36 +162,45 @@ def install_approved_repair(
     candidate_audio: Path,
 ) -> ApprovedRepair:
     """Copy an auditioned take into managed storage and atomically approve it."""
-    if take < 1:
-        raise ValidationError("Approved repair take must be positive")
-    if not candidate_audio.is_file():
-        raise ArtifactError(f"Repair candidate is missing: {candidate_audio}")
-    audio_sha256 = sha256_file(candidate_audio)
-    repair_root = workspace.resolve() / ".yakbox" / "cache" / "repairs"
-    destination = repair_root / audio_sha256[:2] / f"{audio_sha256}.wav"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if not destination.exists():
-        shutil.copyfile(candidate_audio, destination)
-    if sha256_file(destination) != audio_sha256:
-        raise ArtifactError("Approved repair cache copy failed digest verification")
-    repair = ApprovedRepair(
-        chunk_id=chunk_id,
-        text_sha256=text_sha256,
-        profile=profile,
-        audio_path=destination.resolve(),
-        audio_sha256=audio_sha256,
-        source_path=source_path,
-        source_start_line=source_start_line,
-        source_end_line=source_end_line,
-        repair_id=repair_id,
-        take=take,
-    )
+    return install_approved_repairs(
+        workspace,
+        target,
+        installs=(
+            RepairInstall(
+                chunk_id=chunk_id,
+                text_sha256=text_sha256,
+                profile=profile,
+                source_path=source_path,
+                source_start_line=source_start_line,
+                source_end_line=source_end_line,
+                repair_id=repair_id,
+                take=take,
+                candidate_audio=candidate_audio,
+            ),
+        ),
+    )[0]
+
+
+def install_approved_repairs(
+    workspace: Path,
+    target: str,
+    *,
+    installs: tuple[RepairInstall, ...],
+) -> tuple[ApprovedRepair, ...]:
+    """Validate, cache, and atomically commit several reviewed replacements."""
+    if not installs:
+        raise ValidationError("Repair approval batch must not be empty")
+    chunk_ids = tuple(item.chunk_id for item in installs)
+    if len(chunk_ids) != len(set(chunk_ids)):
+        raise ValidationError("Repair approval batch contains duplicate chunk IDs")
+    prepared = tuple(_prepare_approved_repair(workspace, item) for item in installs)
+    replaced = set(chunk_ids)
     existing = [
         item
         for item in load_approved_repairs(workspace, target)
-        if item.chunk_id != chunk_id
+        if item.chunk_id not in replaced
     ]
-    existing.append(repair)
+    existing.extend(prepared)
     path = approved_repairs_path(workspace, target)
     atomic_write_json(
         path,
@@ -189,7 +213,39 @@ def install_approved_repair(
             ],
         },
     )
-    return repair
+    return prepared
+
+
+def _prepare_approved_repair(
+    workspace: Path,
+    install: RepairInstall,
+) -> ApprovedRepair:
+    take = install.take
+    if take < 1:
+        raise ValidationError("Approved repair take must be positive")
+    candidate_audio = install.candidate_audio
+    if not candidate_audio.is_file():
+        raise ArtifactError(f"Repair candidate is missing: {candidate_audio}")
+    audio_sha256 = sha256_file(candidate_audio)
+    repair_root = workspace.resolve() / ".yakbox" / "cache" / "repairs"
+    destination = repair_root / audio_sha256[:2] / f"{audio_sha256}.wav"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not destination.exists():
+        shutil.copyfile(candidate_audio, destination)
+    if sha256_file(destination) != audio_sha256:
+        raise ArtifactError("Approved repair cache copy failed digest verification")
+    return ApprovedRepair(
+        chunk_id=install.chunk_id,
+        text_sha256=install.text_sha256,
+        profile=install.profile,
+        audio_path=destination.resolve(),
+        audio_sha256=audio_sha256,
+        source_path=install.source_path,
+        source_start_line=install.source_start_line,
+        source_end_line=install.source_end_line,
+        repair_id=install.repair_id,
+        take=take,
+    )
 
 
 def _repair_from_dict(value: object, *, workspace: Path) -> ApprovedRepair:
