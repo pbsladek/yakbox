@@ -1,8 +1,15 @@
 # yakbox: production audiobook build system
 
-Status: working design; Phases 1–7 implemented, later phases pending
+Status: working design; Phases 1–7 implemented; Phase 8 substantially
+implemented with release evidence pending; Phases 9–10 parked
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-09-04
+
+Active qualification and listening-review work is tracked in
+[`todo.md`](../todo.md). The multi-model speech-analysis workstream has its own
+fail-closed public-cutover gates and does not describe current public build
+behavior. The localhost UI and service/Kubernetes phases remain inactive until
+the user explicitly activates them.
 
 Target release: `yakbox` 1.0
 
@@ -2800,7 +2807,12 @@ Use Hypothesis for:
 ### 12.8 Coverage policy
 
 - Branch coverage, not only statement coverage.
-- Repository minimum: 90% line and 85% branch after the migration.
+- The current enforceable floor is 75% combined branch-aware coverage, as
+  configured in `pyproject.toml` and `docs/code-quality.md`. It is a ratchet,
+  not the target.
+- Post-migration target: 90% line and 85% branch. Raise the enforceable floor
+  as direct branch tests close the gap; do not weaken or exclude hard-to-test
+  runtime and CLI paths to reach it.
 - Audiobook/speech core (`audiobook/`, `speech/services.py`, artifact state)
   and cloud reliability core (`retry.py`, `output.py`, `batch.py`): 95% line
   and 90% branch.
@@ -3185,6 +3197,20 @@ Gate:
   terminology.
 
 ### Phase 8 — hardening and release candidate
+
+Implementation status (2026-09-04): the repository has a Python 3.14
+Linux/macOS/Windows test matrix, branch-aware coverage, dependency audits,
+package smoke tests, scheduled performance and mutation suites, and a release
+workflow with Trusted Publishing, checksums, CycloneDX SBOMs, and provenance
+attestations. Phase 8 remains open because the complete section 16 evidence has
+not been reviewed and recorded.
+
+The remaining CI and release-evidence gaps are the minimum-direct resolution
+job, scheduled newest-lock and Python-prerelease tests, CodeQL analysis, the
+complete optional-extra install matrix, built wheel/sdist verification on all
+three operating systems, and a dedicated vulnerability-reporting policy. The
+active narration and speech-analysis qualification work is tracked in
+[`todo.md`](../todo.md).
 
 Deliverables:
 
@@ -3573,6 +3599,12 @@ Gate:
   and require no cluster/service dependencies.
 
 ## 16. Definition of done
+
+Tracking note (2026-09-04): this is the release acceptance record, not a list
+of missing implementations. Many capabilities below exist and have automated
+tests, but they remain unchecked until their authoritative release evidence is
+reviewed. Current human-review and qualification work is tracked in
+[`todo.md`](../todo.md).
 
 The target 1.0 release is complete only when all are proven below. Parked
 phases 9 and 10 are intentionally excluded: they neither block 1.0 nor begin
