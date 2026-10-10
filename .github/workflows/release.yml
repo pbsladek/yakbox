@@ -146,10 +146,16 @@ jobs:
           name: python-package-distributions
           path: dist/
       - name: Install and verify the built wheel
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
         run: |
           uv venv --python 3.14 .release-venv
           uv pip install --python .release-venv/bin/python dist/*.whl
-          .release-venv/bin/yakbox --version
+          expected="yakbox, version ${RELEASE_TAG#v} (commit ${RELEASE_COMMIT})"
+          actual="$(.release-venv/bin/yakbox --version)"
+          printf '%s\n' "$actual"
+          test "$actual" = "$expected"
           .release-venv/bin/python tests/package_sdk_consumer.py
           .release-venv/bin/python tests/package_worker_consumer.py
 

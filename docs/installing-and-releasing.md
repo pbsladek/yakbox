@@ -114,6 +114,24 @@ dependency-audit gates, including exact audits for the Whisper, Parakeet, and
 Qwen worker dependency slices. It builds the distributions once, verifies
 isolated installs, and exports checksums, SBOMs, and a JSON preflight report.
 Twine validates the wheel and source metadata and README before publication.
+Both distributions embed the full Git commit selected for the release.
+`yakbox --version` prints it alongside the package version:
+
+```text
+yakbox, version 0.2.0 (commit 0123456789abcdef0123456789abcdef01234567)
+```
+
+Preflight checks isolated installs of the wheel and source archive against
+the release version and commit; the macOS and Linux release jobs also check
+the installed wheel. Metadata remains embedded when the source archive is
+rebuilt after installation. Version output reads the installed package and
+does not require Git or inspect the caller's working directory.
+An unstamped development package prints `commit unknown`. For a package build
+from a clean Git checkout, use `uv run python -m yakbox._build`;
+`make release-preflight` already embeds the commit and restores the source file
+after packaging. Commit-stamped builds reject uncommitted changes so their
+commit identifier describes the packaged source.
+
 Both macOS and Linux then run the offline test suite and verify the same wheel.
 Release test failures retain coverage and JUnit diagnostics. Every publication
 job verifies the downloaded assets against `SHA256SUMS` before uploading them.

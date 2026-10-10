@@ -281,6 +281,30 @@ def test_release_uploads_tested_assets_and_targets_the_resolved_commit() -> None
         "tests/package_worker_consumer.py" in str(step.get("run", ""))
         for step in test_steps
     )
+    install = next(
+        step
+        for step in test_steps
+        if step.get("name") == "Install and verify the built wheel"
+    )
+    assert _mapping(install["env"])["RELEASE_COMMIT"] == (
+        "${{ needs.build.outputs.commit }}"
+    )
+    assert "${RELEASE_TAG#v} (commit ${RELEASE_COMMIT})" in str(install["run"])
+    assert 'test "$actual" = "$expected"' in str(install["run"])
+
+
+def test_ci_packages_the_commit_and_checks_installed_wheel_and_source() -> None:
+    steps = cast(list[dict[str, object]], _job(_workflow("ci.yml"), "package")["steps"])
+    assert any("python -m yakbox._build" in str(step.get("run", "")) for step in steps)
+    verify = next(
+        step
+        for step in steps
+        if step.get("name") == "Verify installed wheel and source version metadata"
+    )
+    command = str(verify["run"])
+    assert "git rev-parse HEAD" in command
+    assert 'test "$wheel_version" = "$expected"' in command
+    assert 'test "$source_version" = "$expected"' in command
 
 
 def _release_resolver_script() -> str:

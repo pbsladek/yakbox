@@ -51,7 +51,7 @@ uv lock --check
 Use `uv run ruff format .` to format code. The full packaging check is:
 
 ```console
-uv build --no-sources
+uv run python -m yakbox._build
 ```
 
 FFmpeg and FFprobe are required for audio mastering, encoding, inspection, and

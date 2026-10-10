@@ -105,7 +105,8 @@ jobs:
           version: "latest"
           python-version: "3.14"
           enable-cache: true
-      - run: uv build --no-sources
+      - name: Build distributions with their source commit
+        run: uv run python -m yakbox._build
       - name: Validate PyPI metadata and README
         run: uv run twine check --strict dist/*
       - run: uv run --isolated --no-project --with dist/*.whl yakbox --help
@@ -124,7 +125,14 @@ jobs:
           --project /tmp
           --python .sdk-venv/bin/python
           tests/package_sdk_consumer.py
-      - run: uv run --isolated --no-project --with dist/*.tar.gz yakbox --version
+      - name: Verify installed wheel and source version metadata
+        run: |
+          expected="yakbox, version $(uv version --short) (commit $(git rev-parse HEAD))"
+          wheel_version="$(.sdk-venv/bin/yakbox --version)"
+          source_version="$(uv run --isolated --no-project --with dist/*.tar.gz yakbox --version)"
+          printf '%s\n' "$wheel_version" "$source_version"
+          test "$wheel_version" = "$expected"
+          test "$source_version" = "$expected"
 
   gate:
     name: CI gate

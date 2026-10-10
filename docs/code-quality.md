@@ -16,7 +16,7 @@ uv run ty check
 uv run lint-imports --no-cache
 uv run pytest --cov=yakbox --cov-branch
 uv lock --check
-uv build --no-sources
+uv run python -m yakbox._build
 uv run twine check --strict dist/*
 ```
 
@@ -40,6 +40,8 @@ and both CI and release runs retain coverage and JUnit diagnostics after a test
 failure. The package job exercises isolated wheel and source installs, SDK
 imports and typing, PyPI metadata and README validation, and the packaged
 analysis workers before a merge.
+Wheel and source installs must print the package version and the build commit
+with `yakbox --version`, matching the commit tested by CI.
 
 Dependabot checks all four uv projects and pinned GitHub Actions weekly.
 Dependency upgrades should arrive through pull requests and pass `CI gate`.
