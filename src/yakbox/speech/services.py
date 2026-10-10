@@ -4,7 +4,7 @@ import io
 import math
 import struct
 import wave
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -189,7 +189,7 @@ async def open_speech_backend(
     local_conditioning_cache_size: int = 8,
     local_runtime_maximum_memory_bytes: int | None = None,
     accelerator_lease: AcceleratorLease | None = None,
-) -> AsyncIterator[TextToSpeechService]:
+) -> AsyncGenerator[TextToSpeechService]:
     """Open one backend service and close resources when the context exits."""
     normalized = name.casefold()
     if normalized == "fake":
@@ -282,7 +282,7 @@ async def open_speech_backend(
 @asynccontextmanager
 async def open_transformation_backend(
     name: str,
-) -> AsyncIterator[SpeechTransformationService]:
+) -> AsyncGenerator[SpeechTransformationService]:
     """Open a transformation backend for the lifetime of the async context."""
     normalized = name.casefold()
     if normalized == "fake":
@@ -304,7 +304,7 @@ async def open_transformation_backend(
 async def open_configured_speech_backend(
     name: str,
     options: SpeechBackendOptions,
-) -> AsyncIterator[TextToSpeechService]:
+) -> AsyncGenerator[TextToSpeechService]:
     """Open a speech backend from one evolvable typed options object."""
     async with open_speech_backend(
         name,

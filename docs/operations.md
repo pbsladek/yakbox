@@ -88,6 +88,18 @@ preflight, and stage failures retain the run journal and do not leave owned
 `yakbox artifacts verify` reports the mismatch; rebuild from source rather
 than accepting unexplained bytes.
 
+The hosted client's `max_json_response_bytes` limit (64 MiB by default) is
+checked before buffering a declared oversized body and while reading decoded
+JSON bytes. It also applies to recording-upload responses. Provider errors
+retain at most a 4 KiB prefix before closing the response; an unreadable error
+body preserves the HTTP status used for retry decisions.
+
+Local worker timeouts cover stalled request writes as well as waits for
+per-item progress. Analysis batch deadlines cover the worker handshake,
+request write, and response reads.
+Rejected analysis-worker handshakes and response frames discard the process,
+so the next request starts with a fresh handshake.
+
 ## Troubleshooting
 
 `FFmpeg is required`: install FFmpeg and ensure both `ffmpeg` and `ffprobe` are

@@ -464,6 +464,10 @@ loads each model, keeps up to the configured number of voice-conditioning
 states, stops after the idle timeout, and can stop after a request if the
 resident-memory ceiling is exceeded.
 
+Each runtime request and response supports up to 16 MiB of UTF-8 JSON,
+including the terminating newline. Larger messages are rejected; the limit
+applies to the complete batch rather than to each speech chunk.
+
 ```console
 yakbox runtime start yakbox.toml
 yakbox runtime status yakbox.toml

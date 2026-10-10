@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -159,6 +160,17 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
     assert "yakbox-worker-parakeet.cdx.json" in checksums
     assert "yakbox-worker-qwen.cdx.json" in checksums
     assert "release-preflight.json" in checksums
+    assets = {
+        item.path.name: item.path
+        for item in (*report.distributions, report.sbom, *report.worker_sboms)
+    }
+    assets[report.report_path.name] = report.report_path
+    entries = [line.split("  ", 1) for line in checksums.splitlines()]
+    assert {name for _, name in entries} == set(assets)
+    assert all(
+        digest == hashlib.sha256(assets[name].read_bytes()).hexdigest()
+        for digest, name in entries
+    )
     assert (
         commands.count(
             (
@@ -173,7 +185,17 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
         )
         == 1
     )
-    assert ("uv", "run", "pytest") in commands
+    assert ("uv", "run", "pytest", "--cov=yakbox", "--cov-branch") in commands
+    assert (
+        "uv",
+        "run",
+        "twine",
+        "check",
+        "--strict",
+        str(tmp_path / "dist" / "yakbox-0.1.0-py3-none-any.whl"),
+        str(tmp_path / "dist" / "yakbox-0.1.0.tar.gz"),
+    ) in commands
+    assert sum(command[:2] == ("uv", "lock") for command in commands) == 4
     assert ("uv", "run", "lint-imports", "--no-cache") in commands
     assert ("uv", "audit", "--frozen") in commands
     assert len(report.worker_sboms) == 3

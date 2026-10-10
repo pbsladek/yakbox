@@ -9,7 +9,7 @@ import os
 import re
 import shutil
 import wave
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -936,7 +936,7 @@ async def _journal_hosted_usage(
     service: TextToSpeechService,
     journal: RunJournal,
     prior_events: tuple[dict[str, object], ...],
-) -> AsyncIterator[None]:
+) -> AsyncGenerator[None]:
     if not isinstance(service, HostedUsageJournalingService):
         yield
         return

@@ -9,19 +9,22 @@ backends also power direct text-to-speech commands.
 
 ## Install
 
-Yakbox supports Python 3.14 only. Install the CLI with
+Yakbox supports macOS and Linux with Python 3.14. Install the CLI from a
+[GitHub Release](https://github.com/pbsladek/yakbox/releases) with
 [uv](https://docs.astral.sh/uv/):
 
 ```console
-uv tool install yakbox
+uv tool install --python 3.14 \
+  https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl
 yakbox doctor
 ```
 
 For local Chatterbox synthesis:
 
 ```console
-uv tool install "yakbox[local]" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 \
+  "yakbox[local] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
 ```
 
 FFmpeg and FFprobe are required to master, encode, inspect, and assemble audio.
@@ -31,6 +34,10 @@ You can also install a wheel downloaded from the
 ```console
 uv tool install ./yakbox-*.whl
 ```
+
+Releases include `SHA256SUMS`. See the
+[installation and release guide](docs/installing-and-releasing.md) for checksum
+verification, local release commands, and optional PyPI publishing.
 
 ## Build an audiobook
 

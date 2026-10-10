@@ -278,6 +278,10 @@ override file is
 records its source and rights URL. The 25-text inventory fingerprint is
 `e306fc8d84aa126acd0e92b13c94336dc22bc040cc57a3ec849ffefb69808bae`.
 
+Source-text downloads stop when the decoded response exceeds 64 MiB. Declared
+oversized responses are rejected before reading the body, and missing length
+headers do not bypass the limit.
+
 Source anchoring has two evidence tiers. The stronger tier requires two or
 more recognizers to match one unique span in the pinned text. The second tier
 requires one exact recognizer match against one unique source span, at least

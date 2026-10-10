@@ -2,26 +2,27 @@
 
 ## Install
 
-Yakbox supports Python 3.14 only. Install the default CLI without
+Yakbox supports macOS and Linux with Python 3.14. Install the default CLI without
 PyTorch:
 
 ```console
-uv tool install yakbox
+uv tool install --python 3.14 \
+  https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl
 ```
 
 Install local Chatterbox only on a machine intended to run the model:
 
 ```console
-uv tool install "yakbox[local]" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
 ```
 
 On Apple Silicon, add the local MLX Whisper aligner when using verified
 context extraction for short utterances:
 
 ```console
-uv tool install "yakbox[local,alignment]" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local,alignment] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
 ```
 
 The aligner is optional and runs locally. Install the pinned Whisper model

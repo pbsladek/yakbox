@@ -91,8 +91,8 @@ to accommodate a change.
 
 Yakbox supports Python 3.14 only. Package metadata, Ruff, `ty`, the lockfile,
 documentation, and CI agree on that runtime. The project and workflows
-also use `uv 0.12.x`, so a standard local installation no longer fails the
-repository's own uv-version check.
+accept `uv>=0.13.0` without an upper version ceiling, and workflows install
+the latest stable uv. A current local installation can run the same gates as CI.
 
 ### CLI and SDK contracts
 

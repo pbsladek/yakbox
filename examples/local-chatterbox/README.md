@@ -30,8 +30,8 @@ more generic slots expose the expanded catalog:
 | `character-24` | `john-burlinson` | male |
 
 ```console
-uv tool install "yakbox[local]" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
 yakbox doctor yakbox.toml --backend chatterbox-local --deep
 yakbox validate
 yakbox plan
@@ -151,8 +151,8 @@ On an Apple Silicon Mac, install both local model extras to try verified
 context extraction for one- to three-word chunks:
 
 ```console
-uv tool install "yakbox[local,alignment]" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.1.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local,alignment] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
 ```
 
 Then run `yakbox whisper models install` and set

@@ -322,7 +322,7 @@ remains part of the explicit `doctor --whisper --deep` smoke test.
 
 CI requires zero false accepts and zero false rejects on this frozen corpus.
 That protects threshold changes without requiring the Apple-only model on
-Linux and Windows runners.
+Linux runners.
 
 ## Configuration
 

@@ -19,6 +19,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import httpx
 
 from yakbox._files import atomic_write_bytes, atomic_write_json, safe_child, sha256_file
+from yakbox._http import buffered_response
 from yakbox.contracts import runtime_metadata, schema_uri
 from yakbox.errors import ValidationError
 from yakbox.speech.analysis_corpus_sources import load_licensed_voice_sources
@@ -558,23 +559,34 @@ def _plain_text_link(
 def _bounded_get(client: httpx.Client, url: str) -> httpx.Response:
     _require_https(url, "source-text download URL")
     try:
-        response = client.get(url)
-        response.raise_for_status()
+        with client.stream("GET", url) as response:
+            response.raise_for_status()
+            for followed in (*response.history, response):
+                _require_https(str(followed.url), "source-text redirect URL")
+            _check_content_length(response)
+            chunks: list[bytes] = []
+            size = 0
+            for chunk in response.iter_bytes():
+                size += len(chunk)
+                if size > _MAXIMUM_RESPONSE_BYTES:
+                    raise ValidationError("Source-text response exceeds byte limit")
+                chunks.append(chunk)
+            return buffered_response(response, b"".join(chunks))
     except httpx.HTTPError as error:
         raise ValidationError("Cannot download public-domain source text") from error
-    for followed in (*response.history, response):
-        _require_https(str(followed.url), "source-text redirect URL")
+
+
+def _check_content_length(response: httpx.Response) -> None:
     length = response.headers.get("content-length")
     if length is not None:
         try:
             declared = int(length)
         except ValueError as error:
             raise ValidationError("Source-text content length is invalid") from error
+        if declared < 0:
+            raise ValidationError("Source-text content length is invalid")
         if declared > _MAXIMUM_RESPONSE_BYTES:
             raise ValidationError("Source-text response exceeds byte limit")
-    if len(response.content) > _MAXIMUM_RESPONSE_BYTES:
-        raise ValidationError("Source-text response exceeds byte limit")
-    return response
 
 
 def _load_source(value: object, *, text_root: Path) -> CorpusTextSource:

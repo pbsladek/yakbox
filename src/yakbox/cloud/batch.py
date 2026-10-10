@@ -5,7 +5,7 @@ import hashlib
 import json
 import tempfile
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -185,7 +185,7 @@ class _BatchRun:
 
 
 @contextmanager
-def _row_spool_stream() -> Iterator[tempfile.SpooledTemporaryFile[str]]:
+def _row_spool_stream() -> Generator[tempfile.SpooledTemporaryFile[str]]:
     with tempfile.SpooledTemporaryFile(
         max_size=1024 * 1024,
         mode="w+t",

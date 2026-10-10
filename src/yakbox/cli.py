@@ -6,7 +6,7 @@ import importlib.util
 import json
 import os
 import sys
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from decimal import Decimal
@@ -752,7 +752,7 @@ def _validate_build_preflight(
 def _build_progress(
     options: _BuildCommandOptions,
     total: int,
-) -> Iterator[BuildProgressCallback | None]:
+) -> Generator[BuildProgressCallback | None]:
     enabled = (
         not options.no_progress
         and not options.dry_run

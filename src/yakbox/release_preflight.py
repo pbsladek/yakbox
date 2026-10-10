@@ -156,12 +156,13 @@ def run_release_preflight(
         ("uv", "run", "ruff", "check", "."),
         ("uv", "run", "ty", "check"),
         ("uv", "run", "lint-imports", "--no-cache"),
-        ("uv", "run", "pytest"),
+        ("uv", "run", "pytest", "--cov=yakbox", "--cov-branch"),
         ("uv", "audit", "--frozen"),
     )
     for command in quality_commands:
         command_runner(command, root)
     for project in _WORKER_PROJECTS.values():
+        command_runner(("uv", "lock", "--project", str(project), "--check"), root)
         command_runner(_worker_audit_command(project), root)
 
     command_runner(
@@ -173,6 +174,18 @@ def run_release_preflight(
             "--no-create-gitignore",
             "--out-dir",
             str(distribution_root),
+        ),
+        root,
+    )
+    distributions = _distribution_files(distribution_root, version)
+    command_runner(
+        (
+            "uv",
+            "run",
+            "twine",
+            "check",
+            "--strict",
+            *(str(item.path) for item in distributions),
         ),
         root,
     )
@@ -191,7 +204,6 @@ def run_release_preflight(
         root,
     )
 
-    distributions = _distribution_files(distribution_root, version)
     _verify_sbom(sbom_path, name="yakbox", version=version)
     worker_sbom_paths = tuple(
         metadata_root / _WORKER_SBOM_FILENAMES[family] for family in _WORKER_PROJECTS

@@ -282,6 +282,7 @@ class IsolatedAnalysisWorker:
                 "Analysis worker terminated before returning a result",
             )
         except WorkerProtocolError as error:
+            await self._terminate()
             return self._cancelled_protocol_failure(request.request_id, error)
 
     def _retry_failure(
@@ -335,14 +336,9 @@ class IsolatedAnalysisWorker:
             self._idle.clear()
             deadline = time.monotonic() + timeout_seconds
             try:
-                process = await self._ensure_process()
-                if process.stdin is None:
-                    raise WorkerProtocolError(
-                        "Analysis worker input pipe is unavailable"
-                    )
-                async with self._write_lock:
-                    process.stdin.write(encode_worker_request(request) + b"\n")
-                    await process.stdin.drain()
+                process = await asyncio.wait_for(
+                    self._start_batch(request), timeout=timeout_seconds
+                )
                 while True:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -372,6 +368,17 @@ class IsolatedAnalysisWorker:
                 self._idle.set()
                 if not finished or cancelled:
                     await self._terminate()
+
+    async def _start_batch(
+        self, request: RecognitionManyWorkerRequest | ForcedAlignmentManyWorkerRequest
+    ) -> asyncio.subprocess.Process:
+        process = await self._ensure_process()
+        if process.stdin is None:
+            raise WorkerProtocolError("Analysis worker input pipe is unavailable")
+        async with self._write_lock:
+            process.stdin.write(encode_worker_request(request) + b"\n")
+            await process.stdin.drain()
+        return process
 
     def _require_allowed_engine(self, engine: object) -> None:
         if engine is not None and engine not in self.definition.engines:
@@ -524,12 +531,15 @@ class IsolatedAnalysisWorker:
             raise WorkerProtocolError("Analysis worker handshake pipe is unavailable")
         try:
             frame = await self._process.stdout.readuntil(b"\n")
+            actual = parse_worker_handshake(frame[:-1])
         except (asyncio.IncompleteReadError, asyncio.LimitOverrunError) as error:
             await self._terminate()
             raise WorkerProtocolError(
                 "Analysis worker handshake is incomplete"
             ) from error
-        actual = parse_worker_handshake(frame[:-1])
+        except WorkerProtocolError:
+            await self._terminate()
+            raise
         planned = build_worker_handshake(
             family=self.definition.family,
             engines=self.definition.engines,

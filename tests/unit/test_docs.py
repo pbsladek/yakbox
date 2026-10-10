@@ -118,8 +118,10 @@ def test_ci_installs_ffmpeg_on_every_supported_runner_and_allows_only_local_ipc(
     workflow = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     project = (root / "pyproject.toml").read_text(encoding="utf-8")
 
-    for runner in ("Linux", "macOS", "Windows"):
+    for runner in ("Linux", "macOS"):
         assert f"runner.os == '{runner}'" in workflow
+    assert "windows-latest" not in workflow
+    assert "choco install" not in workflow
     assert 'python: "3.12"' not in workflow
     assert 'python: "3.13"' not in workflow
     for path in (root / ".github" / "workflows").glob("*.yml"):
@@ -146,6 +148,7 @@ def test_local_extra_and_distributed_security_overrides_stay_aligned() -> None:
         "torch",
         "torchaudio",
         "transformers",
+        "urllib3",
     }
     local = {
         Requirement(value).name
@@ -166,7 +169,7 @@ def test_local_extra_and_distributed_security_overrides_stay_aligned() -> None:
         if line and not line.startswith("#")
     }
 
-    assert expected - {"cryptography"} <= local
+    assert expected - {"cryptography", "urllib3"} <= local
     assert configured == expected
     assert distributed == expected
 
