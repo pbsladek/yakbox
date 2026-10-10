@@ -5,7 +5,7 @@ import hashlib
 import json
 import tomllib
 import wave
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -569,7 +569,7 @@ async def test_local_preview_and_audition_use_isolated_backend(
     @asynccontextmanager
     async def backend(
         _name: str, **options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         backend_options.append(options)
         yield service
 
@@ -700,7 +700,7 @@ async def test_explicit_preview_and_audition_apply_manifest_pronunciations(
     @asynccontextmanager
     async def backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield service
 
     monkeypatch.setattr(build_module, "open_speech_backend", backend)
@@ -732,7 +732,7 @@ async def test_audition_matrix_is_deterministic_and_reports_persistable_settings
         api_key: str | None = None,
         device: str | None = None,
         **_options: object,
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         nonlocal opened
         opened += 1
         async with original_open(name, api_key=api_key, device=device) as service:
@@ -1133,7 +1133,7 @@ async def test_hosted_audiobook_scheduling_is_bounded_and_overlapping(
     @asynccontextmanager
     async def backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield service
 
     monkeypatch.setattr(build_module, "open_speech_backend", backend)
@@ -1153,7 +1153,7 @@ async def test_cancelled_audiobook_run_is_resumable_and_releases_lock(
     @asynccontextmanager
     async def blocking_backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield service
 
     monkeypatch.setattr(build_module, "open_speech_backend", blocking_backend)
@@ -1177,7 +1177,7 @@ async def test_cancelled_audiobook_run_is_resumable_and_releases_lock(
     @asynccontextmanager
     async def fake_backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield FakeSpeechService()
 
     monkeypatch.setattr(build_module, "open_speech_backend", fake_backend)
@@ -1205,7 +1205,7 @@ async def test_local_chapter_chunks_share_one_isolated_worker_request(
     @asynccontextmanager
     async def backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield service
 
     monkeypatch.setattr(build_module, "open_speech_backend", backend)
@@ -1277,7 +1277,7 @@ async def test_character_routes_switch_voice_reference_and_performance_per_chunk
     @asynccontextmanager
     async def backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield service
 
     monkeypatch.setattr(build_module, "open_speech_backend", backend)
@@ -1356,7 +1356,7 @@ async def test_chatterbox_native_rate_is_used_for_explicit_pauses(
     @asynccontextmanager
     async def backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield _NativeRateFakeService()
 
     monkeypatch.setattr(build_module, "open_speech_backend", backend)
@@ -1393,7 +1393,7 @@ async def test_mismatched_backend_chunks_are_normalized_before_join(
     @asynccontextmanager
     async def backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield service
 
     monkeypatch.setattr(build_module, "open_speech_backend", backend)
@@ -1441,7 +1441,7 @@ async def test_failed_chapter_resumes_from_verified_file_backed_chunk_cache(
     @asynccontextmanager
     async def backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield next(services)
 
     monkeypatch.setattr(build_module, "open_speech_backend", backend)
@@ -1481,7 +1481,7 @@ async def test_hosted_audiobook_reservation_survives_failed_run_resume(
     @asynccontextmanager
     async def backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         service = _JournaledHostedService()
         services.append(service)
         yield service

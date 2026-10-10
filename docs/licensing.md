@@ -18,6 +18,15 @@ also include a license review; a vulnerability result is not a license result.
 The required PyYAML configuration parser is MIT-licensed and is invoked only
 through its safe loaders.
 
+The release metadata checker uses Apache-2.0 Twine, Readme Renderer,
+Requests Toolbelt, `id`, and `rfc3986`, plus MIT `nh3`. These are development
+dependencies and are not vendored in Yakbox. Docutils is also used by the
+checker: its parsing library is public domain with BSD-licensed components.
+Its upstream GPL-licensed Emacs editor support is outside the installed
+library and is not redistributed by Yakbox. This review accepts the parser
+for development metadata checks; it does not authorize bundling the editor
+support. See [Docutils copying terms](https://docutils.sourceforge.io/COPYING.html).
+
 ## Media, reference voices, and documentation assets
 
 Bundled media must be public domain, CC0, or CC BY 4.0. Attribution required by

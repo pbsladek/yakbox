@@ -1,0 +1,52 @@
+.DEFAULT_GOAL := help
+
+UV ?= uv
+GH ?= gh
+RELEASE_REPO ?= pbsladek/yakbox
+RELEASE_REF ?= main
+RELEASE_TAG ?=
+PUBLISH_TO ?= github
+RUN_ID ?=
+
+# Pass settings as environment values so recipes preserve spaces and punctuation.
+export RELEASE_REPO RELEASE_REF RELEASE_TAG PUBLISH_TO RUN_ID
+
+.PHONY: help release release-preflight release-runs release-watch
+
+help:
+	@printf '%s\n' \
+	  'make release             Dispatch the checked release workflow (GitHub by default).' \
+	  'make release-preflight   Check and build the local version from a clean worktree.' \
+	  'make release-runs        List release workflow runs.' \
+	  'make release-watch RUN_ID=12345  Watch one run and return its exit status.' \
+	  '' \
+	  'Settings: RELEASE_REPO=pbsladek/yakbox RELEASE_REF=main RELEASE_TAG=' \
+	  '          PUBLISH_TO=github|pypi|testpypi UV=uv GH=gh' \
+	  'An empty RELEASE_TAG uses the selected commit version (local for preflight).'
+
+release:
+	@case "$$PUBLISH_TO" in \
+	  github|pypi|testpypi) ;; \
+	  *) printf '%s\n' 'PUBLISH_TO must be github, pypi, or testpypi.' >&2; exit 2 ;; \
+	esac
+	$(GH) workflow run release.yml --repo "$$RELEASE_REPO" --ref "$$RELEASE_REF" \
+	  -f "tag=$$RELEASE_TAG" -f "publish_to=$$PUBLISH_TO"
+	@printf '%s\n' 'Release dispatched. Use make release-runs, then make release-watch RUN_ID=<id>.'
+
+release-preflight:
+	@set -eu; \
+	tag="$$RELEASE_TAG"; \
+	if [ -z "$$tag" ]; then \
+	  version="$$($(UV) version --short)"; \
+	  tag="v$$version"; \
+	fi; \
+	$(UV) run yakbox-release-preflight --tag "$$tag"
+
+release-runs:
+	$(GH) run list --repo "$$RELEASE_REPO" --workflow release.yml
+
+release-watch:
+	@case "$$RUN_ID" in \
+	  ''|*[!0-9]*) printf '%s\n' 'Set RUN_ID to the numeric ID from make release-runs.' >&2; exit 2 ;; \
+	esac
+	$(GH) run watch "$$RUN_ID" --repo "$$RELEASE_REPO" --exit-status

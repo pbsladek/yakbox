@@ -6,7 +6,7 @@ import json
 import os
 import re
 import tempfile
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from pathlib import Path
 from typing import Self, cast
@@ -14,6 +14,7 @@ from typing import Self, cast
 import httpx
 
 from yakbox import __version__
+from yakbox._http import buffered_response
 from yakbox.cloud.errors import (
     AmbiguousMutationError,
     ClientStateError,
@@ -53,6 +54,7 @@ _DEFINITELY_UNSENT_ERRORS = (
     httpx.ConnectTimeout,
     httpx.PoolTimeout,
 )
+_MAXIMUM_ERROR_BODY_BYTES = 4096
 
 
 class ResembleClient:
@@ -213,7 +215,7 @@ class ResembleClient:
     @asynccontextmanager
     async def _stream_once(
         self, request: StreamRequest
-    ) -> AsyncIterator[AsyncIterator[bytes]]:
+    ) -> AsyncGenerator[AsyncIterator[bytes]]:
         if self._usage_gate is not None:
             await self._usage_gate.add_logical_item()
 
@@ -375,7 +377,8 @@ class ResembleClient:
         async def operation(_attempt: int) -> httpx.Response:
             http = self._require_http()
             with audio_path.open("rb") as audio:
-                response = await http.post(
+                request = http.build_request(
+                    "POST",
                     (
                         f"{self.options.management_base_url}/voices/"
                         f"{voice_uuid}/recordings"
@@ -395,12 +398,7 @@ class ResembleClient:
                         "fill": str(fill).lower(),
                     },
                 )
-            if not response.is_success:
-                await self._raise_for_response(
-                    response,
-                    ambiguous=(response.status_code in _AMBIGUOUS_MUTATION_STATUSES),
-                )
-            return response
+                return await self._send_json_request(request, ambiguous_mutation=True)
 
         response = await self._management_mutation(
             "Recording creation",
@@ -496,25 +494,52 @@ class ResembleClient:
         params: dict[str, str | int | float | None] | None = None,
         ambiguous_mutation: bool = False,
     ) -> httpx.Response:
-        response = await self._require_http().request(
+        request = self._require_http().build_request(
             method, url, json=json_body, params=params
         )
-        if not response.is_success:
-            await self._raise_for_response(
-                response,
-                ambiguous=(
-                    ambiguous_mutation
-                    and response.status_code in _AMBIGUOUS_MUTATION_STATUSES
-                ),
-            )
+        return await self._send_json_request(
+            request, ambiguous_mutation=ambiguous_mutation
+        )
+
+    async def _send_json_request(
+        self, request: httpx.Request, *, ambiguous_mutation: bool = False
+    ) -> httpx.Response:
+        response = await self._require_http().send(request, stream=True)
+        try:
+            if not response.is_success:
+                await self._raise_for_response(
+                    response,
+                    ambiguous=(
+                        ambiguous_mutation
+                        and response.status_code in _AMBIGUOUS_MUTATION_STATUSES
+                    ),
+                )
+            self._check_json_content_length(response)
+            chunks: list[bytes] = []
+            size = 0
+            async for chunk in response.aiter_bytes():
+                size += len(chunk)
+                if size > self.options.max_json_response_bytes:
+                    raise ProviderProtocolError("Provider JSON response is too large")
+                chunks.append(chunk)
+            return buffered_response(response, b"".join(chunks))
+        finally:
+            await response.aclose()
+
+    def _check_json_content_length(self, response: httpx.Response) -> None:
         length = response.headers.get("content-length")
-        if length and int(length) > self.options.max_json_response_bytes:
-            await response.aclose()
+        if length is None:
+            return
+        try:
+            declared = int(length)
+        except ValueError as error:
+            raise ProviderProtocolError(
+                "Provider JSON content length is invalid"
+            ) from error
+        if declared < 0:
+            raise ProviderProtocolError("Provider JSON content length is invalid")
+        if declared > self.options.max_json_response_bytes:
             raise ProviderProtocolError("Provider JSON response is too large")
-        if len(response.content) > self.options.max_json_response_bytes:
-            await response.aclose()
-            raise ProviderProtocolError("Provider JSON response is too large")
-        return response
 
     async def _management_mutation[T](
         self,
@@ -552,12 +577,20 @@ class ResembleClient:
     async def _raise_for_response(
         self, response: httpx.Response, *, ambiguous: bool = False
     ) -> None:
-        body = self._safe_provider_message(
-            (await response.aread())[:4096].decode(errors="replace").strip()
-        )
+        prefix = bytearray()
+        try:
+            async for chunk in response.aiter_bytes():
+                prefix.extend(chunk[: _MAXIMUM_ERROR_BODY_BYTES - len(prefix)])
+                if len(prefix) == _MAXIMUM_ERROR_BODY_BYTES:
+                    break
+        except httpx.TransportError, httpx.DecodingError:
+            # The known HTTP status still determines retry and mutation safety.
+            prefix.clear()
+        finally:
+            await response.aclose()
+        body = self._safe_provider_message(prefix.decode(errors="replace").strip())
         request_id = _request_id(response)
         retry_after = parse_retry_after(response.headers.get("retry-after"))
-        await response.aclose()
         raise ProviderError(
             status_code=response.status_code,
             message=body or response.reason_phrase,

@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -82,7 +82,7 @@ def atomic_write_json(
 
 
 @contextmanager
-def atomic_output_path(path: Path, *, overwrite: bool = False) -> Iterator[Path]:
+def atomic_output_path(path: Path, *, overwrite: bool = False) -> Generator[Path]:
     """Yield a sibling temporary path and atomically commit it on success."""
     path = path.resolve()
     path.parent.mkdir(parents=True, exist_ok=True)

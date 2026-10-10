@@ -51,7 +51,7 @@ uv lock --check
 Use `uv run ruff format .` to format code. The full packaging check is:
 
 ```console
-uv build --no-sources
+uv run python -m yakbox._build
 ```
 
 FFmpeg and FFprobe are required for audio mastering, encoding, inspection, and
@@ -92,7 +92,7 @@ workspaces and the fake backend for audiobook build tests whenever possible.
   exceptions derived from `YakboxError` over unstructured dictionaries and
   generic exceptions.
 - Use `pathlib.Path` for filesystem paths and preserve cross-platform behavior
-  across Linux, macOS, and Windows.
+  across the supported Linux and macOS platforms.
 - Keep backend-specific behavior behind the speech or cloud abstractions. Avoid
   importing heavy optional dependencies at module import time.
 - Preserve deterministic ordering, stable fingerprints, and reproducible

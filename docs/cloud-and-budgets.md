@@ -11,7 +11,7 @@ export RESEMBLE_API_KEY='...'
 The optional credentials extra enables system-keyring profiles:
 
 ```console
-uv tool install "yakbox[credentials]"
+uv tool install --python 3.14 "yakbox[credentials] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl"
 yakbox config auth login --credential-profile studio
 yakbox config auth status --credential-profile studio
 yakbox cloud --credential-profile studio voices list

@@ -220,7 +220,7 @@ explicit `yakbox whisper models install` operation; builds never download it.
 
 This adapter is intentionally platform-specific. Normal builds and the direct
 strategy do not import MLX. The backend-neutral alignment contract and fake
-tests continue to run on Linux, macOS, and Windows; `context_extract` currently
+tests continue to run on Linux and macOS; `context_extract` currently
 requires an Apple Silicon Mac with the `alignment` extra installed.
 
 Voice activity detection can refine speech boundaries. An implementation such
@@ -518,7 +518,7 @@ Build synthetic PCM fixtures with known speech envelopes and assert:
 - fades change only the configured edges;
 - initial and final consonant fixtures are not truncated;
 - invalid PCM and missing safe boundaries fail; and
-- Windows, macOS, and Linux write identical PCM for identical input.
+- macOS and Linux write identical PCM for identical input.
 
 #### Selection, cache, and policy
 
@@ -568,8 +568,8 @@ aligner. Measure:
 - offline operation after installation; and
 - code, model, and transitive dependency licenses.
 
-The selected adapter must support Python 3.14 and the repository's Linux,
-macOS, and Windows CI policy, or it must be isolated behind a documented local
+The selected adapter must support Python 3.14 and the repository's Linux and
+macOS CI policy, or it must be isolated behind a documented local
 runtime boundary with equivalent contract tests on every platform.
 
 Do not select an aligner from long-form transcription accuracy alone. The

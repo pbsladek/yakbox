@@ -1185,11 +1185,11 @@ bounded build requirement follows Astral's compatibility recommendation:
 
 ```toml
 [build-system]
-requires = ["uv_build>=0.12.0,<0.13"]
+requires = ["uv_build>=0.13.0,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv]
-required-version = ">=0.12.0,<0.13"
+required-version = ">=0.13.0"
 
 [tool.uv.build-backend]
 module-name = "yakbox"
@@ -2930,7 +2930,7 @@ Jobs:
 1. `quality` on Python 3.14: Ruff format/lint, `ty check`, config validation.
 2. `test-core` on Ubuntu for Python 3.14 with branch
    coverage, audiobook/speech/hosted dependencies, and no local extra.
-3. `platform-smoke` on macOS, Windows, and Ubuntu using Python 3.14.
+3. `platform-smoke` on macOS and Ubuntu using Python 3.14.
 4. `minimum-direct`: in a temporary project copy, resolve
    `uv lock --resolution lowest-direct` and run audiobook, speech, cloud, unit,
    and API tests on Python 3.14, proving published lower bounds.
@@ -3199,7 +3199,7 @@ Gate:
 ### Phase 8 — hardening and release candidate
 
 Implementation status (2026-09-04): the repository has a Python 3.14
-Linux/macOS/Windows test matrix, branch-aware coverage, dependency audits,
+Linux/macOS test matrix, branch-aware coverage, dependency audits,
 package smoke tests, scheduled performance and mutation suites, and a release
 workflow with Trusted Publishing, checksums, CycloneDX SBOMs, and provenance
 attestations. Phase 8 remains open because the complete section 16 evidence has

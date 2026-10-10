@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
 from yakbox.release_preflight import (
+    CommandRunner,
     ReleaseFile,
     ReleasePreflightError,
     _write_checksums,
@@ -97,22 +99,21 @@ def test_cyclonedx_shape_fixture_documents_release_contract(tmp_path: Path) -> N
     assert json.loads(path.read_text(encoding="utf-8"))["specVersion"] == "1.5"
 
 
-def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
-    tmp_path: Path,
-) -> None:
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "yakbox"\nversion = "0.1.0"\n',
-        encoding="utf-8",
-    )
-    commands: list[tuple[str, ...]] = []
-
+def _preflight_runner(
+    commands: list[tuple[str, ...]],
+    commit: str,
+    metadata: Path,
+    *,
+    bad_suffix: str | None = None,
+) -> CommandRunner:
     def runner(command: tuple[str, ...], _cwd: Path) -> str:
         commands.append(command)
         if command[:2] == ("git", "status"):
             return ""
         if command == ("git", "rev-parse", "HEAD"):
-            return "commit-sha\n"
+            return f"{commit}\n"
         if command[:2] == ("uv", "build"):
+            assert commit in metadata.read_text()
             output = Path(command[command.index("--out-dir") + 1])
             (output / "yakbox-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
             (output / "yakbox-0.1.0.tar.gz").write_bytes(b"source")
@@ -140,7 +141,44 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
                 ),
                 encoding="utf-8",
             )
+        if command[-2:] == ("yakbox", "--version"):
+            if bad_suffix and any(item.endswith(bad_suffix) for item in command):
+                return "yakbox, version 0.1.0 (commit unknown)\n"
+            return f"yakbox, version 0.1.0 (commit {commit})\n"
         return ""
+
+    return runner
+
+
+@pytest.mark.parametrize("suffix", [".whl", ".tar.gz"])
+def test_preflight_rejects_installs_without_the_release_commit(
+    tmp_path: Path, suffix: str
+) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n')
+    metadata = tmp_path / "src" / "yakbox" / "_build_commit.py"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("COMMIT: str | None = None\n")
+    runner = _preflight_runner([], "a" * 40, metadata, bad_suffix=suffix)
+    with pytest.raises(ReleasePreflightError, match="release version and commit"):
+        run_release_preflight(tmp_path, tag="v0.1.0", runner=runner)
+    assert not (tmp_path / "release-metadata" / "release-preflight.json").exists()
+    assert metadata.read_text() == "COMMIT: str | None = None\n"
+
+
+def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "yakbox"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    commands: list[tuple[str, ...]] = []
+    commit = "a" * 40
+    metadata = tmp_path / "src" / "yakbox" / "_build_commit.py"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("COMMIT: str | None = None\n")
+
+    runner = _preflight_runner(commands, commit, metadata)
 
     report = run_release_preflight(
         tmp_path,
@@ -148,7 +186,8 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
         runner=runner,
     )
 
-    assert report.head_sha == "commit-sha"
+    assert report.head_sha == commit
+    assert metadata.read_text() == "COMMIT: str | None = None\n"
     assert len(report.distributions) == 2
     assert report.report_path.is_file()
     checksums = report.checksums_path.read_text(encoding="utf-8")
@@ -159,6 +198,17 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
     assert "yakbox-worker-parakeet.cdx.json" in checksums
     assert "yakbox-worker-qwen.cdx.json" in checksums
     assert "release-preflight.json" in checksums
+    assets = {
+        item.path.name: item.path
+        for item in (*report.distributions, report.sbom, *report.worker_sboms)
+    }
+    assets[report.report_path.name] = report.report_path
+    entries = [line.split("  ", 1) for line in checksums.splitlines()]
+    assert {name for _, name in entries} == set(assets)
+    assert all(
+        digest == hashlib.sha256(assets[name].read_bytes()).hexdigest()
+        for digest, name in entries
+    )
     assert (
         commands.count(
             (
@@ -173,7 +223,17 @@ def test_preflight_runs_all_gates_builds_once_and_writes_release_evidence(
         )
         == 1
     )
-    assert ("uv", "run", "pytest") in commands
+    assert ("uv", "run", "pytest", "--cov=yakbox", "--cov-branch") in commands
+    assert (
+        "uv",
+        "run",
+        "twine",
+        "check",
+        "--strict",
+        str(tmp_path / "dist" / "yakbox-0.1.0-py3-none-any.whl"),
+        str(tmp_path / "dist" / "yakbox-0.1.0.tar.gz"),
+    ) in commands
+    assert sum(command[:2] == ("uv", "lock") for command in commands) == 4
     assert ("uv", "run", "lint-imports", "--no-cache") in commands
     assert ("uv", "audit", "--frozen") in commands
     assert len(report.worker_sboms) == 3

@@ -16,11 +16,44 @@ uv run ty check
 uv run lint-imports --no-cache
 uv run pytest --cov=yakbox --cov-branch
 uv lock --check
-uv build --no-sources
+uv run python -m yakbox._build
+uv run twine check --strict dist/*
 ```
 
-CI runs the same checks on Python 3.14 across Linux, macOS, and Windows.
+Use uv 0.13.0 or newer. CI installs the latest stable uv and runs the same checks
+on Python 3.14 across Linux and macOS.
 Python 3.14 is the repository's sole supported runtime.
+
+## Pull requests and merges
+
+CI runs on pull requests targeting `main`, pushes to `main`, and merge-queue
+groups. Feature-branch pushes rely on their pull request run. The `CI gate`
+check passes only when quality, both platform test jobs, and packaging succeed;
+failed, cancelled, or skipped jobs fail the gate. Configure the repository's
+`main` ruleset to require this check and a pull request before merging, with
+up-to-date branches or a merge queue. Workflow files alone do not enforce those
+repository settings.
+
+Quality includes root and packaged-worker lock freshness and vulnerability
+audits, plus Actionlint validation of every workflow. Jobs have time limits,
+and both CI and release runs retain coverage and JUnit diagnostics after a test
+failure. The package job exercises isolated wheel and source installs, SDK
+imports and typing, PyPI metadata and README validation, and the packaged
+analysis workers before a merge.
+Wheel and source installs must print the package version and the build commit
+with `yakbox --version`, matching the commit tested by CI.
+
+Dependabot checks all four uv projects and pinned GitHub Actions weekly.
+Dependency upgrades should arrive through pull requests and pass `CI gate`.
+Qualified model-loader versions and the reviewed Hugging Face Hub API range
+remain pinned; changing them also requires the speech-analysis qualification
+workflow. Transitive updates do not establish narration quality.
+
+Update dependencies with `uv lock --upgrade`, then run
+`uv lock --project src/yakbox/runtimes/FAMILY --upgrade` for each worker.
+Keep the distributed security override file consistent with the reviewed root
+lock, review new dependency licenses, and run the checks above. Do not hand-edit
+a lockfile.
 
 ## Architecture contracts
 
@@ -167,7 +200,7 @@ uv run mutmut browse
 
 The single child avoids pytest temporary-directory cleanup races on macOS;
 increment it only after verifying the host. Mutmut requires process-fork
-support, so Windows development uses WSL. Treat surviving mutants as
+support. Treat surviving mutants as
 test-design prompts: add an observable assertion when the mutation changes
 behavior, and document equivalent mutants during review. Add new
 safety-critical modules to `only_mutate` as their tests become suitable, then

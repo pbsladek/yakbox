@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from yakbox.errors import ValidationError
@@ -22,7 +22,7 @@ class AcceleratorLease:
         return self._owner
 
     @asynccontextmanager
-    async def hold(self, owner: str) -> AsyncIterator[None]:
+    async def hold(self, owner: str) -> AsyncGenerator[None]:
         """Hold the process-local accelerator lease for one named operation."""
         if not owner:
             raise ValidationError("Accelerator lease owner is required")
@@ -40,7 +40,7 @@ async def accelerator_operation(
     *,
     owner: str,
     enabled: bool,
-) -> AsyncIterator[None]:
+) -> AsyncGenerator[None]:
     """Hold the shared lease only when an operation can use an accelerator."""
     if lease is None or not enabled:
         yield

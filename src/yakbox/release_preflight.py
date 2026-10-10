@@ -15,6 +15,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from yakbox._build import embedded_commit
+from yakbox._version import version_output
+from yakbox.errors import BuildError
+
 type CommandRunner = Callable[[tuple[str, ...], Path], str]
 
 _WORKER_PROJECTS = {
@@ -156,23 +160,37 @@ def run_release_preflight(
         ("uv", "run", "ruff", "check", "."),
         ("uv", "run", "ty", "check"),
         ("uv", "run", "lint-imports", "--no-cache"),
-        ("uv", "run", "pytest"),
+        ("uv", "run", "pytest", "--cov=yakbox", "--cov-branch"),
         ("uv", "audit", "--frozen"),
     )
     for command in quality_commands:
         command_runner(command, root)
     for project in _WORKER_PROJECTS.values():
+        command_runner(("uv", "lock", "--project", str(project), "--check"), root)
         command_runner(_worker_audit_command(project), root)
 
+    with embedded_commit(root, head_sha):
+        command_runner(
+            (
+                "uv",
+                "build",
+                "--no-sources",
+                "--clear",
+                "--no-create-gitignore",
+                "--out-dir",
+                str(distribution_root),
+            ),
+            root,
+        )
+    distributions = _distribution_files(distribution_root, version)
     command_runner(
         (
             "uv",
-            "build",
-            "--no-sources",
-            "--clear",
-            "--no-create-gitignore",
-            "--out-dir",
-            str(distribution_root),
+            "run",
+            "twine",
+            "check",
+            "--strict",
+            *(str(item.path) for item in distributions),
         ),
         root,
     )
@@ -191,7 +209,6 @@ def run_release_preflight(
         root,
     )
 
-    distributions = _distribution_files(distribution_root, version)
     _verify_sbom(sbom_path, name="yakbox", version=version)
     worker_sbom_paths = tuple(
         metadata_root / _WORKER_SBOM_FILENAMES[family] for family in _WORKER_PROJECTS
@@ -224,7 +241,7 @@ def run_release_preflight(
         item.path for item in distributions if item.path.name.endswith(".tar.gz")
     )
     for artifact in (wheel, source):
-        command_runner(
+        installed_version = command_runner(
             (
                 "uv",
                 "run",
@@ -237,6 +254,11 @@ def run_release_preflight(
             ),
             root,
         )
+        if installed_version.strip() != version_output(version, head_sha):
+            raise ReleasePreflightError(
+                f"Installed {artifact.name} does not report the release "
+                "version and commit"
+            )
 
     sbom = _release_file(sbom_path)
     worker_sboms = tuple(_release_file(path) for path in worker_sbom_paths)
@@ -403,7 +425,7 @@ def main(arguments: Sequence[str] | None = None) -> None:
             metadata_dir=options.metadata_dir,
             require_tag_ref=options.require_tag_ref,
         )
-    except ReleasePreflightError as error:
+    except (ReleasePreflightError, BuildError) as error:
         parser.exit(1, f"release preflight failed: {error}\n")
     sys.stdout.write(
         f"release preflight passed for {report.tag}: "

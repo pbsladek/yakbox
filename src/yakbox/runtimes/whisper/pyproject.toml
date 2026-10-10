@@ -8,5 +8,7 @@ dependencies = [
 ]
 
 [tool.uv]
-override-dependencies = ["cryptography>=50.0.0"]
+# Keep the model loaders on the reviewed Hugging Face Hub API generation.
+constraint-dependencies = ["huggingface-hub<2"]
+override-dependencies = ["cryptography>=50.0.0", "urllib3>=2.8.0"]
 

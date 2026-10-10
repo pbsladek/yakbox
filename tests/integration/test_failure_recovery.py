@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -56,7 +56,7 @@ async def test_failure_at_every_build_stage_is_journaled_and_resumable(
     @asynccontextmanager
     async def backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield service
 
     monkeypatch.setattr(build_module, "open_speech_backend", backend)
@@ -91,7 +91,7 @@ async def test_failure_at_every_build_stage_is_journaled_and_resumable(
     @asynccontextmanager
     async def healthy_backend(
         _name: str, **_options: object
-    ) -> AsyncIterator[TextToSpeechService]:
+    ) -> AsyncGenerator[TextToSpeechService]:
         yield FakeSpeechService()
 
     monkeypatch.setattr(build_module, "open_speech_backend", healthy_backend)

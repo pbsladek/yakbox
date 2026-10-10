@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -113,7 +113,7 @@ def new_run_id() -> str:
 
 
 @contextmanager
-def target_lock(state_root: Path, target: str) -> Iterator[None]:
+def target_lock(state_root: Path, target: str) -> Generator[None]:
     lock_dir = state_root / "locks"
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / f"{target}.lock"

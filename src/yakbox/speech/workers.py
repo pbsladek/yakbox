@@ -192,7 +192,7 @@ class IsolatedLocalSpeechService:
             process.stdin.write(
                 json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
             )
-            await process.stdin.drain()
+            await asyncio.wait_for(process.stdin.drain(), timeout=self.timeout_seconds)
             results = await self._read_batch_responses(
                 process, len(worker_request.items)
             )
@@ -204,6 +204,13 @@ class IsolatedLocalSpeechService:
         except BuildError:
             _cleanup_worker_parts(worker_request.items)
             raise
+        except TimeoutError as error:
+            await self._discard_worker(process)
+            _cleanup_worker_parts(worker_request.items)
+            raise BuildError(
+                "Local Chatterbox worker request exceeded "
+                f"{self.timeout_seconds:g}s while sending"
+            ) from error
         except (BrokenPipeError, ConnectionError, OSError, ValueError) as error:
             await self._discard_worker(process)
             _cleanup_worker_parts(worker_request.items)

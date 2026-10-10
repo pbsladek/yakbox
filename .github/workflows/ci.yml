@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -15,13 +18,14 @@ concurrency:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.0"
+          version: "latest"
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --frozen --all-groups
@@ -31,6 +35,14 @@ jobs:
       - run: uv run lint-imports --no-cache
       - run: uv lock --check
       - run: uv audit --frozen
+      - name: Check and audit packaged worker lockfiles
+        run: |
+          for family in whisper parakeet qwen; do
+            uv lock --project "src/yakbox/runtimes/$family" --check
+            uv audit --project "src/yakbox/runtimes/$family" --frozen --no-dev
+          done
+      - name: Validate GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
   test:
     strategy:
@@ -41,16 +53,15 @@ jobs:
             python: "3.14"
           - os: macos-latest
             python: "3.14"
-          - os: windows-latest
-            python: "3.14"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.0"
+          version: "latest"
           python-version: ${{ matrix.python }}
           enable-cache: true
       - name: Install FFmpeg (Ubuntu)
@@ -59,9 +70,6 @@ jobs:
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
-      - name: Install FFmpeg (Windows)
-        if: runner.os == 'Windows'
-        run: choco install ffmpeg --yes --no-progress
       - run: uv sync --frozen --all-groups
       - name: Test
         run: >-
@@ -76,7 +84,7 @@ jobs:
           --junitxml=test-results.xml
       - name: Upload test diagnostics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-diagnostics-${{ runner.os }}-py${{ matrix.python }}
           path: |
@@ -87,22 +95,26 @@ jobs:
 
   package:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.0"
+          version: "latest"
           python-version: "3.14"
           enable-cache: true
-      - run: uv build --no-sources
+      - name: Build distributions with their source commit
+        run: uv run python -m yakbox._build
+      - name: Validate PyPI metadata and README
+        run: uv run twine check --strict dist/*
       - run: uv run --isolated --no-project --with dist/*.whl yakbox --help
       - run: uv run --isolated --no-project --with dist/*.whl yakbox --json doctor
       - name: Install the wheel into an isolated SDK environment
         run: |
           uv venv --python 3.14 .sdk-venv
-          uv pip install --python .sdk-venv/bin/python dist/*.whl 'ty>=0.0.1a32,<0.1'
+          uv pip install --python .sdk-venv/bin/python dist/*.whl 'ty>=0.0.86,<0.1'
       - name: Smoke-test public SDK imports from the wheel
         run: .sdk-venv/bin/python tests/package_sdk_consumer.py
       - name: Execute every packaged analysis worker from the wheel
@@ -113,4 +125,31 @@ jobs:
           --project /tmp
           --python .sdk-venv/bin/python
           tests/package_sdk_consumer.py
-      - run: uv run --isolated --no-project --with dist/*.tar.gz yakbox --version
+      - name: Verify installed wheel and source version metadata
+        run: |
+          expected="yakbox, version $(uv version --short) (commit $(git rev-parse HEAD))"
+          wheel_version="$(.sdk-venv/bin/yakbox --version)"
+          source_version="$(uv run --isolated --no-project --with dist/*.tar.gz yakbox --version)"
+          printf '%s\n' "$wheel_version" "$source_version"
+          test "$wheel_version" = "$expected"
+          test "$source_version" = "$expected"
+
+  gate:
+    name: CI gate
+    if: always()
+    needs: [quality, test, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all CI jobs to pass
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        run: |
+          for result in "$QUALITY_RESULT" "$TEST_RESULT" "$PACKAGE_RESULT"; do
+            if [[ "$result" != "success" ]]; then
+              echo "A required CI job failed, was cancelled, or was skipped."
+              exit 1
+            fi
+          done

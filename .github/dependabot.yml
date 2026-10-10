@@ -1,7 +1,11 @@
 version: 2
 updates:
   - package-ecosystem: uv
-    directory: /
+    directories:
+      - /
+      - /src/yakbox/runtimes/whisper
+      - /src/yakbox/runtimes/parakeet
+      - /src/yakbox/runtimes/qwen
     schedule:
       interval: weekly
     groups:

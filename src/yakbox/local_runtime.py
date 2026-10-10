@@ -483,7 +483,9 @@ async def _send_endpoint(
 ) -> dict[str, object]:
     async def exchange() -> dict[str, object]:
         reader, writer = await asyncio.open_connection(
-            "127.0.0.1", int(cast(int, endpoint["port"]))
+            "127.0.0.1",
+            int(cast(int, endpoint["port"])),
+            limit=_MAXIMUM_MESSAGE_BYTES,
         )
         try:
             payload = {
@@ -493,7 +495,12 @@ async def _send_endpoint(
             }
             writer.write(json.dumps(payload, ensure_ascii=False).encode() + b"\n")
             await writer.drain()
-            line = await reader.readline()
+            try:
+                line = await reader.readline()
+            except ValueError as error:
+                raise BuildError(
+                    "Persistent runtime returned no valid response"
+                ) from error
             if not line or len(line) > _MAXIMUM_MESSAGE_BYTES:
                 raise BuildError("Persistent runtime returned no valid response")
             value = json.loads(line)
@@ -529,7 +536,9 @@ class _RuntimeServer:
         self.port: int | None = None
 
     async def serve(self) -> None:
-        server = await asyncio.start_server(self.handle, "127.0.0.1", 0)
+        server = await asyncio.start_server(
+            self.handle, "127.0.0.1", 0, limit=_MAXIMUM_MESSAGE_BYTES
+        )
         socket = server.sockets[0]
         port = int(socket.getsockname()[1])
         self.port = port

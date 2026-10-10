@@ -168,6 +168,8 @@ asyncio.run(render())
 The legacy keyword factory `open_speech_backend` remains public.
 `open_transformation_backend` opens voice-conversion services. All three are
 async context managers; do not retain a service after its context exits.
+Their decorated implementations use `AsyncGenerator` annotations for current
+type checkers; callers continue to enter them with `async with`.
 Pass one `AcceleratorLease` to local TTS and speech-analysis supervisors when
 they share an Apple Silicon accelerator. It serializes model loading,
 inference, and cleanup across Torch/MPS and MLX workers.

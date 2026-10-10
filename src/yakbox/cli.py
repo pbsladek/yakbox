@@ -6,7 +6,7 @@ import importlib.util
 import json
 import os
 import sys
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from decimal import Decimal
@@ -18,8 +18,8 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 from rich.table import Table
 
-from yakbox import __version__
 from yakbox._files import atomic_write_bytes
+from yakbox._version import show_version
 from yakbox.audio import inspect_audio
 from yakbox.audiobook import (
     ArtifactKind,
@@ -219,7 +219,14 @@ def _context() -> Context:
     context_settings={"help_option_names": ["-h", "--help"]},
     invoke_without_command=False,
 )
-@click.version_option(version=__version__, prog_name="yakbox")
+@click.option(
+    "--version",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=show_version,
+    help="Show the version and build commit, then exit.",
+)
 @click.option("--json", "json_output", is_flag=True, help="Emit versioned JSON.")
 @click.option("--no-color", is_flag=True, help="Disable color output.")
 @click.option("-q", "--quiet", is_flag=True, help="Suppress non-error output.")
@@ -752,7 +759,7 @@ def _validate_build_preflight(
 def _build_progress(
     options: _BuildCommandOptions,
     total: int,
-) -> Iterator[BuildProgressCallback | None]:
+) -> Generator[BuildProgressCallback | None]:
     enabled = (
         not options.no_progress
         and not options.dry_run
