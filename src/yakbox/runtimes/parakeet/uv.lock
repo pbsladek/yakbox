@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.14.*"
 
 [manifest]
@@ -509,7 +509,7 @@ wheels = [
 
 [[package]]
 name = "parakeet-mlx"
-version = "0.5.2"
+version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dacite" },
@@ -519,9 +519,9 @@ dependencies = [
     { name = "numpy" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5b/1a/d7ab33b3e25dcf2d97d0192fd1e718f2c6e69b5775370413e144fef54256/parakeet_mlx-0.5.2.tar.gz", hash = "sha256:6c6ba3c4d42ebf015dde515e5a83858a516add3f5b2c6bd4a7be5c4ba8bd4d02", size = 37791, upload-time = "2026-06-05T07:52:35.473Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/59/4fd8c37c064c117e4f6af5bdf041960548121608d0504545aa913b71e8ee/parakeet_mlx-0.5.3.tar.gz", hash = "sha256:b06b7345d68127b581ee0ba07691654e60d44004c401c9acfefcefbb4de50ea7", size = 38083, upload-time = "2026-10-01T16:03:30.852Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/54/09a3501c74f1ef54a36002534661cb89a0b2f098fcad87fe64f515a0dba7/parakeet_mlx-0.5.2-py3-none-any.whl", hash = "sha256:50afb6ddb62237a6486e214482c25ef12759832fda3cd514e159938fa5970d9c", size = 37353, upload-time = "2026-06-05T07:52:34.452Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/72/90a8cc7d86e37e9799dd822b52179042a60200a54f96d4c6213b06337154/parakeet_mlx-0.5.3-py3-none-any.whl", hash = "sha256:64c1f0f48445f6a1b99e6ddc2670f9b4d7218e0237ba883a8cfa850b24dca7c8", size = 37540, upload-time = "2026-10-01T16:03:25.066Z" },
 ]
 
 [[package]]
@@ -833,6 +833,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "parakeet-mlx", specifier = "==0.5.2" },
+    { name = "parakeet-mlx", specifier = "==0.5.3" },
     { name = "regex", specifier = ">=2026.7.19,<2027" },
 ]
