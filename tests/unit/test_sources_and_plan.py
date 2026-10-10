@@ -757,6 +757,17 @@ def test_chunking_does_not_split_combining_or_joiner_sequences() -> None:
         chunk_text("🇺🇸X", 1)
 
 
+@pytest.mark.parametrize("maximum", [3, 4, 5, 7])
+def test_chunking_preserves_graphemes_after_many_hard_boundaries(maximum: int) -> None:
+    text = "a\u0301b👩\u200d💻🇺🇸x" * 40
+    chunks = chunk_text(text, maximum)
+
+    assert "".join(chunks) == text
+    assert all(len(chunk) <= maximum for chunk in chunks)
+    assert all(not chunk.startswith(("\u0301", "\u200d", "💻")) for chunk in chunks)
+    assert all("🇺🇸" in chunk for chunk in chunks if "🇺" in chunk or "🇸" in chunk)
+
+
 def test_chunking_prioritizes_sentence_boundaries_over_later_words() -> None:
     chunks = plan_text_chunks("Alpha sentence. beta gamma delta epsilon", 28)
 

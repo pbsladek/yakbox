@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -41,6 +42,65 @@ def test_runtime_options_reject_unbounded_values() -> None:
         LocalRuntimeOptions(idle_timeout_seconds=0)
     with pytest.raises(ValidationError, match="cache size"):
         LocalRuntimeOptions(conditioning_cache_size=0)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_runtime_idle_timeout_rejects_nonfinite_values(value: float) -> None:
+    with pytest.raises(ValidationError, match="positive and finite"):
+        LocalRuntimeOptions(idle_timeout_seconds=value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("activity", ["recent", "busy", "idle"])
+async def test_runtime_idle_timer_rechecks_recent_activity_and_active_operations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, activity: str
+) -> None:
+    clock = SimpleNamespace(now=0.0)
+    monkeypatch.setattr(
+        "yakbox.local_runtime.time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    server = _RuntimeServer(tmp_path, LocalRuntimeOptions(idle_timeout_seconds=10))
+    if activity == "busy":
+        await server.operation_lock.acquire()
+    closed: list[bool] = []
+
+    async def wait_closed() -> None:
+        pass
+
+    async def start_server(*_arguments: object, **_options: object) -> object:
+        return SimpleNamespace(
+            sockets=[SimpleNamespace(getsockname=lambda: ("127.0.0.1", 12345))],
+            close=lambda: closed.append(True),
+            wait_closed=wait_closed,
+        )
+
+    waits: list[float] = []
+
+    async def wait_for(
+        awaitable: Coroutine[object, object, bool],
+        *,
+        timeout: float,  # noqa: ASYNC109 - matches the mocked asyncio.wait_for boundary
+    ) -> bool:
+        awaitable.close()
+        waits.append(timeout)
+        if len(waits) == 1:
+            clock.now = 10.0
+            if activity == "recent":
+                server.last_activity = 9.0
+            raise TimeoutError
+        assert (tmp_path / ".yakbox/runtime/endpoint.json").is_file()
+        server.stop_event.set()
+        return True
+
+    monkeypatch.setattr("yakbox.local_runtime.asyncio.start_server", start_server)
+    monkeypatch.setattr("yakbox.local_runtime.asyncio.wait_for", wait_for)
+
+    await server.serve()
+
+    expected = [10] if activity == "idle" else [10, 10 if activity == "busy" else 9]
+    assert waits == expected
+    assert closed == [True]
+    assert not (tmp_path / ".yakbox/runtime/endpoint.json").exists()
 
 
 @pytest_asyncio.fixture

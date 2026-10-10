@@ -45,6 +45,10 @@ with `yakbox --version`, matching the commit tested by CI.
 
 Dependabot checks all four uv projects and pinned GitHub Actions weekly.
 Dependency upgrades should arrive through pull requests and pass `CI gate`.
+Worker packaging tests check that each adapter is exactly pinned, matches its
+frozen lockfile, and stays isolated from the other adapter families. They read
+the version from the packaged project so a dependency update does not require
+editing an old version assertion in the test.
 Qualified model-loader versions and the reviewed Hugging Face Hub API range
 remain pinned; changing them also requires the speech-analysis qualification
 workflow. Transitive updates do not establish narration quality.

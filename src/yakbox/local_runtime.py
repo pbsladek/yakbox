@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+import math
 import os
 import secrets
 import signal
@@ -52,8 +53,11 @@ class LocalRuntimeOptions:
     maximum_memory_bytes: int | None = None
 
     def __post_init__(self) -> None:
-        if self.idle_timeout_seconds <= 0:
-            raise ValidationError("Runtime idle timeout must be positive")
+        if (
+            not math.isfinite(self.idle_timeout_seconds)
+            or self.idle_timeout_seconds <= 0
+        ):
+            raise ValidationError("Runtime idle timeout must be positive and finite")
         if self.conditioning_cache_size < 1:
             raise ValidationError("Runtime conditioning cache size must be positive")
         if self.maximum_memory_bytes is not None and self.maximum_memory_bytes < 1:
@@ -561,12 +565,14 @@ class _RuntimeServer:
                 remaining = self.options.idle_timeout_seconds - (
                     time.monotonic() - self.last_activity
                 )
+                if self.operation_lock.locked():
+                    remaining = self.options.idle_timeout_seconds
                 if remaining <= 0:
                     break
                 try:
                     await asyncio.wait_for(self.stop_event.wait(), timeout=remaining)
                 except TimeoutError:
-                    break
+                    continue
         finally:
             server.close()
             await server.wait_closed()

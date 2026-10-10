@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from yakbox.audiobook import load_manifest, normalize_sources, plan_audiobook
+from yakbox.speech.chunking import plan_text_chunks
 from yakbox.textutils import iter_batch_rows
 
 pytestmark = pytest.mark.performance
@@ -72,5 +73,22 @@ def test_streaming_batch_reader_time_and_peak_memory(tmp_path: Path) -> None:
     tracemalloc.stop()
 
     assert characters > 19_000_000
+    assert elapsed <= baseline["max_seconds"]
+    assert peak <= baseline["max_peak_bytes"]
+
+
+def test_chunking_long_text_time_and_peak_memory() -> None:
+    text = "word " * 1_600_000
+    baseline = _BASELINES["chunk_8000000_characters"]
+
+    tracemalloc.start()
+    started = time.perf_counter()
+    chunks = plan_text_chunks(text, 500)
+    elapsed = time.perf_counter() - started
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert len(chunks) == 16_000
+    assert all(len(chunk.text) <= 500 for chunk in chunks)
     assert elapsed <= baseline["max_seconds"]
     assert peak <= baseline["max_peak_bytes"]

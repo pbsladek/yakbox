@@ -67,9 +67,7 @@ def atomic_write_bytes(path: Path, data: bytes, *, overwrite: bool = False) -> N
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        if path.exists() and not overwrite:
-            raise ArtifactError(f"Output already exists: {path}")
-        temporary.replace(path)
+        _publish_temporary_file(temporary, path, overwrite=overwrite)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -122,6 +120,12 @@ def commit_temporary_file(
     # Windows before the atomic replace can happen.
     with temporary.open("rb+") as stream:
         os.fsync(stream.fileno())
+    _publish_temporary_file(temporary, destination, overwrite=overwrite)
+
+
+def _publish_temporary_file(
+    temporary: Path, destination: Path, *, overwrite: bool
+) -> None:
     if overwrite:
         temporary.replace(destination)
     else:

@@ -8,8 +8,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from yakbox._files import sha256_file
+from yakbox._files import safe_child, sha256_file
 from yakbox.errors import ArtifactError
+
+_CACHE_PATH = Path(".yakbox/cache/synthesis")
+_WORKSPACE_PARENT_INDEX = len(_CACHE_PATH.parts) - 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +102,8 @@ def inventory_synthesis_cache(workspace: Path) -> CacheInventory:
     pinned = _pinned_fingerprints(workspace)
     for audio in sorted(root.glob("*/*.wav")):
         metadata = audio.with_suffix(".json")
+        safe_child(root, audio)
+        safe_child(root, metadata)
         status = audio.stat()
         fingerprint = audio.stem
         details = _entry_details(metadata)
@@ -132,7 +137,9 @@ def plan_cache_cleanup(
     if max_bytes is not None and max_bytes < 0:
         raise ArtifactError("Cache byte limit must be non-negative")
     inventory = inventory_synthesis_cache(workspace)
-    candidates = {entry for entry in inventory.entries if not entry.valid}
+    candidates = {
+        entry for entry in inventory.entries if not entry.valid and not entry.pinned
+    }
     if max_age_days is not None:
         cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
         candidates.update(
@@ -166,6 +173,7 @@ def plan_cache_cleanup(
 
 def apply_cache_cleanup(plan: CacheCleanupPlan) -> int:
     """Apply a previously computed cache plan and return removed entry count."""
+    _validate_cleanup_plan(plan)
     root = plan.cache_root.resolve()
     removed = 0
     for entry in plan.candidates:
@@ -185,7 +193,27 @@ def apply_cache_cleanup(plan: CacheCleanupPlan) -> int:
 
 
 def _cache_root(workspace: Path) -> Path:
-    return workspace.resolve() / ".yakbox" / "cache" / "synthesis"
+    workspace = workspace.resolve()
+    root = workspace / _CACHE_PATH
+    safe_child(workspace, root)
+    return root
+
+
+def _validate_cleanup_plan(plan: CacheCleanupPlan) -> None:
+    if len(plan.cache_root.parents) <= _WORKSPACE_PARENT_INDEX:
+        raise ArtifactError("Invalid synthesis cache cleanup root")
+    workspace = plan.cache_root.parents[_WORKSPACE_PARENT_INDEX]
+    if plan.cache_root != _cache_root(workspace):
+        raise ArtifactError("Invalid synthesis cache cleanup root")
+    current = {
+        entry.audio_path: entry
+        for entry in inventory_synthesis_cache(workspace).entries
+    }
+    for entry in plan.candidates:
+        if entry.pinned or current.get(entry.audio_path) != entry:
+            raise ArtifactError(
+                f"Cache cleanup candidate changed after planning: {entry.audio_path}"
+            )
 
 
 def _valid_entry(audio: Path, metadata: Path, fingerprint: str) -> bool:
@@ -193,7 +221,7 @@ def _valid_entry(audio: Path, metadata: Path, fingerprint: str) -> bool:
         return False
     try:
         raw = json.loads(metadata.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return False
     return bool(
         isinstance(raw, dict)
@@ -207,7 +235,7 @@ def _valid_entry(audio: Path, metadata: Path, fingerprint: str) -> bool:
 def _entry_details(path: Path) -> dict[str, object]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return {}
     return value if isinstance(value, dict) else {}
 
@@ -231,7 +259,7 @@ def _pinned_fingerprints(workspace: Path) -> frozenset[str]:
     for path in root.glob("**/*.json"):
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-        except OSError, json.JSONDecodeError:
+        except OSError, UnicodeDecodeError, json.JSONDecodeError:
             continue
         if not _assembly_audio_is_current(raw, workspace):
             continue

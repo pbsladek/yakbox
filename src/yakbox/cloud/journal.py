@@ -24,6 +24,7 @@ class BatchJournalWriter:
         self.append = append
         self._queue: asyncio.Queue[_Write | None] = asyncio.Queue(maxsize=100)
         self._task: asyncio.Task[None] | None = None
+        self._closing = False
 
     async def __aenter__(self) -> BatchJournalWriter:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,22 +38,34 @@ class BatchJournalWriter:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
+        self._closing = True
         if self._task is not None and self._task.done():
             await self._task
             return
-        await self._queue.put(None)
+        try:
+            await self._queue.put(None)
+        except asyncio.QueueShutDown:
+            if self._task is not None:
+                await self._task
+            return
         if self._task is not None:
             await self._task
 
     async def append_record(self, record: dict[str, object]) -> None:
-        if self._task is None:
+        if self._task is None or self._closing:
             raise BatchJournalError("Batch journal writer is not open")
         if self._task.done():
             await self._task
             raise BatchJournalError("Batch journal writer stopped unexpectedly")
         loop = asyncio.get_running_loop()
         acknowledgement: asyncio.Future[None] = loop.create_future()
-        await self._queue.put(_Write(record, acknowledgement))
+        try:
+            await self._queue.put(_Write(record, acknowledgement))
+        except asyncio.QueueShutDown:
+            await self._task
+            raise BatchJournalError(
+                "Batch journal writer stopped unexpectedly"
+            ) from None
         await acknowledgement
 
     async def _run(self) -> None:
@@ -70,16 +83,21 @@ class BatchJournalWriter:
                         ).encode()
                         await asyncio.to_thread(_durable_append, stream, payload)
                     except Exception as error:
-                        item.acknowledgement.set_exception(error)
+                        if not item.acknowledgement.done():
+                            item.acknowledgement.set_exception(error)
                         raise
                     else:
-                        item.acknowledgement.set_result(None)
+                        if not item.acknowledgement.done():
+                            item.acknowledgement.set_result(None)
         except Exception as error:
+            self._queue.shutdown()
             while not self._queue.empty():
                 item = self._queue.get_nowait()
                 if item is not None and not item.acknowledgement.done():
                     item.acknowledgement.set_exception(error)
             raise BatchJournalError(f"Cannot write batch journal: {error}") from error
+        finally:
+            self._queue.shutdown()
 
 
 def read_journal(path: Path) -> tuple[dict[str, object], ...]:

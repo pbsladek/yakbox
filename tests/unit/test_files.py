@@ -1,10 +1,49 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
-from yakbox._files import atomic_output_path, commit_temporary_file
+from yakbox._files import atomic_output_path, atomic_write_bytes, commit_temporary_file
+from yakbox.errors import ArtifactError
+
+
+def test_atomic_bytes_preserve_a_destination_created_during_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "evidence.json"
+    real_replace = Path.replace
+    real_link = os.link
+
+    def racing_replace(source: Path, target: Path) -> Path:
+        if target == destination:
+            target.write_bytes(b"other writer")
+        return real_replace(source, target)
+
+    def racing_link(source: Path, target: Path) -> None:
+        if target == destination:
+            target.write_bytes(b"other writer")
+        real_link(source, target)
+
+    monkeypatch.setattr(Path, "replace", racing_replace)
+    monkeypatch.setattr(os, "link", racing_link)
+
+    with pytest.raises(ArtifactError, match="already exists"):
+        atomic_write_bytes(destination, b"this writer")
+
+    assert destination.read_bytes() == b"other writer"
+    assert tuple(tmp_path.glob("*.part")) == ()
+
+
+@pytest.mark.parametrize("payload", [b"", b"new bytes"])
+def test_atomic_bytes_preserve_empty_output_and_explicit_overwrite(
+    tmp_path: Path, payload: bytes
+) -> None:
+    destination = tmp_path / "output"
+    atomic_write_bytes(destination, b"old bytes")
+    atomic_write_bytes(destination, payload, overwrite=True)
+    assert destination.read_bytes() == payload
 
 
 def test_atomic_output_preserves_media_suffix(tmp_path: Path) -> None:

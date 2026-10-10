@@ -6,6 +6,7 @@ from pathlib import Path
 
 from yakbox._files import sha256_file
 from yakbox.cloud.client import ResembleClient
+from yakbox.cloud.errors import ClientStateError
 from yakbox.cloud.models import AudioFormat as CloudAudioFormat
 from yakbox.cloud.models import Precision, SynthesisRequest
 from yakbox.speech.capabilities import BackendCapabilities
@@ -84,11 +85,12 @@ class ResembleSpeechService:
         overwrite: bool = False,
     ) -> tuple[SpeechArtifact, ...]:
         """Synthesize ordered requests with bounded concurrency."""
-        futures = [
-            await self._enqueue(request, destination, overwrite=overwrite)
-            for request, destination in requests
-        ]
+        self._require_open()
         try:
+            futures = [
+                await self._enqueue(request, destination, overwrite=overwrite)
+                for request, destination in requests
+            ]
             results = await asyncio.gather(*futures, return_exceptions=True)
         except asyncio.CancelledError:
             await self.aclose()
@@ -105,6 +107,7 @@ class ResembleSpeechService:
         if self._closed:
             return
         self._closed = True
+        self._queue.shutdown()
         for worker in self._workers:
             worker.cancel()
         if self._workers:
@@ -123,22 +126,29 @@ class ResembleSpeechService:
         *,
         overwrite: bool,
     ) -> asyncio.Future[SpeechArtifact]:
-        if self._closed:
-            raise RuntimeError("Resemble speech service is closed")
+        self._require_open()
         if not self._workers:
             self._workers = tuple(
                 asyncio.create_task(self._worker()) for _ in range(self.concurrency)
             )
         future = asyncio.get_running_loop().create_future()
-        await self._queue.put(
-            _SynthesisJob(
-                request=request,
-                destination=destination,
-                overwrite=overwrite,
-                future=future,
+        try:
+            await self._queue.put(
+                _SynthesisJob(
+                    request=request,
+                    destination=destination,
+                    overwrite=overwrite,
+                    future=future,
+                )
             )
-        )
+        except asyncio.QueueShutDown:
+            future.cancel()
+            raise ClientStateError("Resemble speech service is closed") from None
         return future
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise ClientStateError("Resemble speech service is closed")
 
     async def _worker(self) -> None:
         while True:
@@ -170,6 +180,7 @@ class ResembleSpeechService:
         *,
         overwrite: bool,
     ) -> SpeechArtifact:
+        self._require_open()
         provider_request = SynthesisRequest(
             text=request.text,
             voice_uuid=request.voice,

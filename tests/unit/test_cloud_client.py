@@ -122,6 +122,76 @@ async def test_speech_service_batch_uses_one_bounded_dispatcher(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("close", [False, True])
+async def test_speech_service_stops_a_batch_blocked_on_a_full_queue(
+    tmp_path: Path, close: bool
+) -> None:
+    started = asyncio.Event()
+    active = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal active
+        active += 1
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            active -= 1
+        raise AssertionError("Blocked provider request should be cancelled")
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    options = ClientOptions(synthesis_base_url="https://example.test")
+    async with ResembleClient("secret", options=options, http_client=http) as client:
+        service = ResembleSpeechService(client, concurrency=1)
+        batch = asyncio.create_task(
+            service.synthesize_many_to_files(
+                tuple(
+                    (
+                        SpeechSynthesisRequest(text=f"line {index}", voice="voice"),
+                        tmp_path / f"{index}.wav",
+                    )
+                    for index in range(4)
+                )
+            )
+        )
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+            if close:
+                await service.aclose()
+                expected = ClientStateError
+            else:
+                batch.cancel()
+                expected = asyncio.CancelledError
+            with pytest.raises(expected):
+                await asyncio.wait_for(batch, timeout=2)
+            assert active == 0
+            assert not tuple(tmp_path.glob("*.wav"))
+        finally:
+            batch.cancel()
+            await asyncio.gather(batch, return_exceptions=True)
+            await service.aclose()
+            await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_closed_speech_service_rejects_single_and_empty_batch_calls(
+    tmp_path: Path,
+) -> None:
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: pytest.fail()))
+    async with ResembleClient("secret", http_client=http) as client:
+        service = ResembleSpeechService(client)
+        await service.aclose()
+        with pytest.raises(ClientStateError, match="closed"):
+            await service.synthesize_to_file(
+                SpeechSynthesisRequest(text="hello", voice="voice"),
+                tmp_path / "audio.wav",
+            )
+        with pytest.raises(ClientStateError, match="closed"):
+            await service.synthesize_many_to_files(())
+    await http.aclose()
+
+
+@pytest.mark.asyncio
 async def test_usage_reservation_is_durable_before_provider_send() -> None:
     recorded_attempts: list[int] = []
 
