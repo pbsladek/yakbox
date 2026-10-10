@@ -4,3 +4,6 @@ planner_300_chapters:
 stream_10000_rows:
   max_peak_bytes: 8388608
   max_seconds: 5.0
+chunk_8000000_characters:
+  max_peak_bytes: 41943040
+  max_seconds: 5.0

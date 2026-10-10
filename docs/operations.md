@@ -100,6 +100,13 @@ request write, and response reads.
 Rejected analysis-worker handshakes and response frames discard the process,
 so the next request starts with a fresh handshake.
 
+Persistent-runtime idle shutdown counts time since the latest authenticated
+request or completed operation and keeps an active operation alive. Cancelling
+a queued hosted batch stops its dispatcher, including when the caller is still
+waiting for queue capacity. A cancelled journal acknowledgement does not stop
+durable writes; a writer failure wakes blocked producers so interruption
+handling can finish.
+
 ## Troubleshooting
 
 `FFmpeg is required`: install FFmpeg and ensure both `ffmpeg` and `ffprobe` are

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import tomllib
 from collections.abc import Coroutine
 from pathlib import Path
@@ -15,6 +16,7 @@ from yakbox.cli import main
 from yakbox.cloud import Page
 from yakbox.speech import AudioFormat, SpeechArtifact
 from yakbox.speech.analysis_migration import preview_manifest_migration
+from yakbox.speech.analysis_runtime_install import AnalysisRuntimeInstaller
 
 
 def test_help_does_not_import_torch() -> None:
@@ -177,6 +179,68 @@ def test_analysis_runtime_cli_installs_explicitly_and_verifies_without_installin
     ]
     assert json.loads(installed.output)["data"]["verified"] is True
     assert json.loads(verified.output)["data"]["verified"] is True
+
+
+def test_analysis_runtime_cli_reports_the_supported_uv_minimum(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def run(
+        arguments: list[str], **_options: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        if arguments[1:] == ["--version"]:
+            return subprocess.CompletedProcess(arguments, 0, b"uv 0.12.99\n", b"")
+        assert arguments[1:3] == ["-I", "-c"]
+        return subprocess.CompletedProcess(arguments, 0, b"3.14\n", b"")
+
+    installer = AnalysisRuntimeInstaller(
+        tmp_path / "runtimes",
+        uv_executable=Path("/usr/local/bin/uv"),
+        runner=run,
+        host_validator=lambda: None,
+    )
+    monkeypatch.setattr(
+        "yakbox.cli_runtime.AnalysisRuntimeInstaller", lambda _root: installer
+    )
+
+    result = CliRunner().invoke(main, ["--json", "runtimes", "install", "parakeet"])
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    validate_contract("cli-output", payload)
+    assert payload["error"]["code"] == "backend_unavailable"
+    assert "uv 0.13.0 or newer" in payload["error"]["message"]
+
+
+def test_cache_cleanup_cli_rejects_an_external_root_without_deleting_files(
+    book_workspace: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    outside = tmp_path_factory.mktemp("external-synthesis-cache")
+    audio = outside / "aa/audio.wav"
+    audio.parent.mkdir()
+    audio.write_bytes(b"preserve external audio")
+    linked = book_workspace / ".yakbox/cache/synthesis"
+    linked.parent.mkdir(parents=True)
+    linked.symlink_to(outside, target_is_directory=True)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--json",
+            "artifacts",
+            "cache",
+            "clean",
+            str(book_workspace / "yakbox.toml"),
+            "--max-bytes",
+            "0",
+            "--apply",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    validate_contract("cli-output", payload)
+    assert payload["error"]["code"] == "artifact_error"
+    assert audio.read_bytes() == b"preserve external audio"
 
 
 def test_localized_repair_cli_generates_approves_and_explains(

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 from tests.schema_helpers import validate_contract
@@ -9,8 +12,83 @@ from tests.schema_helpers import validate_contract
 from yakbox.audiobook.journal import RunJournal, target_lock
 from yakbox.cloud.errors import BatchJournalError
 from yakbox.cloud.journal import BatchJournalWriter, read_journal
+from yakbox.cloud.journal import _durable_append as durable_append
 from yakbox.contracts import runtime_metadata
 from yakbox.errors import BuildError
+
+
+@pytest.mark.asyncio
+async def test_cancelled_journal_append_does_not_stop_the_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release = threading.Event()
+
+    def delayed_append(stream: BinaryIO, payload: bytes) -> None:
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(timeout=5)
+        durable_append(stream, payload)
+
+    monkeypatch.setattr("yakbox.cloud.journal._durable_append", delayed_append)
+    path = tmp_path / "batch.ndjson"
+    try:
+        async with BatchJournalWriter(path) as writer:
+            append = asyncio.create_task(writer.append_record(_batch_record("header")))
+            await asyncio.wait_for(started.wait(), timeout=2)
+            append.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await append
+            release.set()
+            await asyncio.wait_for(
+                writer.append_record(_batch_record("interrupted")), timeout=2
+            )
+    finally:
+        release.set()
+
+    assert [record["record_type"] for record in read_journal(path)] == [
+        "header",
+        "interrupted",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_journal_failure_unblocks_producers_waiting_for_queue_capacity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release = threading.Event()
+
+    def failing_append(_stream: object, _payload: bytes) -> None:
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(timeout=5)
+        raise OSError("disk full")
+
+    monkeypatch.setattr("yakbox.cloud.journal._durable_append", failing_append)
+    results: list[BaseException | None] | None = None
+    try:
+        with pytest.raises(BatchJournalError, match="disk full"):
+            async with BatchJournalWriter(tmp_path / "batch.ndjson") as writer:
+                appends = [
+                    asyncio.create_task(writer.append_record(_batch_record("header")))
+                ]
+                await asyncio.wait_for(started.wait(), timeout=2)
+                appends.extend(
+                    asyncio.create_task(writer.append_record(_batch_record("row")))
+                    for _ in range(102)
+                )
+                await asyncio.sleep(0)
+                release.set()
+                results = await asyncio.wait_for(
+                    asyncio.gather(*appends, return_exceptions=True), timeout=2
+                )
+    finally:
+        release.set()
+
+    assert results is not None
+    assert len(results) == 103
+    assert all(isinstance(result, (OSError, BatchJournalError)) for result in results)
 
 
 def test_audiobook_journal_recovers_only_a_torn_final_record(

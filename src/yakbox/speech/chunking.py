@@ -55,16 +55,18 @@ def plan_text_chunks(text: str, maximum: int) -> tuple[TextChunk, ...]:
     if len(text) <= maximum:
         return (TextChunk(text, ChunkBoundary.END),) if text else ()
     chunks: list[TextChunk] = []
-    remainder = text
-    while len(remainder) > maximum:
-        end, boundary = _semantic_boundary(remainder, maximum)
+    start = 0
+    while len(text) - start > maximum:
+        end, boundary = _semantic_boundary(text[start : start + maximum], maximum)
         if end < 1:
-            end = _unicode_safe_boundary(remainder, maximum)
+            end = _unicode_safe_boundary(text, maximum, start=start)
             boundary = ChunkBoundary.HARD
-        chunks.append(TextChunk(remainder[:end].strip(), boundary))
-        remainder = remainder[end:].strip()
-    if remainder:
-        chunks.append(TextChunk(remainder, ChunkBoundary.END))
+        chunks.append(TextChunk(text[start : start + end].strip(), boundary))
+        start += end
+        while start < len(text) and text[start].isspace():
+            start += 1
+    if start < len(text):
+        chunks.append(TextChunk(text[start:], ChunkBoundary.END))
     return tuple(chunk for chunk in chunks if chunk.text)
 
 
@@ -77,14 +79,14 @@ def _semantic_boundary(text: str, maximum: int) -> tuple[int, ChunkBoundary]:
     return 0, ChunkBoundary.HARD
 
 
-def _unicode_safe_boundary(text: str, maximum: int) -> int:
-    point = 0
-    for grapheme in regex.finditer(r"\X", text):
-        if grapheme.end() > maximum:
+def _unicode_safe_boundary(text: str, maximum: int, *, start: int = 0) -> int:
+    point = start
+    for grapheme in regex.finditer(r"\X", text, pos=start):
+        if grapheme.end() - start > maximum:
             break
         point = grapheme.end()
-    if point < 1:
+    if point == start:
         raise ValidationError(
             "A single Unicode grapheme exceeds the configured chunk size"
         )
-    return point
+    return point - start

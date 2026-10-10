@@ -73,9 +73,13 @@ yakbox artifacts cache clean --max-age-days 30
 yakbox artifacts cache clean --max-bytes 2147483648 --apply
 ```
 
-Invalid entries are always candidates. A byte limit keeps the newest valid
-chunks. Applying cache cleanup removes only cache files; built chapter audio
-and source files remain untouched.
+Chunks referenced by a current assembly are pinned, including entries with
+invalid cache metadata. Invalid unpinned entries are always candidates. A byte
+limit keeps the newest valid unpinned chunks. Apply rechecks every candidate
+before deleting anything and refuses a plan whose entries changed or acquired
+a pin. Replan after a concurrent build. Cache roots and entries must stay
+inside their managed workspace. Applying cache cleanup removes only cache
+files; built chapter audio and source files remain untouched.
 
 ## Release
 

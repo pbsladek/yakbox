@@ -147,3 +147,116 @@ filesystem and artifact assertions.
 Live providers, local model execution, and scheduled performance baselines are
 outside the default suite by design. Changes to those paths still require their
 documented opt-in canaries before release.
+
+## Performance and correctness follow-up: 2026-10-10
+
+This follow-up reviews filesystem commits, artifact and cache cleanup, hosted
+request queues, journals, runtime lifecycle, worker protocols, text chunking,
+and audio processing. It uses controlled offline reproductions and local
+benchmarks. It does not establish real-model narration quality or hosted
+provider compatibility.
+
+### Fixed findings
+
+- **P1: byte writes could overwrite a competing writer.**
+  `atomic_write_bytes(overwrite=False)` checked existence and then replaced the
+  destination. A file created between those operations was overwritten. Byte
+  writes now share the exclusive commit primitive used by media output and
+  sync the parent directory after publication. Empty byte files remain valid.
+- **P1: synthesis cache cleanup could delete files outside the workspace.**
+  A cache-root symlink made the external directory its own containment boundary.
+  Cache discovery now validates the root against the workspace and validates
+  each entry against the cache root. Cleanup also revalidates every candidate
+  before deleting any file, rejects regenerated or newly pinned entries, and
+  retains pinned entries even when their cache metadata is corrupt.
+- **P1: cancelling a journal append stopped the writer.**
+  Cancellation cancelled the acknowledgement future; completing that future
+  raised `InvalidStateError`. The writer now checks acknowledgement state.
+  Separately, disk failure could drain the queue while a blocked producer
+  resumed into a queue with no consumer. Failed writers now shut down the
+  queue and wake those producers. Regression tests fill the real 100-record
+  queue and exercise cancellation during a durable append.
+- **P1: cancelling a hosted batch could leave provider work running.**
+  Queue filling happened outside the cancellation handler. Cancellation while
+  waiting for capacity therefore bypassed dispatcher cleanup. Enqueueing is
+  now covered by that handler. Closing the service shuts down its queue,
+  cancels active workers, and rejects later single or batch operations with a
+  domain error.
+- **P2: the runtime idle timer ignored later activity.**
+  The original timer expired even if an authenticated request had updated
+  `last_activity`. The server now recalculates the remaining idle period and
+  keeps an active operation alive. Nonfinite timeout values are rejected.
+- **P2: chunking copied the remaining input on every iteration.**
+  Chunking now advances an offset through one string and copies bounded chunk
+  windows. A comparison against the previous implementation passed 300 cases
+  covering semantic boundaries and Unicode graphemes. The default suite adds
+  repeated grapheme-boundary tests; the performance suite adds an 8-million-
+  character baseline.
+
+The new failure reproductions failed against the previous implementations and
+passed after the corresponding fixes. The package-owned worker archive was
+rebuilt because it includes the changed filesystem helper.
+
+### Chunking measurements
+
+The following timings use CPython 3.14.4 on the local Apple Silicon host,
+500-character chunks, and repeated `word ` input. They are local samples,
+separate from the performance suite's traced-memory limits.
+
+| Characters | Chunks | Before | After |
+| ---: | ---: | ---: | ---: |
+| 1,000,000 | 2,000 | 0.050 s | 0.028 s |
+| 4,000,000 | 8,000 | 0.471 s | 0.109 s |
+| 8,000,000 | 16,000 | 1.281 s | 0.222 s |
+
+The largest input improved by approximately 5.8 times. These measurements
+cover planning work; they do not measure TTS or ASR inference.
+
+### Open findings
+
+**P1: persistent Chatterbox inference blocks its control plane.**
+`LocalChatterboxService.synthesize_to_file()` invokes synchronous inference
+inside its async method. The persistent runtime awaits that method on the
+same event loop that serves status and stop requests. A controlled 250 ms
+inference stub delayed a 10 ms heartbeat to 260 ms. Real inference exceeding
+the five-second connection timeout can therefore make a running runtime
+appear unhealthy. `ensure_local_runtime()` can then attempt another startup.
+Move inference behind a responsive process supervisor and test health,
+shutdown, and duplicate-start prevention with a deliberately slow worker.
+Preserve the documented rule against sharing a PyTorch model across threads.
+
+**P1 for loader upgrades: dependency pins and qualification metadata drift.**
+[Dependabot PR #20](https://github.com/pbsladek/yakbox/pull/20) changes the
+Parakeet worker pin to 0.5.3 and the Qwen worker pin to 0.5.8. The matching
+`BUILT_IN_WORKERS` definitions and model registry still identify 0.5.2 and
+0.4.8. An offline status reproduction with the upgraded installed versions
+reports `backend_package_unqualified` for both families. A successful worker
+handshake does not exercise model loading. Before releasing those upgraded
+loaders, update their reviewed provenance and worker definitions together and
+run the documented model qualification. Keep the historical qualification
+record distinct from evidence for a new package version.
+
+**P2: repair splicing expands complete audio into Python integers.**
+`audio.splice._read_wave()` decodes the entire source into a tuple, and
+crossfades repeatedly copy accumulated output. A 30-second mono 24 kHz PCM16
+fixture occupied 1,440,044 bytes on disk and peaked at 36,173,729 bytes of
+Python heap during decoding alone, approximately 25 times the file size.
+Long chapters and multiple replacements increase both memory and copy work.
+Stream unchanged prefixes and suffixes and decode only replacement windows
+plus bounded context, using compact sample buffers. Preserve sample format,
+frame coordinates, and the current splice evidence in comparison tests.
+
+### Verification
+
+The default offline suite passed 788 tests with 79.00% branch coverage; 20 live
+and performance tests were deselected. All three performance baselines passed
+when run explicitly. Ruff formatting and lint, `ty`, all eight import contracts,
+workflow validation with Actionlint, and all four lockfile checks passed.
+
+A clean temporary Git snapshot built the wheel and source distribution using
+the release helper. Both passed strict Twine metadata checks. Isolated wheel
+consumers exercised the public SDK and packaged worker. Isolated wheel and
+source installs both printed the snapshot commit with `yakbox --version`, and
+the builder restored the source metadata afterward. These checks used macOS
+and CPython 3.14.4; Linux CI, real-model qualification, and live-provider tests
+were not run. No release or remote repository change was made.

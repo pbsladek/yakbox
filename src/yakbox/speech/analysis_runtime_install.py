@@ -45,7 +45,8 @@ _FAMILY_ADAPTERS = {
     "parakeet": "parakeet-mlx",
     "qwen": "mlx-audio",
 }
-_UV_VERSION = re.compile(r"uv 0\.12(?:\.[0-9]+)?(?:\s.*)?")
+_UV_VERSION = re.compile(r"uv ([0-9]+)\.([0-9]+)\.([0-9]+)(?:\s.*)?")
+_MINIMUM_UV_VERSION = (0, 13, 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,8 +367,13 @@ class AnalysisRuntimeInstaller:
             timeout=30,
         )
         output = completed.stdout.decode("utf-8", errors="replace").strip()
-        if completed.returncode != 0 or _UV_VERSION.fullmatch(output) is None:
-            raise BackendUnavailableError("Yakbox requires reviewed uv 0.12.x")
+        version = _UV_VERSION.fullmatch(output)
+        if (
+            completed.returncode != 0
+            or version is None
+            or tuple(int(part) for part in version.group(1, 2, 3)) < _MINIMUM_UV_VERSION
+        ):
+            raise BackendUnavailableError("Yakbox requires uv 0.13.0 or newer")
 
     def _verify_python(self) -> None:
         completed = self._runner(
@@ -462,7 +468,7 @@ def _find_uv() -> Path:
     value = shutil.which("uv")
     if value is None:
         raise BackendUnavailableError(
-            "uv 0.12.x is required for explicit analysis-runtime installation"
+            "uv 0.13.0 or newer is required for explicit analysis-runtime installation"
         )
     return Path(value)
 
