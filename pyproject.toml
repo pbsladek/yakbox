@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "yakbox"
-version = "0.2.2"
+version = "0.3.0"
 description = "A local-first, reproducible audiobook build system"
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
