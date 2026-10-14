@@ -3,8 +3,8 @@
 ## Install the CLI
 
 Yakbox supports macOS and Linux with Python 3.14. Windows is not supported.
-The default installation is small and does not install PyTorch. Once the
-v0.2.0 release is published, install its wheel directly:
+The default installation is small and does not install PyTorch. Install the
+published v0.2.0 wheel directly:
 
 ```console
 uv tool install --python 3.14 \
@@ -74,9 +74,9 @@ gh attestation verify yakbox-0.2.0-py3-none-any.whl --repo pbsladek/yakbox
 
 ## Trigger a GitHub Release locally
 
-The project version in `pyproject.toml` is authoritative; the initial release
-version is `0.2.0`, with tag `v0.2.0`. Commit and push the version and workflow
-changes before running the release workflow. Authenticate `gh` with
+The project version in `pyproject.toml` is authoritative. The next release
+version is `0.2.1`, with tag `v0.2.1`. Commit and merge the version and workflow
+changes to `main` before running the release workflow. Authenticate `gh` with
 `gh auth login` if needed, then run:
 
 ```console
@@ -95,14 +95,14 @@ commit's project version. A supplied tag must match that version. Override these
 settings when needed:
 
 ```console
-make release RELEASE_REPO=pbsladek/yakbox RELEASE_REF=main RELEASE_TAG=v0.2.0
+make release RELEASE_REPO=pbsladek/yakbox RELEASE_REF=main RELEASE_TAG=v0.2.1
 ```
 
 The equivalent GitHub CLI command is:
 
 ```console
 gh workflow run release.yml --repo pbsladek/yakbox --ref main \
-  -f tag=v0.2.0 -f publish_to=github
+  -f tag=v0.2.1 -f publish_to=github
 ```
 
 `make help` lists all release targets and settings; `UV` and `GH` can select
@@ -118,7 +118,7 @@ Both distributions embed the full Git commit selected for the release.
 `yakbox --version` prints it alongside the package version:
 
 ```text
-yakbox, version 0.2.0 (commit 0123456789abcdef0123456789abcdef01234567)
+yakbox, version 0.2.1 (commit 0123456789abcdef0123456789abcdef01234567)
 ```
 
 Preflight checks isolated installs of the wheel and source archive against
@@ -139,22 +139,45 @@ Only after those jobs pass does the GitHub job publish the tested artifacts
 and create the tag at the tested commit. Existing tags must already point to
 that commit. GitHub publication needs no PyPI account or publishing token.
 
+Each new release needs a new version. For subsequent patch releases, run:
+
+```console
+uv version --bump patch
+```
+
+This updates `pyproject.toml` and refreshes `uv.lock`. Update the source-only
+version fallback in `src/yakbox/__init__.py` to match and rebuild the packaged
+worker, which includes that initializer:
+
+```console
+uv run python -m yakbox.speech.analysis_worker_artifact --write-packaged
+```
+
+Commit and merge the changes before running `make release`.
+
+If preflight says a tag does not point to the release commit, the selected
+version already belongs to another commit. For example, `v0.2.0` remains tied
+to the published 0.2.0 source even after `main` advances. Bump the version to
+release the new changes. Keep published tags at their original commits. To
+publish an existing version to PyPI, select its tag as `RELEASE_REF`, as shown
+below.
+
 You can also run preflight locally from a clean worktree before publishing:
 
 ```console
 make release-preflight
 ```
 
-This derives the tag from the local project version; `RELEASE_TAG=v0.2.0` can
-set it explicitly. It runs `uv run yakbox-release-preflight --tag v0.2.0` and
+This derives the tag from the local project version; `RELEASE_TAG=v0.2.1` can
+set it explicitly. It runs `uv run yakbox-release-preflight --tag v0.2.1` and
 writes distributions under `dist/` and release evidence under
 `release-metadata/`. `make release` runs preflight in GitHub Actions; it does
 not require a separate local preflight. Alternatively, pushing a reviewed
 version tag starts the GitHub release workflow automatically:
 
 ```console
-git tag -a v0.2.0 -m "yakbox v0.2.0"
-git push origin v0.2.0
+git tag -a v0.2.1 -m "yakbox v0.2.1"
+git push origin v0.2.1
 ```
 
 Use either the manual dispatch or tag push for a new GitHub Release. A tag push

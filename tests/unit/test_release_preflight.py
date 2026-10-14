@@ -17,6 +17,9 @@ from yakbox.release_preflight import (
     run_release_preflight,
     validate_release_tag,
 )
+from yakbox.release_preflight import (
+    main as preflight_main,
+)
 
 
 def test_project_version_and_tag_contract(tmp_path: Path) -> None:
@@ -56,6 +59,38 @@ def test_clean_worktree_and_tag_must_resolve_to_head(tmp_path: Path) -> None:
     )
     with pytest.raises(ReleasePreflightError, match="does not point"):
         ensure_tag_points_to_head(tmp_path, "v1.0.0", head, runner=runner)
+
+
+def test_preflight_explains_how_to_release_new_changes_after_a_tag_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.2.0"\n')
+    tagged_commit = "a" * 40
+    release_commit = "b" * 40
+    responses = {
+        ("git", "status", "--porcelain", "--untracked-files=all"): "",
+        ("git", "rev-parse", "HEAD"): release_commit,
+        ("git", "rev-parse", "--verify", "refs/tags/v0.2.0^{commit}"): tagged_commit,
+    }
+
+    def runner(command: tuple[str, ...], _cwd: Path) -> str:
+        return responses[command]
+
+    monkeypatch.setattr("yakbox.release_preflight._run_command", runner)
+
+    with pytest.raises(SystemExit) as result:
+        preflight_main(
+            ["--root", str(tmp_path), "--tag", "v0.2.0", "--require-tag-ref"]
+        )
+
+    assert result.value.code == 1
+    diagnostic = capsys.readouterr().err
+    assert tagged_commit in diagnostic
+    assert release_commit in diagnostic
+    assert "uv version --bump patch" in diagnostic
+    assert "commit and merge" in diagnostic
+    assert not (tmp_path / "dist").exists()
+    assert not (tmp_path / "release-metadata").exists()
 
 
 def test_checksum_manifest_is_deterministic_and_rejects_name_collisions(
