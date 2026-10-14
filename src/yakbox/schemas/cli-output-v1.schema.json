@@ -66,5 +66,26 @@
       "not": {"required": ["data"]}
     }
   ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {"command": {"const": "completion"}, "status": {"const": "ok"}},
+        "required": ["command", "status"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["shell", "script"],
+            "properties": {
+              "shell": {"enum": ["bash", "zsh", "fish"]},
+              "script": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": false
 }

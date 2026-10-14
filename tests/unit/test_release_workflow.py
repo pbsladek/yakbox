@@ -263,6 +263,26 @@ def test_github_release_is_dispatchable_without_pypi_and_waits_for_both_platform
         assert "inputs.publish_to ==" in str(job["if"])
 
 
+@pytest.mark.parametrize("environment", ["pypi", "testpypi"])
+def test_index_publication_uses_oidc_without_static_credentials(
+    environment: str,
+) -> None:
+    job = _job(_workflow("release.yml"), f"publish-{environment}")
+    assert _mapping(job["environment"])["name"] == environment
+    assert _mapping(job["permissions"])["id-token"] == "write"
+    steps = cast(list[dict[str, object]], job["steps"])
+    publish = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("pypa/gh-action-pypi-publish@")
+    )
+    configuration = _mapping(publish.get("with", {}))
+    assert "password" not in configuration
+    assert "user" not in configuration
+    if environment == "testpypi":
+        assert configuration["repository-url"] == "https://test.pypi.org/legacy/"
+
+
 def test_release_uploads_tested_assets_and_targets_the_resolved_commit() -> None:
     workflow = _workflow("release.yml")
     steps = cast(list[dict[str, object]], _job(workflow, "github-release")["steps"])
@@ -401,48 +421,80 @@ def test_release_please_prepares_generated_files_and_explicitly_runs_ci() -> Non
     assert "publish_to=github" in publication
 
 
-@pytest.mark.parametrize("created", [True, False])
-@pytest.mark.parametrize("unavailable", [False, True])
-def test_release_pr_resolution_uses_action_output_and_direct_api(
-    tmp_path: Path, created: bool, unavailable: bool
-) -> None:
-    steps = cast(
-        list[dict[str, object]],
-        _job(_workflow("release-please.yml"), "prepare")["steps"],
-    )
-    script = next(step["run"] for step in steps if step.get("id") == "pr")
+@pytest.fixture
+def release_pr_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path]:
+    jq = shutil.which("jq")
+    assert jq is not None
     gh = tmp_path / "gh"
     log = tmp_path / "requests"
     gh.write_text(
         f"#!{sys.executable}\n"
-        "import json, os, sys\nfrom pathlib import Path\n"
+        "import json, os, subprocess, sys\nfrom pathlib import Path\n"
         "args = sys.argv[1:]\n"
         f"with Path({str(log)!r}).open('a') as stream:\n"
         "    stream.write(json.dumps(args) + '\\n')\n"
         "assert args[0] == 'api', 'Search must not resolve a newly created PR'\n"
         "if os.environ['UNAVAILABLE'] == '1': sys.exit(1)\n"
-        "print('release-please--branches--main' if args[1].endswith('/24') else '24')\n"
+        "if args[1].endswith('/24'):\n"
+        "    print('release-please--branches--main')\n"
+        "else:\n"
+        "    assert '--paginate' in args and '--slurp' in args\n"
+        "    assert args[1:3] == ['--method', 'GET']\n"
+        "    pages = 'CLOSED_PR_PAGES' if 'state=closed' in args else 'OPEN_PR_PAGES'\n"
+        f"    result = subprocess.run([{jq!r}, '-r', args[-1]],\n"
+        "        input=os.environ[pages], text=True, check=False)\n"
+        "    sys.exit(result.returncode)\n"
     )
     gh.chmod(0o755)
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("GH_REPO", "example/yakbox")
+    monkeypatch.setenv("TARGET_BRANCH", "main")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("CREATED_PR", "")
+    monkeypatch.setenv("UNAVAILABLE", "0")
+    monkeypatch.setenv("OPEN_PR_PAGES", "[[]]")
+    monkeypatch.setenv("CLOSED_PR_PAGES", "[[]]")
+    return output, log
+
+
+def _resolve_release_pr() -> subprocess.CompletedProcess[str]:
+    steps = cast(
+        list[dict[str, object]],
+        _job(_workflow("release-please.yml"), "prepare")["steps"],
+    )
+    script = next(step["run"] for step in steps if step.get("id") == "pr")
     shell = shutil.which("bash")
     assert shell is not None
-    output = tmp_path / "outputs"
-    result = subprocess.run(  # noqa: S603 - checked-in lookup script and fake GitHub API
+    return subprocess.run(  # noqa: S603 - checked-in lookup script and fake GitHub API
         [shell, "-e", "-o", "pipefail", "-c", str(script)],
-        env={
-            **os.environ,
-            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
-            "CREATED_PR": json.dumps({"number": 24}) if created else "",
-            "GH_REPO": "example/yakbox",
-            "TARGET_BRANCH": "main",
-            "GITHUB_OUTPUT": str(output),
-            "UNAVAILABLE": "1" if unavailable else "0",
-        },
         text=True,
         capture_output=True,
         check=False,
         timeout=10,
     )
+
+
+@pytest.mark.parametrize("created", [json.dumps({"number": 24}), "", "null"])
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_release_pr_resolution_uses_action_output_and_direct_api(
+    release_pr_api: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    created: str,
+    unavailable: bool,
+) -> None:
+    output, log = release_pr_api
+    monkeypatch.setenv("CREATED_PR", created)
+    monkeypatch.setenv("UNAVAILABLE", "1" if unavailable else "0")
+    monkeypatch.setenv(
+        "OPEN_PR_PAGES",
+        json.dumps(
+            [[], [{"number": 24, "labels": [{"name": "autorelease: pending"}]}]]
+        ),
+    )
+    result = _resolve_release_pr()
     assert (result.returncode == 0) is not unavailable, result.stderr
     if unavailable:
         assert not output.exists()
@@ -451,7 +503,117 @@ def test_release_pr_resolution_uses_action_output_and_direct_api(
             output.read_text() == "number=24\nbranch=release-please--branches--main\n"
         )
         requests = [json.loads(line) for line in log.read_text().splitlines()]
-        assert len(requests) == (1 if created else 2)
+        assert len(requests) == (1 if created.startswith("{") else 2)
+
+
+@pytest.mark.parametrize("created", ["", "null"])
+def test_release_pr_resolution_reports_no_releasable_changes(
+    release_pr_api: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    created: str,
+) -> None:
+    output, _ = release_pr_api
+    monkeypatch.setenv("CREATED_PR", created)
+    monkeypatch.setenv(
+        "CLOSED_PR_PAGES",
+        json.dumps(
+            [
+                [
+                    {
+                        "number": 23,
+                        "merged_at": None,
+                        "labels": [{"name": "autorelease: pending"}],
+                    },
+                    {
+                        "number": 24,
+                        "merged_at": "2026-10-14T06:42:48Z",
+                        "labels": [{"name": "autorelease: tagged"}],
+                    },
+                ]
+            ]
+        ),
+    )
+    result = _resolve_release_pr()
+    assert result.returncode == 0, result.stderr
+    assert "No release PR: no releasable Conventional Commits" in result.stdout
+    assert not output.exists()
+
+
+def test_release_pr_resolution_reports_merged_pending_publication(
+    release_pr_api: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output, _ = release_pr_api
+    monkeypatch.setenv(
+        "CLOSED_PR_PAGES",
+        json.dumps(
+            [
+                [],
+                [
+                    {
+                        "number": 24,
+                        "merged_at": "2026-10-14T06:42:48Z",
+                        "labels": [{"name": "autorelease: pending"}],
+                    }
+                ],
+            ]
+        ),
+    )
+    result = _resolve_release_pr()
+    assert result.returncode != 0
+    assert "::error::Merged release PR(s) 24" in result.stdout
+    assert "make release" in result.stdout
+    assert not output.exists()
+
+
+def test_release_pr_resolution_rejects_multiple_pending_prs_across_pages(
+    release_pr_api: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output, _ = release_pr_api
+    monkeypatch.setenv(
+        "OPEN_PR_PAGES",
+        json.dumps(
+            [
+                [{"number": number, "labels": [{"name": "autorelease: pending"}]}]
+                for number in (24, 25)
+            ]
+        ),
+    )
+    result = _resolve_release_pr()
+    assert result.returncode != 0
+    assert "Multiple release PRs" in result.stderr
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("created", ["not JSON", "{}"])
+def test_release_pr_resolution_rejects_invalid_action_output(
+    release_pr_api: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    created: str,
+) -> None:
+    output, _ = release_pr_api
+    monkeypatch.setenv("CREATED_PR", created)
+    result = _resolve_release_pr()
+    assert result.returncode != 0
+    assert not output.exists()
+
+
+def test_github_publication_prepares_next_pr_after_marking_release_tagged() -> None:
+    job = _job(_workflow("release.yml"), "github-release")
+    assert _mapping(job["permissions"])["actions"] == "write"
+    steps = cast(list[dict[str, object]], job["steps"])
+    scripts = [str(step["run"]) for step in steps if "run" in step]
+    mark = next(
+        index
+        for index, script in enumerate(scripts)
+        if "--add-label 'autorelease: tagged'" in script
+    )
+    dispatch = next(
+        script
+        for script in scripts[mark + 1 :]
+        if "gh workflow run release-please.yml --ref main" in script
+    )
+    assert '-f "request_id=$REQUEST_ID"' in dispatch
+    assert not any(step.get("if") == "always()" for step in steps)
 
 
 def test_ci_package_rejects_stale_lock_without_rewriting_it(tmp_path: Path) -> None:

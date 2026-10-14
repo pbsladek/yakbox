@@ -61,3 +61,22 @@ def test_cli_error_shape_requires_stable_code_and_message() -> None:
 
     with pytest.raises(ValidationError):
         Draft202012Validator(load_schema("cli-output")).validate(value)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [{}, {"shell": "unknown", "script": "script"}, {"shell": "zsh", "script": ""}],
+)
+def test_completion_schema_rejects_invalid_payloads(data: dict[str, object]) -> None:
+    value = {
+        "$schema": "https://yakbox.dev/schemas/cli-output-v1.schema.json",
+        "schema_version": 1,
+        "yakbox_version": "0.2.2",
+        "timestamp": "2026-10-14T00:00:00+00:00",
+        "command": "completion",
+        "status": "ok",
+        "exit_code": 0,
+        "data": data,
+    }
+    with pytest.raises(ValidationError):
+        Draft202012Validator(load_schema("cli-output")).validate(value)

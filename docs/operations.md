@@ -21,6 +21,7 @@ yakbox doctor yakbox.toml --target default
 yakbox doctor yakbox.toml --backend chatterbox-local --deep
 yakbox doctor yakbox.toml --backend resemble --network
 yakbox --json doctor
+yakbox doctor --strict
 ```
 
 The default is offline and read-only. It checks Python/package configuration,
@@ -28,6 +29,24 @@ FFmpeg/FFprobe, workspace paths, source readability, free storage, locks, and
 atomic writes. `--deep` inspects local runtime/device readiness without loading
 a model. `--network` performs only safe provider discovery (`GET` voices); it
 never synthesizes or mutates.
+
+`--strict` also returns exit code 1 when a diagnostic has `warn` status. Skipped
+checks remain allowed. Without `--strict`, warnings retain exit code 0 when
+there are no failures. The JSON envelope's status and exit code reflect this
+policy; the nested Doctor report's `healthy` field continues to describe the
+absence of failed checks.
+
+## Initialize a workspace
+
+Set the book metadata when creating a new project:
+
+```console
+yakbox init my-book --title "My Book" --author "Author Name"
+```
+
+The defaults remain `My Audiobook` and `Author Name`. Titles and authors must
+contain non-whitespace text. Quotes, backslashes, and Unicode are safely
+encoded in `yakbox.toml`. Initialization refuses an existing manifest.
 
 ## Configuration
 
@@ -141,10 +160,15 @@ exit codes 0, 1, 2, and 130.
 Click completion can be installed for the current shell:
 
 ```console
-_YAKBOX_COMPLETE=bash_source yakbox > ~/.local/share/bash-completion/completions/yakbox
-_YAKBOX_COMPLETE=zsh_source yakbox > ~/.zfunc/_yakbox
-_YAKBOX_COMPLETE=fish_source yakbox > ~/.config/fish/completions/yakbox.fish
+yakbox completion --shell bash > ~/.yakbox-complete.bash
+yakbox completion --shell zsh > ~/.yakbox-complete.zsh
+yakbox completion --shell fish > ~/.config/fish/completions/yakbox.fish
 ```
 
-Create the destination directory first and restart the shell. Regenerate
-completion after upgrading command surfaces.
+For Bash, source `~/.yakbox-complete.bash` in `~/.bashrc`; for Zsh, source
+`~/.yakbox-complete.zsh` in `~/.zshrc`. Bash completion requires Bash 4.4 or
+newer. Create the Fish destination directory first and restart the shell.
+Regenerate completion after upgrading command surfaces. The command prints
+the raw script without terminal formatting; `--json completion --shell zsh`
+instead returns the script and shell in the standard CLI envelope. The
+existing `_YAKBOX_COMPLETE=SHELL_source yakbox` interface remains available.
