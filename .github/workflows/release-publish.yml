@@ -1,4 +1,5 @@
-name: Publish merged release
+name: Start release
+run-name: Start release · ${{ github.ref_name }}
 
 on:
   push:
@@ -38,5 +39,4 @@ jobs:
           RELEASE_COMMIT: ${{ github.sha }}
         run: >-
           gh workflow run release.yml --ref main
-          -f "tag=$RELEASE_TAG" -f "commit=$RELEASE_COMMIT" -f publish_to=github
-          -f "request_id=publish-$RELEASE_COMMIT"
+          -f "tag=$RELEASE_TAG" -f "commit=$RELEASE_COMMIT"

@@ -8,7 +8,6 @@ import re
 import subprocess
 import sys
 import time
-import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -77,6 +76,36 @@ class _GitHub:
                 "GitHub returned invalid release JSON"
             ) from error
 
+    def dispatch(self, workflow: str, ref: str, **inputs: str) -> int:
+        arguments = (
+            self.executable,
+            "api",
+            "--method",
+            "POST",
+            f"repos/{self.repository}/actions/workflows/{workflow}/dispatches",
+            "-H",
+            "X-GitHub-Api-Version: 2026-03-10",
+            "-f",
+            f"ref={ref}",
+            *(
+                part
+                for key, value in inputs.items()
+                for part in ("-f", f"inputs[{key}]={value}")
+            ),
+        )
+        try:
+            value = _mapping(json.loads(self.runner(arguments)))
+        except json.JSONDecodeError as error:
+            raise ReleasePreflightError("Invalid workflow dispatch response") from error
+        identifier = value.get("workflow_run_id")
+        if (
+            not isinstance(identifier, int)
+            or isinstance(identifier, bool)
+            or identifier < 1
+        ):
+            raise ReleasePreflightError("GitHub did not return a workflow run ID")
+        return identifier
+
     def pending(self, ref: str, state: str) -> _ReleasePR | None:
         query = (
             '[.[] | select(any(.labels[]; .name == "autorelease: pending"))'
@@ -121,26 +150,40 @@ class _GitHub:
             raise ReleasePreflightError("Expected at most one pending release PR")
         return _pull_request(values[0]) if values else None
 
-    def wait_run(self, workflow: str, title: str, *, head: str | None = None) -> int:
+    def wait_run(
+        self, workflow: str, title: str | int, *, head: str | None = None
+    ) -> int:
         deadline = time.monotonic() + _WAIT_SECONDS
         while time.monotonic() < deadline:
-            runs = self.json(
-                "run",
-                "list",
-                "--workflow",
-                workflow,
-                "--event",
-                "workflow_dispatch",
-                "--limit",
-                "50",
-                "--json",
-                "databaseId,displayTitle,status,conclusion,headSha",
+            runs = (
+                [
+                    self.json(
+                        "run",
+                        "view",
+                        str(title),
+                        "--json",
+                        "databaseId,status,conclusion,headSha",
+                    )
+                ]
+                if isinstance(title, int)
+                else self.json(
+                    "run",
+                    "list",
+                    "--workflow",
+                    workflow,
+                    "--event",
+                    "workflow_dispatch",
+                    "--limit",
+                    "50",
+                    "--json",
+                    "databaseId,displayTitle,status,conclusion,headSha",
+                )
             )
             if not isinstance(runs, list):
                 raise ReleasePreflightError("GitHub returned invalid workflow runs")
             for raw in runs:
                 run = _mapping(raw)
-                if run.get("displayTitle") != title:
+                if isinstance(title, str) and run.get("displayTitle") != title:
                     continue
                 if run.get("status") != "completed":
                     break  # Prefer the latest matching run over older retries.
@@ -200,7 +243,7 @@ class _GitHub:
         return version
 
     def publication_handoff(self, commit: str) -> str | None:
-        title = f"Release publish-{commit}"
+        title = f"Release v{self.manifest_version(commit)}"
         runs = self.json(
             "run",
             "list",
@@ -239,12 +282,31 @@ class _GitHub:
             return title
         return None
 
-    def retry_publication(self, ref: str, pr: _ReleasePR) -> str:
+    def retry_publication(self, ref: str, pr: _ReleasePR) -> int:
         if pr.merged is None:
             raise ReleasePreflightError(
                 "Publication retries require a merged release PR"
             )
         version = self.manifest_version(pr.merged)
+        try:
+            commit = self._resolve_commit(f"v{version}")
+        except ReleasePreflightError as error:
+            if "HTTP 404" not in str(error):
+                raise
+            commit = self._resolve_commit(ref)
+        if self.manifest_version(commit) != version:
+            raise ReleasePreflightError(
+                "The selected ref no longer matches the pending release version"
+            )
+        return self.dispatch(
+            "release.yml",
+            ref,
+            tag=f"v{version}",
+            commit=commit,
+            release_pr=str(pr.number),
+        )
+
+    def _resolve_commit(self, ref: str) -> str:
         commit = self.runner(
             (
                 self.executable,
@@ -256,29 +318,7 @@ class _GitHub:
         ).strip()
         if _SHA.fullmatch(commit) is None:
             raise ReleasePreflightError("Cannot resolve the publication retry commit")
-        if self.manifest_version(commit) != version:
-            raise ReleasePreflightError(
-                "The selected ref no longer matches the pending release version"
-            )
-        request = uuid.uuid4().hex
-        self.command(
-            "workflow",
-            "run",
-            "release.yml",
-            "--ref",
-            ref,
-            "-f",
-            f"tag=v{version}",
-            "-f",
-            f"commit={commit}",
-            "-f",
-            "publish_to=github",
-            "-f",
-            f"request_id={request}",
-            "-f",
-            f"release_pr={pr.number}",
-        )
-        return f"Release {request}"
+        return commit
 
 
 def automate_release(
@@ -302,20 +342,14 @@ def automate_release(
         if title is None:
             title = github.retry_publication(ref, pending)
     else:
-        request = uuid.uuid4().hex
-        github.command(
-            "workflow",
-            "run",
-            "release-please.yml",
-            "--ref",
-            ref,
-            "-f",
-            f"request_id={request}",
-        )
+        preparation = github.dispatch("release-please.yml", ref)
         sys.stdout.write("Preparing the Release Please PR and generated files...\n")
-        preparation = github.wait_run(
-            "release-please.yml", f"Release preparation {request}"
-        )
+        github.wait_run("release-please.yml", preparation)
+        number = _mapping(
+            github.json("run", "view", str(preparation), "--json", "number")
+        ).get("number")
+        if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+            raise ReleasePreflightError("GitHub returned an invalid preparation number")
         pr = github.pending(ref, "open")
         if pr is None:
             raise ReleasePreflightError(
@@ -323,10 +357,10 @@ def automate_release(
                 "fix:, feat:, or perf: first."
             )
         sys.stdout.write(f"Waiting for CI on release PR #{pr.number}...\n")
-        github.wait_run("ci.yml", f"CI release-{preparation}", head=pr.head)
+        github.wait_run("ci.yml", f"CI · release preparation #{number}", head=pr.head)
         merged = github.merge(pr)
-        title = f"Release publish-{merged}"
-    sys.stdout.write("Waiting for the checked GitHub publication...\n")
+        title = f"Release v{github.manifest_version(merged)}"
+    sys.stdout.write("Waiting for checked GitHub and PyPI publication...\n")
     return github.wait_run("release.yml", title)
 
 

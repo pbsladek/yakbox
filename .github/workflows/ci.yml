@@ -1,5 +1,5 @@
 name: CI
-run-name: CI ${{ inputs.request_id || github.ref_name }}
+run-name: "${{ inputs.release_preparation && format('CI · release preparation #{0}', inputs.release_preparation) || format('CI · {0}', github.head_ref || github.ref_name) }}"
 
 on:
   push:
@@ -9,8 +9,8 @@ on:
   merge_group:
   workflow_dispatch:
     inputs:
-      request_id:
-        description: Correlation ID for release preparation
+      release_preparation:
+        description: Preparation number for release checks
         type: string
         required: false
 

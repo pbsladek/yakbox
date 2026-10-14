@@ -61,7 +61,9 @@ def test_make_default_only_shows_help(tmp_path: Path) -> None:
     assert commands == []
 
 
-def test_make_release_defaults_to_github_and_remote_version(tmp_path: Path) -> None:
+def test_make_release_automates_both_destinations_from_the_remote_version(
+    tmp_path: Path,
+) -> None:
     result, commands = _make(tmp_path, "release")
     assert result.returncode == 0, result.stderr
     assert commands == [
@@ -80,10 +82,7 @@ def test_make_release_defaults_to_github_and_remote_version(tmp_path: Path) -> N
     ]
 
 
-@pytest.mark.parametrize("destination", ["pypi", "testpypi"])
-def test_make_release_preserves_explicit_settings(
-    tmp_path: Path, destination: str
-) -> None:
+def test_make_release_preserves_explicit_settings(tmp_path: Path) -> None:
     tag = "v0.2.0; literal text"
     result, commands = _make(
         tmp_path,
@@ -91,7 +90,6 @@ def test_make_release_preserves_explicit_settings(
         "RELEASE_REPO=example/yakbox",
         "RELEASE_REF=v0.2.0",
         f"RELEASE_TAG={tag}",
-        f"PUBLISH_TO={destination}",
     )
     assert result.returncode == 0, result.stderr
     assert commands[0] == [
@@ -104,18 +102,7 @@ def test_make_release_preserves_explicit_settings(
         "v0.2.0",
         "-f",
         f"tag={tag}",
-        "-f",
-        f"publish_to={destination}",
     ]
-
-
-def test_make_release_rejects_unknown_destination_before_dispatch(
-    tmp_path: Path,
-) -> None:
-    result, commands = _make(tmp_path, "release", "PUBLISH_TO=unknown")
-    assert result.returncode != 0
-    assert "PUBLISH_TO must be" in result.stderr
-    assert commands == []
 
 
 def test_make_preflight_derives_local_version(tmp_path: Path) -> None:

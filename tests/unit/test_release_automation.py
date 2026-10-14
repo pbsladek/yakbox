@@ -17,6 +17,10 @@ HEAD = "a" * 40
 MERGED = "b" * 40
 
 
+def _is_dispatch(command: tuple[str, ...]) -> bool:
+    return command[1] == "api" and "POST" in command
+
+
 class FakeGitHub:
     def __init__(self, *, failed: str = "", resume: bool = False) -> None:
         self.commands: list[tuple[str, ...]] = []
@@ -37,13 +41,21 @@ class FakeGitHub:
 
     def __call__(self, command: tuple[str, ...]) -> str:
         self.commands.append(command)
-        if command[1:3] == ("workflow", "run"):
-            self.request = next(
-                part.removeprefix("request_id=")
-                for part in command
-                if part.startswith("request_id=")
+        if command[1] == "api":
+            return self.api(command)
+        if command[1:3] == ("run", "view"):
+            if command[-3:] == ("number", "--repo", "example/yakbox"):
+                return json.dumps({"number": 7})
+            identifier = int(command[3])
+            workflow = "release-please.yml" if identifier == 10 else "release.yml"
+            return json.dumps(
+                {
+                    "databaseId": identifier,
+                    "status": "completed",
+                    "headSha": self.head,
+                    "conclusion": "failure" if self.failed == workflow else "success",
+                }
             )
-            return ""
         if command[1:3] == ("run", "list"):
             workflow = command[command.index("--workflow") + 1]
             identifier = {
@@ -53,16 +65,14 @@ class FakeGitHub:
                 "release-publish.yml": 0,
             }[workflow]
             title = {
-                "release-please.yml": f"Release preparation {self.request}",
-                "ci.yml": "CI release-10",
+                "release-please.yml": "Prepare release · main",
+                "ci.yml": "CI · release preparation #7",
                 "release-publish.yml": "",
-                "release.yml": f"Release {self.request}"
-                if self.resume
-                else f"Release publish-{MERGED}",
+                "release.yml": "Release v0.2.2",
             }[workflow]
             return json.dumps(
                 []
-                if identifier == 0
+                if identifier == 0 or (self.resume and workflow == "release.yml")
                 else [
                     {
                         "databaseId": identifier,
@@ -75,7 +85,22 @@ class FakeGitHub:
                     }
                 ]
             )
-        if command[1] == "api" and "--paginate" in command:
+        if command[1:3] == ("pr", "merge"):
+            assert command[command.index("--match-head-commit") + 1] == HEAD
+            if self.failed == "merge":
+                raise ReleasePreflightError("Required review missing")
+            return ""
+        if command[1:3] == ("pr", "view"):
+            return json.dumps(self.pr(merged=True))
+        raise AssertionError(command)
+
+    def api(self, command: tuple[str, ...]) -> str:
+        if _is_dispatch(command):
+            workflow = command[command.index("POST") + 1].split("/")[-2]
+            return json.dumps(
+                {"workflow_run_id": 10 if workflow == "release-please.yml" else 30}
+            )
+        if "--paginate" in command:
             state = "merged" if "state=closed" in command else "open"
             return json.dumps(
                 [self.pr(merged=True)]
@@ -84,20 +109,13 @@ class FakeGitHub:
                 if state == "open"
                 else []
             )
-        if command[1:3] == ("pr", "merge"):
-            assert command[command.index("--match-head-commit") + 1] == HEAD
-            if self.failed == "merge":
-                raise ReleasePreflightError("Required review missing")
-            return ""
-        if command[1:3] == ("pr", "view"):
-            return json.dumps(self.pr(merged=True))
-        if command[1] == "api":
-            return (
-                "c" * 40
-                if command[2].endswith("/commits/main")
-                else json.dumps({".": "0.2.2"})
-            )
-        raise AssertionError(command)
+        if "/commits/v" in command[2]:
+            raise ReleasePreflightError("HTTP 404")
+        return (
+            "c" * 40
+            if command[2].endswith("/commits/main")
+            else json.dumps({".": "0.2.2"})
+        )
 
 
 def test_one_command_prepares_tests_merges_and_waits_for_publication() -> None:
@@ -142,13 +160,11 @@ def test_publication_retry_uses_corrected_main_with_the_same_pending_version() -
 
     assert automate_release("example/yakbox", runner=github) == 30
 
-    dispatch = next(
-        command for command in github.commands if command[1:3] == ("workflow", "run")
-    )
-    assert "release.yml" in dispatch
-    assert f"commit={'c' * 40}" in dispatch
-    assert "tag=v0.2.2" in dispatch
-    assert "release_pr=25" in dispatch
+    dispatch = next(command for command in github.commands if _is_dispatch(command))
+    assert any("workflows/release.yml/dispatches" in part for part in dispatch)
+    assert f"inputs[commit]={'c' * 40}" in dispatch
+    assert "inputs[tag]=v0.2.2" in dispatch
+    assert "inputs[release_pr]=25" in dispatch
     assert not any(command[1:3] == ("pr", "merge") for command in github.commands)
 
 
@@ -168,7 +184,7 @@ def test_make_release_joins_existing_publication_instead_of_retrying(
                 [
                     {
                         "databaseId": 30,
-                        "displayTitle": f"Release publish-{MERGED}",
+                        "displayTitle": "Release v0.2.2",
                         "status": status if lookups == 1 else "completed",
                         "conclusion": "success",
                     }
@@ -177,7 +193,7 @@ def test_make_release_joins_existing_publication_instead_of_retrying(
         return result
 
     assert automate_release("example/yakbox", runner=runner) == 30
-    assert not any(command[1:3] == ("workflow", "run") for command in github.commands)
+    assert not any(_is_dispatch(command) for command in github.commands)
 
 
 @pytest.mark.parametrize("status", ["queued", "in_progress", "completed"])
@@ -198,7 +214,7 @@ def test_make_release_waits_for_publication_dispatch_to_become_visible(
                 else [
                     {
                         "databaseId": 30,
-                        "displayTitle": f"Release publish-{MERGED}",
+                        "displayTitle": "Release v0.2.2",
                         "status": "completed",
                         "conclusion": "success",
                     }
@@ -209,7 +225,7 @@ def test_make_release_waits_for_publication_dispatch_to_become_visible(
         return result
 
     assert automate_release("example/yakbox", runner=runner) == 30
-    assert not any(command[1:3] == ("workflow", "run") for command in github.commands)
+    assert not any(_is_dispatch(command) for command in github.commands)
 
 
 def test_failed_existing_publication_allows_an_explicit_retry() -> None:
@@ -226,7 +242,7 @@ def test_failed_existing_publication_allows_an_explicit_retry() -> None:
                     [
                         {
                             "databaseId": 29,
-                            "displayTitle": f"Release publish-{MERGED}",
+                            "displayTitle": "Release v0.2.2",
                             "status": "completed",
                             "conclusion": "failure",
                         }
@@ -235,7 +251,7 @@ def test_failed_existing_publication_allows_an_explicit_retry() -> None:
         return result
 
     assert automate_release("example/yakbox", runner=runner) == 30
-    assert sum(command[1:3] == ("workflow", "run") for command in github.commands) == 1
+    assert sum(_is_dispatch(command) for command in github.commands) == 1
 
 
 def test_publication_retry_rejects_a_different_version_on_main() -> None:
@@ -250,7 +266,35 @@ def test_publication_retry_rejects_a_different_version_on_main() -> None:
     with pytest.raises(ReleasePreflightError, match="pending release version"):
         automate_release("example/yakbox", runner=runner)
 
-    assert not any(command[1:3] == ("workflow", "run") for command in github.commands)
+    assert not any(_is_dispatch(command) for command in github.commands)
+
+
+def test_partial_publication_retry_keeps_the_existing_tag_when_main_advances() -> None:
+    github = FakeGitHub(resume=True)
+
+    def runner(command: tuple[str, ...]) -> str:
+        if command[1] == "api" and "/commits/v0.2.2" in command[2]:
+            return MERGED
+        return github(command)
+
+    assert automate_release("example/yakbox", runner=runner) == 30
+    dispatch = next(command for command in github.commands if _is_dispatch(command))
+    assert f"inputs[commit]={MERGED}" in dispatch
+    assert not any(
+        part.endswith("/commits/main")
+        for command in github.commands
+        for part in command
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    ["", "not JSON", "{}", '{"workflow_run_id":true}', '{"workflow_run_id":0}'],
+)
+def test_dispatch_requires_a_valid_native_workflow_run_id(response: str) -> None:
+    github = _GitHub("example/yakbox", "gh", lambda _: response)
+    with pytest.raises(ReleasePreflightError):
+        github.dispatch("release-please.yml", "main")
 
 
 def test_pending_release_lookup_combines_direct_api_pages() -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import itertools
 import json
 import os
@@ -135,165 +134,70 @@ def test_ci_audits_worker_locks_and_dependabot_tracks_them() -> None:
     }
 
 
-def test_each_publication_checks_assets_before_uploading() -> None:
-    workflow = _workflow("release.yml")
-    for name in ("github-release", "publish-pypi", "publish-testpypi"):
-        steps = cast(list[dict[str, object]], _job(workflow, name)["steps"])
-        verify = next(
-            index
-            for index, step in enumerate(steps)
-            if step.get("name") == "Verify release checksums"
-        )
-        assert "sha256sum --check SHA256SUMS" in str(steps[verify]["run"])
-        assert "release-metadata/*" in str(steps[verify]["run"])
-        assert verify < len(steps) - 1
-
-
-@pytest.mark.parametrize("job", ["github-release", "publish-pypi", "publish-testpypi"])
-@pytest.mark.parametrize("corrupt", [False, True])
-def test_publication_checksum_gate_rejects_modified_assets(
-    tmp_path: Path, job: str, corrupt: bool
-) -> None:
-    dist = tmp_path / "dist"
-    metadata = tmp_path / "release-metadata"
-    dist.mkdir()
-    metadata.mkdir()
-    wheel = dist / "yakbox-0.2.0-py3-none-any.whl"
-    report = metadata / "release-preflight.json"
-    wheel.write_bytes(b"reviewed wheel")
-    report.write_bytes(b"reviewed report")
-    (metadata / "SHA256SUMS").write_text(
-        "".join(
-            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
-            for path in (wheel, report)
-        )
-    )
-    if corrupt:
-        wheel.write_bytes(b"modified wheel")
-    steps = cast(list[dict[str, object]], _job(_workflow("release.yml"), job)["steps"])
-    step = next(
-        item for item in steps if item.get("name") == "Verify release checksums"
-    )
-    script = str(step["run"])
-    if shutil.which("sha256sum") is None:
-        tool = shutil.which("shasum")
-        assert tool is not None
-        script = script.replace("sha256sum", f"'{tool}' -a 256")
-    shell = shutil.which("bash")
-    assert shell is not None
-    result = subprocess.run(  # noqa: S603 - reviewed checksum shell and fixture assets
-        (shell, "-e", "-o", "pipefail", "-c", script),
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
-    assert (result.returncode == 0) is not corrupt
-
-
-@pytest.mark.parametrize(
-    ("event", "destination", "exists", "require_tag"),
-    [
-        ("workflow_dispatch", "github", False, False),
-        ("workflow_dispatch", "github", True, True),
-        ("push", "github", False, True),
-        ("workflow_dispatch", "pypi", False, True),
-        ("workflow_dispatch", "testpypi", False, True),
-    ],
-)
-def test_release_preflight_requires_existing_tags_for_package_indexes(
-    tmp_path: Path, event: str, destination: str, exists: bool, require_tag: bool
-) -> None:
-    steps = cast(
-        list[dict[str, object]], _job(_workflow("release.yml"), "build")["steps"]
-    )
-    step = next(item for item in steps if item.get("name") == "Run release preflight")
-    commands = tmp_path / "commands"
-    (tmp_path / "uv").write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{commands}"\n')
-    (tmp_path / "git").write_text(f"#!/bin/sh\nexit {0 if exists else 1}\n")
-    for name in ("git", "uv"):
-        (tmp_path / name).chmod(0o755)
-    shell = shutil.which("bash")
-    assert shell is not None
-    result = subprocess.run(  # noqa: S603 - reviewed preflight shell with fake uv/Git
-        (shell, "-e", "-o", "pipefail", "-c", str(step["run"])),
-        env={
-            **os.environ,
-            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
-            "GITHUB_EVENT_NAME": event,
-            "PUBLISH_TO": destination,
-            "RELEASE_TAG": "v0.2.0",
-        },
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
-    assert result.returncode == 0, result.stderr
-    expected = ["run", "yakbox-release-preflight", "--tag", "v0.2.0"]
-    if require_tag:
-        expected.append("--require-tag-ref")
-    assert commands.read_text().splitlines() == expected
-
-
-def test_github_release_is_dispatchable_without_pypi_and_waits_for_both_platforms() -> (
-    None
-):
+def test_every_release_publishes_to_both_destinations_before_completion() -> None:
     workflow = _workflow("release.yml")
     inputs = _mapping(_mapping(_mapping(workflow["on"])["workflow_dispatch"])["inputs"])
-    destination = _mapping(inputs["publish_to"])
-    assert destination["default"] == "github"
-    assert destination["options"] == ["github", "pypi", "testpypi"]
+    assert "publish_to" not in inputs
+    assert "publish-testpypi" not in _mapping(workflow["jobs"])
     assert _mapping(inputs["tag"])["required"] is False
-
-    release = _job(workflow, "github-release")
-    assert set(cast(list[str], release["needs"])) == {"build", "test"}
-    assert release["if"] == (
-        "github.event_name == 'push' || inputs.publish_to == 'github'"
-    )
+    github = _job(workflow, "github-release")
+    pypi = _job(workflow, "publish-pypi")
+    finish = _job(workflow, "finish")
+    assert set(cast(list[str], github["needs"])) == {"build", "test"}
+    assert set(cast(list[str], pypi["needs"])) == {"build", "test", "github-release"}
+    assert set(cast(list[str], finish["needs"])) == {
+        "build",
+        "github-release",
+        "publish-pypi",
+    }
+    for job in (github, pypi, finish):
+        assert "if" not in job
+        steps = cast(list[dict[str, object]], job["steps"])
+        assert _mapping(steps[0]["with"])["ref"] == "${{ needs.build.outputs.commit }}"
+        assert steps[1]["uses"] == "./.github/actions/release-assets"
     assert _mapping(_mapping(_job(workflow, "test")["strategy"])["matrix"])["os"] == [
         "ubuntu-latest",
         "macos-latest",
     ]
-    for name in ("publish-pypi", "publish-testpypi"):
-        job = _job(workflow, name)
-        assert set(cast(list[str], job["needs"])) == {"build", "test"}
-        assert "workflow_dispatch" in str(job["if"])
-        assert "inputs.publish_to ==" in str(job["if"])
 
 
-@pytest.mark.parametrize("environment", ["pypi", "testpypi"])
-def test_index_publication_uses_oidc_without_static_credentials(
-    environment: str,
-) -> None:
-    job = _job(_workflow("release.yml"), f"publish-{environment}")
-    assert _mapping(job["environment"])["name"] == environment
-    assert _mapping(job["permissions"])["id-token"] == "write"
-    steps = cast(list[dict[str, object]], job["steps"])
-    publish = next(
+def test_shared_download_action_verifies_assets_before_the_publish_step() -> None:
+    action = _mapping(
+        yaml.safe_load((ROOT / ".github/actions/release-assets/action.yml").read_text())
+    )
+    steps = cast(list[dict[str, object]], _mapping(action["runs"])["steps"])
+    downloads = [
         step
         for step in steps
-        if str(step.get("uses", "")).startswith("pypa/gh-action-pypi-publish@")
-    )
-    configuration = _mapping(publish.get("with", {}))
-    assert "password" not in configuration
-    assert "user" not in configuration
-    if environment == "testpypi":
-        assert configuration["repository-url"] == "https://test.pypi.org/legacy/"
+        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+    ]
+    assert {_mapping(step["with"])["path"] for step in downloads} == {
+        "dist/",
+        "release-metadata/",
+    }
+    assert str(steps[-1]["run"]).endswith("yakbox.release_publication verify-assets")
+
+
+def test_index_publication_uses_oidc_and_checks_existing_files_before_retry() -> None:
+    job = _job(_workflow("release.yml"), "publish-pypi")
+    assert _mapping(job["environment"])["name"] == "pypi"
+    assert _mapping(job["permissions"])["id-token"] == "write"
+    steps = cast(list[dict[str, object]], job["steps"])
+    publish = steps[-1]
+    assert str(publish["uses"]).startswith("pypa/gh-action-pypi-publish@")
+    configuration = _mapping(publish["with"])
+    assert configuration == {"skip-existing": True}
+    assert str(steps[-2]["run"]).endswith("yakbox.release_publication check-pypi")
 
 
 def test_release_uploads_tested_assets_and_targets_the_resolved_commit() -> None:
     workflow = _workflow("release.yml")
     steps = cast(list[dict[str, object]], _job(workflow, "github-release")["steps"])
-    create = next(step for step in steps if step.get("name") == "Create GitHub Release")
-    environment = _mapping(create["env"])
+    environment = _mapping(_job(workflow, "github-release")["env"])
     assert environment["GH_REPO"] == "${{ github.repository }}"
     assert environment["RELEASE_TAG"] == "${{ needs.build.outputs.tag }}"
     assert environment["RELEASE_COMMIT"] == "${{ needs.build.outputs.commit }}"
-    command = str(create["run"])
-    assert 'gh release create "$RELEASE_TAG" dist/* release-metadata/*' in command
-    assert '--target "$RELEASE_COMMIT"' in command
+    assert str(steps[-1]["run"]).endswith("yakbox.release_publication publish-github")
 
     test_steps = cast(list[dict[str, object]], _job(workflow, "test")["steps"])
     checkout = test_steps[0]
@@ -329,15 +233,6 @@ def test_ci_packages_the_commit_and_checks_installed_wheel_and_source() -> None:
     assert 'test "$source_version" = "$expected"' in command
 
 
-def _release_resolver_script() -> str:
-    steps = cast(
-        list[dict[str, object]], _job(_workflow("release.yml"), "build")["steps"]
-    )
-    step = next(item for item in steps if item.get("id") == "release")
-    script = str(step["run"])
-    return script.split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
-
-
 @pytest.mark.parametrize(
     ("requested", "accepted"),
     [("", True), ("v0.2.0", True), ("v0.1.0", False), ("v0.2.0\ncommit=wrong", False)],
@@ -369,8 +264,8 @@ def test_manual_dispatch_resolves_the_version_and_commit_before_publication(
             command, cwd=tmp_path, check=True, capture_output=True, timeout=10
         )
     output = tmp_path / "outputs"
-    result = subprocess.run(  # noqa: S603 - execute reviewed workflow Python; no shell
-        (sys.executable, "-c", _release_resolver_script()),
+    result = subprocess.run(
+        (sys.executable, "-m", "yakbox.release_workflow", "resolve"),
         cwd=tmp_path,
         env={
             **os.environ,
@@ -408,9 +303,9 @@ def test_release_please_prepares_generated_files_and_explicitly_runs_ci() -> Non
     )
     assert _mapping(action["with"])["skip-github-release"] is True
     commands = "\n".join(str(step.get("run", "")) for step in steps)
-    assert "uv lock" in commands
-    assert "analysis_worker_artifact --write-packaged" in commands
-    assert 'gh workflow run ci.yml --ref "$RELEASE_BRANCH"' in commands
+    assert "yakbox.release_workflow refresh-pr" in commands
+    assert "yakbox.release_workflow start-ci" in commands
+    assert "yakbox.release_workflow find-pr" in commands
     assert _mapping(prepare["permissions"])["actions"] == "write"
     publish = _job(_workflow("release-publish.yml"), "dispatch")
     publication = "\n".join(
@@ -418,204 +313,24 @@ def test_release_please_prepares_generated_files_and_explicitly_runs_ci() -> Non
         for step in cast(list[dict[str, object]], publish["steps"])
     )
     assert '-f "commit=$RELEASE_COMMIT"' in publication
-    assert "publish_to=github" in publication
+    assert "publish_to=" not in publication
+    assert "request_id=" not in publication
 
 
-@pytest.fixture
-def release_pr_api(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[Path, Path]:
-    assert shutil.which("jq") is not None
-    gh = tmp_path / "gh"
-    log = tmp_path / "requests"
-    gh.write_text(
-        f"#!{sys.executable}\n"
-        "import json, os, sys\nfrom pathlib import Path\n"
-        "args = sys.argv[1:]\n"
-        f"with Path({str(log)!r}).open('a') as stream:\n"
-        "    stream.write(json.dumps(args) + '\\n')\n"
-        "assert args[0] == 'api', 'Search must not resolve a newly created PR'\n"
-        "assert not ('--slurp' in args and '--jq' in args), 'Unsupported gh flags'\n"
-        "if os.environ['UNAVAILABLE'] == '1': sys.exit(1)\n"
-        "if args[1].endswith('/24'):\n"
-        "    print('release-please--branches--main')\n"
-        "else:\n"
-        "    assert '--paginate' in args and '--slurp' in args\n"
-        "    assert args[1:3] == ['--method', 'GET']\n"
-        "    pages = 'CLOSED_PR_PAGES' if 'state=closed' in args else 'OPEN_PR_PAGES'\n"
-        "    print(os.environ[pages])\n"
+def test_workflow_titles_show_release_stages_and_versions_without_hashes() -> None:
+    assert (
+        _workflow("release.yml")["run-name"]
+        == "Release ${{ inputs.tag || github.ref_name }}"
     )
-    gh.chmod(0o755)
-    output = tmp_path / "outputs"
-    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("GH_REPO", "example/yakbox")
-    monkeypatch.setenv("TARGET_BRANCH", "main")
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setenv("CREATED_PR", "")
-    monkeypatch.setenv("UNAVAILABLE", "0")
-    monkeypatch.setenv("OPEN_PR_PAGES", "[[]]")
-    monkeypatch.setenv("CLOSED_PR_PAGES", "[[]]")
-    return output, log
-
-
-def _resolve_release_pr() -> subprocess.CompletedProcess[str]:
-    steps = cast(
-        list[dict[str, object]],
-        _job(_workflow("release-please.yml"), "prepare")["steps"],
+    assert (
+        _workflow("release-please.yml")["run-name"]
+        == "Prepare release · ${{ github.ref_name }}"
     )
-    lookup = next(step for step in steps if step.get("id") == "pr")
-    assert lookup["shell"] == "bash"  # Actions enables pipefail for explicit Bash.
-    script = lookup["run"]
-    shell = shutil.which("bash")
-    assert shell is not None
-    return subprocess.run(  # noqa: S603 - checked-in lookup script and fake GitHub API
-        [shell, "-e", "-o", "pipefail", "-c", str(script)],
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=10,
+    assert (
+        _workflow("release-publish.yml")["run-name"]
+        == "Start release · ${{ github.ref_name }}"
     )
-
-
-@pytest.mark.parametrize("created", [json.dumps({"number": 24}), "", "null"])
-@pytest.mark.parametrize("unavailable", [False, True])
-def test_release_pr_resolution_uses_action_output_and_direct_api(
-    release_pr_api: tuple[Path, Path],
-    monkeypatch: pytest.MonkeyPatch,
-    created: str,
-    unavailable: bool,
-) -> None:
-    output, log = release_pr_api
-    monkeypatch.setenv("CREATED_PR", created)
-    monkeypatch.setenv("UNAVAILABLE", "1" if unavailable else "0")
-    monkeypatch.setenv(
-        "OPEN_PR_PAGES",
-        json.dumps(
-            [[], [{"number": 24, "labels": [{"name": "autorelease: pending"}]}]]
-        ),
-    )
-    result = _resolve_release_pr()
-    assert (result.returncode == 0) is not unavailable, result.stderr
-    if unavailable:
-        assert not output.exists()
-    else:
-        assert (
-            output.read_text() == "number=24\nbranch=release-please--branches--main\n"
-        )
-        requests = [json.loads(line) for line in log.read_text().splitlines()]
-        assert len(requests) == (1 if created.startswith("{") else 2)
-
-
-@pytest.mark.parametrize("created", ["", "null"])
-def test_release_pr_resolution_reports_no_releasable_changes(
-    release_pr_api: tuple[Path, Path],
-    monkeypatch: pytest.MonkeyPatch,
-    created: str,
-) -> None:
-    output, _ = release_pr_api
-    monkeypatch.setenv("CREATED_PR", created)
-    monkeypatch.setenv(
-        "CLOSED_PR_PAGES",
-        json.dumps(
-            [
-                [
-                    {
-                        "number": 23,
-                        "merged_at": None,
-                        "labels": [{"name": "autorelease: pending"}],
-                    },
-                    {
-                        "number": 24,
-                        "merged_at": "2026-10-14T06:42:48Z",
-                        "labels": [{"name": "autorelease: tagged"}],
-                    },
-                ]
-            ]
-        ),
-    )
-    result = _resolve_release_pr()
-    assert result.returncode == 0, result.stderr
-    assert "No release PR: no releasable Conventional Commits" in result.stdout
-    assert not output.exists()
-
-
-def test_release_pr_resolution_reports_merged_pending_publication(
-    release_pr_api: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output, _ = release_pr_api
-    monkeypatch.setenv(
-        "CLOSED_PR_PAGES",
-        json.dumps(
-            [
-                [],
-                [
-                    {
-                        "number": 24,
-                        "merged_at": "2026-10-14T06:42:48Z",
-                        "labels": [{"name": "autorelease: pending"}],
-                    }
-                ],
-            ]
-        ),
-    )
-    result = _resolve_release_pr()
-    assert result.returncode == 0, result.stderr
-    assert "::notice::Merged release PR(s) 24" in result.stdout
-    assert "make release" in result.stdout
-    assert "No release PR: no releasable" not in result.stdout
-    assert "::error::" not in result.stdout
-    assert not output.exists()
-
-
-def test_release_pr_resolution_rejects_multiple_pending_prs_across_pages(
-    release_pr_api: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output, _ = release_pr_api
-    monkeypatch.setenv(
-        "OPEN_PR_PAGES",
-        json.dumps(
-            [
-                [{"number": number, "labels": [{"name": "autorelease: pending"}]}]
-                for number in (24, 25)
-            ]
-        ),
-    )
-    result = _resolve_release_pr()
-    assert result.returncode != 0
-    assert "Multiple release PRs" in result.stderr
-    assert not output.exists()
-
-
-@pytest.mark.parametrize("created", ["not JSON", "{}"])
-def test_release_pr_resolution_rejects_invalid_action_output(
-    release_pr_api: tuple[Path, Path],
-    monkeypatch: pytest.MonkeyPatch,
-    created: str,
-) -> None:
-    output, _ = release_pr_api
-    monkeypatch.setenv("CREATED_PR", created)
-    result = _resolve_release_pr()
-    assert result.returncode != 0
-    assert not output.exists()
-
-
-def test_github_publication_prepares_next_pr_after_marking_release_tagged() -> None:
-    job = _job(_workflow("release.yml"), "github-release")
-    assert _mapping(job["permissions"])["actions"] == "write"
-    steps = cast(list[dict[str, object]], job["steps"])
-    scripts = [str(step["run"]) for step in steps if "run" in step]
-    mark = next(
-        index
-        for index, script in enumerate(scripts)
-        if "--add-label 'autorelease: tagged'" in script
-    )
-    dispatch = next(
-        script
-        for script in scripts[mark + 1 :]
-        if "gh workflow run release-please.yml --ref main" in script
-    )
-    assert '-f "request_id=$REQUEST_ID"' in dispatch
-    assert not any(step.get("if") == "always()" for step in steps)
+    assert "release preparation #{0}" in str(_workflow("ci.yml")["run-name"])
 
 
 def test_ci_package_rejects_stale_lock_without_rewriting_it(tmp_path: Path) -> None:

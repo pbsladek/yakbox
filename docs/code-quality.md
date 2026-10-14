@@ -52,17 +52,25 @@ Preparation takes the PR number directly from the action output. A fallback
 uses the pull-request API rather than GitHub's eventually consistent search.
 The fallback paginates the API. A merged release awaiting publication is a
 normal handoff: preparation reports a notice and defers the next PR. Successful
-GitHub publication marks the release PR as tagged before dispatching
-preparation for changes now on `main`. `make release` joins a queued or running
-publication, including a dispatch still becoming visible, before considering
+publication to both GitHub and PyPI marks the release PR as tagged before
+dispatching preparation for changes now on `main`. `make release` joins a
+queued or running publication, including a dispatch still becoming visible, before considering
 a retry of a failed publication.
 The package job uses `uv run --locked` so a stale lock fails before uv can
 modify the checkout and obscure the cause with a dirty-worktree error.
 Quality, test, and release build jobs check lock freshness before installing
 or running project tools, so an implicit uv refresh cannot hide a stale lock.
 `make release` waits for that CI, merges with an exact head check under normal
-repository rules, and waits for checked GitHub publication. Published tags
-remain immutable. PyPI and TestPyPI publication remain explicit options.
+repository rules, and waits for checked GitHub and PyPI publication. Published
+tags remain immutable. Both destinations receive the same tested distributions;
+a failed or partial upload leaves the release pending. Retries verify existing
+file hashes and retain an existing tag’s commit. TestPyPI is not part of the
+release process.
+
+Release decisions live in tested Python helpers. A shared composite action
+downloads and verifies artifacts for both publishers and the completion job.
+Run titles show the release version or preparation stage; the CLI tracks
+dispatches by GitHub run ID rather than embedding UUIDs in workflow names.
 Worker packaging tests check that each adapter is exactly pinned, matches its
 frozen lockfile, and stays isolated from the other adapter families. They read
 the version from the packaged project so a dependency update does not require

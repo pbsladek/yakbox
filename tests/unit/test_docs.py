@@ -88,7 +88,10 @@ def test_every_packaged_example_validates_and_plans_every_target() -> None:
 
 def test_actions_are_commit_pinned_and_release_attests_artifacts() -> None:
     root = Path(__file__).parents[2]
-    workflows = tuple((root / ".github" / "workflows").glob("*.yml"))
+    workflows = (
+        *sorted((root / ".github" / "workflows").glob("*.yml")),
+        *sorted((root / ".github" / "actions").rglob("action.yml")),
+    )
     assert workflows
     for workflow in workflows:
         content = workflow.read_text(encoding="utf-8")
@@ -102,7 +105,7 @@ def test_actions_are_commit_pinned_and_release_attests_artifacts() -> None:
         encoding="utf-8"
     )
     assert release.count("actions/attest@") == 2
-    assert "yakbox-release-preflight" in release
+    assert "yakbox.release_workflow preflight" in release
     assert "sbom-path: release-metadata/yakbox.cdx.json" in release
     assert "yakbox-worker-whisper.cdx.json" in (
         root / "src" / "yakbox" / "release_preflight.py"
