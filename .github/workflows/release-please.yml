@@ -37,6 +37,7 @@ jobs:
           skip-github-release: true
       - name: Find the release pull request
         id: pr
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -45,7 +46,7 @@ jobs:
         run: |
           number=$(printf '%s' "${CREATED_PR:-null}" | jq -r '.number // empty')
           if [ -z "$number" ]; then
-            number=$(gh api --method GET "repos/$GH_REPO/pulls" -f state=open -f "base=$TARGET_BRANCH" -f per_page=100 --paginate --slurp --jq '[.[][] | select(any(.labels[]; .name == "autorelease: pending"))] | if length > 1 then error("Multiple release PRs") else .[0].number // empty end')
+            number=$(gh api --method GET "repos/$GH_REPO/pulls" -f state=open -f "base=$TARGET_BRANCH" -f per_page=100 --paginate --slurp | jq -r '[.[][] | select(any(.labels[]; .name == "autorelease: pending"))] | if length > 1 then error("Multiple release PRs") else .[0].number // empty end')
           fi
           if [ -n "$number" ]; then
             branch=$(gh api "repos/$GH_REPO/pulls/$number" --jq '.head.ref')
@@ -54,7 +55,7 @@ jobs:
             echo 'Release Please returned a PR but it could not be resolved.' >&2
             exit 1
           else
-            pending=$(gh api --method GET "repos/$GH_REPO/pulls" -f state=closed -f "base=$TARGET_BRANCH" -f per_page=100 --paginate --slurp --jq '[.[][] | select(.merged_at != null) | select(any(.labels[]; .name == "autorelease: pending")) | .number | tostring] | join(", ")')
+            pending=$(gh api --method GET "repos/$GH_REPO/pulls" -f state=closed -f "base=$TARGET_BRANCH" -f per_page=100 --paginate --slurp | jq -r '[.[][] | select(.merged_at != null) | select(any(.labels[]; .name == "autorelease: pending")) | .number | tostring] | join(", ")')
             if [ -n "$pending" ]; then
               echo "::error::Merged release PR(s) $pending are still awaiting publication. Run make release to retry publication before preparing the next release."
               exit 1

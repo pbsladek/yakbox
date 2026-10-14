@@ -425,17 +425,17 @@ def test_release_please_prepares_generated_files_and_explicitly_runs_ci() -> Non
 def release_pr_api(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Path, Path]:
-    jq = shutil.which("jq")
-    assert jq is not None
+    assert shutil.which("jq") is not None
     gh = tmp_path / "gh"
     log = tmp_path / "requests"
     gh.write_text(
         f"#!{sys.executable}\n"
-        "import json, os, subprocess, sys\nfrom pathlib import Path\n"
+        "import json, os, sys\nfrom pathlib import Path\n"
         "args = sys.argv[1:]\n"
         f"with Path({str(log)!r}).open('a') as stream:\n"
         "    stream.write(json.dumps(args) + '\\n')\n"
         "assert args[0] == 'api', 'Search must not resolve a newly created PR'\n"
+        "assert not ('--slurp' in args and '--jq' in args), 'Unsupported gh flags'\n"
         "if os.environ['UNAVAILABLE'] == '1': sys.exit(1)\n"
         "if args[1].endswith('/24'):\n"
         "    print('release-please--branches--main')\n"
@@ -443,9 +443,7 @@ def release_pr_api(
         "    assert '--paginate' in args and '--slurp' in args\n"
         "    assert args[1:3] == ['--method', 'GET']\n"
         "    pages = 'CLOSED_PR_PAGES' if 'state=closed' in args else 'OPEN_PR_PAGES'\n"
-        f"    result = subprocess.run([{jq!r}, '-r', args[-1]],\n"
-        "        input=os.environ[pages], text=True, check=False)\n"
-        "    sys.exit(result.returncode)\n"
+        "    print(os.environ[pages])\n"
     )
     gh.chmod(0o755)
     output = tmp_path / "outputs"
@@ -465,7 +463,9 @@ def _resolve_release_pr() -> subprocess.CompletedProcess[str]:
         list[dict[str, object]],
         _job(_workflow("release-please.yml"), "prepare")["steps"],
     )
-    script = next(step["run"] for step in steps if step.get("id") == "pr")
+    lookup = next(step for step in steps if step.get("id") == "pr")
+    assert lookup["shell"] == "bash"  # Actions enables pipefail for explicit Bash.
+    script = lookup["run"]
     shell = shutil.which("bash")
     assert shell is not None
     return subprocess.run(  # noqa: S603 - checked-in lookup script and fake GitHub API
