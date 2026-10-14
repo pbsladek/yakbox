@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import click
-from click.shell_completion import get_completion_class
+from click.shell_completion import ShellComplete, get_completion_class
 
 from yakbox._files import atomic_write_bytes
 
@@ -41,7 +41,10 @@ def register_workspace_commands(
         completion = get_completion_class(shell)
         if completion is None:
             raise click.BadParameter("unsupported shell", param_hint="--shell")
-        script = completion(main, {}, "yakbox", "_YAKBOX_COMPLETE").source()
+        # The script may target another machine; do not probe the local shell.
+        script = ShellComplete.source(
+            completion(main, {}, "yakbox", "_YAKBOX_COMPLETE")
+        )
         context = click.get_current_context().find_root()
         if context.params.get("json_output"):
             emit({"shell": shell, "script": script}, "")

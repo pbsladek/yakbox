@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tomllib
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 from click.testing import CliRunner
@@ -226,3 +227,18 @@ def test_completion_requires_a_supported_shell(arguments: list[str]) -> None:
     result = CliRunner().invoke(main, ["--json", "completion", *arguments])
     assert result.exit_code == 2
     validate_contract("cli-output", json.loads(result.output))
+
+
+def test_completion_generation_does_not_probe_the_installed_shell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_probe(*_args: object, **_kwargs: object) -> NoReturn:
+        raise AssertionError("Script generation must not invoke a local shell")
+
+    monkeypatch.setattr("subprocess.run", reject_probe)
+    result = CliRunner().invoke(main, ["--json", "completion", "--shell", "bash"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    validate_contract("cli-output", payload)
+    assert "bash_complete" in payload["data"]["script"]
+    assert result.stderr == ""
