@@ -2,6 +2,13 @@
 
 Release Please maintains this file from Conventional Commits.
 
+## [0.3.2](https://github.com/pbsladek/yakbox/compare/v0.3.1...v0.3.2) (2026-10-14)
+
+
+### Bug Fixes
+
+* **release:** publish every release to GitHub and PyPI ([#31](https://github.com/pbsladek/yakbox/issues/31)) ([d620928](https://github.com/pbsladek/yakbox/commit/d620928b01881e7d24e267fdca2590071561ad0e))
+
 ## [0.3.1](https://github.com/pbsladek/yakbox/compare/v0.3.0...v0.3.1) (2026-10-14)
 
 
