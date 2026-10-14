@@ -28,10 +28,11 @@ class TrackingService:
         max_text_characters=3_000,
     )
 
-    def __init__(self) -> None:
+    def __init__(self, *, barrier: asyncio.Barrier | None = None) -> None:
         self.calls = 0
         self.active = 0
         self.maximum_active = 0
+        self._barrier = barrier
         self._delegate = FakeSpeechService()
 
     async def synthesize_to_file(
@@ -45,7 +46,10 @@ class TrackingService:
         self.active += 1
         self.maximum_active = max(self.maximum_active, self.active)
         try:
-            await asyncio.sleep(0.02)
+            if self._barrier is None:
+                await asyncio.sleep(0.02)
+            else:
+                await asyncio.wait_for(self._barrier.wait(), timeout=10)
             return await self._delegate.synthesize_to_file(
                 SpeechSynthesisRequest(
                     text=request.text,
@@ -104,7 +108,8 @@ class BlockingService(TrackingService):
 
 @pytest.mark.asyncio
 async def test_batch_parallelizes_and_isolates_validation(tmp_path: Path) -> None:
-    service = TrackingService()
+    # Hold each valid call until all three workers arrive, regardless of disk speed.
+    service = TrackingService(barrier=asyncio.Barrier(3))
     rows = (
         BatchRow(index=1, text="one"),
         BatchRow(index=2, text="x" * 3_001),
