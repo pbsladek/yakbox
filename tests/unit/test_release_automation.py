@@ -46,18 +46,24 @@ class FakeGitHub:
             return ""
         if command[1:3] == ("run", "list"):
             workflow = command[command.index("--workflow") + 1]
-            identifier = {"release-please.yml": 10, "ci.yml": 20, "release.yml": 30}[
-                workflow
-            ]
+            identifier = {
+                "release-please.yml": 10,
+                "ci.yml": 20,
+                "release.yml": 30,
+                "release-publish.yml": 0,
+            }[workflow]
             title = {
                 "release-please.yml": f"Release preparation {self.request}",
                 "ci.yml": "CI release-10",
+                "release-publish.yml": "",
                 "release.yml": f"Release {self.request}"
                 if self.resume
                 else f"Release publish-{MERGED}",
             }[workflow]
             return json.dumps(
-                [
+                []
+                if identifier == 0
+                else [
                     {
                         "databaseId": identifier,
                         "displayTitle": title,
@@ -144,6 +150,92 @@ def test_publication_retry_uses_corrected_main_with_the_same_pending_version() -
     assert "tag=v0.2.2" in dispatch
     assert "release_pr=25" in dispatch
     assert not any(command[1:3] == ("pr", "merge") for command in github.commands)
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress", "completed"])
+def test_make_release_joins_existing_publication_instead_of_retrying(
+    status: str,
+) -> None:
+    github = FakeGitHub(resume=True)
+    lookups = 0
+
+    def runner(command: tuple[str, ...]) -> str:
+        nonlocal lookups
+        result = github(command)
+        if command[1:3] == ("run", "list") and "release.yml" in command:
+            lookups += 1
+            return json.dumps(
+                [
+                    {
+                        "databaseId": 30,
+                        "displayTitle": f"Release publish-{MERGED}",
+                        "status": status if lookups == 1 else "completed",
+                        "conclusion": "success",
+                    }
+                ]
+            )
+        return result
+
+    assert automate_release("example/yakbox", runner=runner) == 30
+    assert not any(command[1:3] == ("workflow", "run") for command in github.commands)
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress", "completed"])
+def test_make_release_waits_for_publication_dispatch_to_become_visible(
+    status: str,
+) -> None:
+    github = FakeGitHub(resume=True)
+    lookups = 0
+
+    def runner(command: tuple[str, ...]) -> str:
+        nonlocal lookups
+        result = github(command)
+        if command[1:3] == ("run", "list") and "release.yml" in command:
+            lookups += 1
+            return json.dumps(
+                []
+                if lookups == 1
+                else [
+                    {
+                        "databaseId": 30,
+                        "displayTitle": f"Release publish-{MERGED}",
+                        "status": "completed",
+                        "conclusion": "success",
+                    }
+                ]
+            )
+        if command[1:3] == ("run", "list") and "release-publish.yml" in command:
+            return json.dumps([{"status": status, "conclusion": "success"}])
+        return result
+
+    assert automate_release("example/yakbox", runner=runner) == 30
+    assert not any(command[1:3] == ("workflow", "run") for command in github.commands)
+
+
+def test_failed_existing_publication_allows_an_explicit_retry() -> None:
+    github = FakeGitHub(resume=True)
+    lookups = 0
+
+    def runner(command: tuple[str, ...]) -> str:
+        nonlocal lookups
+        result = github(command)
+        if command[1:3] == ("run", "list") and "release.yml" in command:
+            lookups += 1
+            if lookups == 1:
+                return json.dumps(
+                    [
+                        {
+                            "databaseId": 29,
+                            "displayTitle": f"Release publish-{MERGED}",
+                            "status": "completed",
+                            "conclusion": "failure",
+                        }
+                    ]
+                )
+        return result
+
+    assert automate_release("example/yakbox", runner=runner) == 30
+    assert sum(command[1:3] == ("workflow", "run") for command in github.commands) == 1
 
 
 def test_publication_retry_rejects_a_different_version_on_main() -> None:

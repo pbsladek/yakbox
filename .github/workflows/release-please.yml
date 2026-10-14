@@ -57,10 +57,10 @@ jobs:
           else
             pending=$(gh api --method GET "repos/$GH_REPO/pulls" -f state=closed -f "base=$TARGET_BRANCH" -f per_page=100 --paginate --slurp | jq -r '[.[][] | select(.merged_at != null) | select(any(.labels[]; .name == "autorelease: pending")) | .number | tostring] | join(", ")')
             if [ -n "$pending" ]; then
-              echo "::error::Merged release PR(s) $pending are still awaiting publication. Run make release to retry publication before preparing the next release."
-              exit 1
+              echo "::notice::Merged release PR(s) $pending are awaiting publication. Preparation will resume automatically after publication. Run make release to wait for publication or retry it if it failed."
+            else
+              echo 'No release PR: no releasable Conventional Commits were found.'
             fi
-            echo 'No release PR: no releasable Conventional Commits were found.'
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.pr.outputs.number != ''
