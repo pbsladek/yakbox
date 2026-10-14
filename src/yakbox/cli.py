@@ -18,7 +18,6 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 from rich.table import Table
 
-from yakbox._files import atomic_write_bytes
 from yakbox._version import show_version
 from yakbox.audio import inspect_audio
 from yakbox.audiobook import (
@@ -66,6 +65,7 @@ from yakbox.cli_options import (
 from yakbox.cli_repair import register_repair_commands
 from yakbox.cli_runtime import register_runtime_commands
 from yakbox.cli_whisper import register_whisper_commands
+from yakbox.cli_workspace import register_workspace_commands
 from yakbox.cloud import (
     AudioFormat as CloudAudioFormat,
 )
@@ -94,7 +94,7 @@ from yakbox.cloud.batch import (
 from yakbox.config import YakboxConfig, load_config
 from yakbox.contracts import runtime_metadata
 from yakbox.credentials import CredentialSource, resolve_resemble_credential
-from yakbox.diagnostics import run_doctor
+from yakbox.diagnostics import DiagnosticStatus, run_doctor
 from yakbox.errors import (
     BackendUnavailableError,
     ConfigurationError,
@@ -246,103 +246,6 @@ def main(
         console.no_color = True
         error_console.no_color = True
     context.obj = Context(json_output=json_output, quiet=quiet, verbose=verbose)
-
-
-@main.command("init")
-@click.argument("directory", type=click.Path(path_type=Path), default=".")
-def init_command(directory: Path) -> None:
-    """Initialize a minimal audiobook workspace."""
-    root = directory.resolve()
-    manifest = root / "yakbox.toml"
-    source = root / "source" / "book.md"
-    if manifest.exists():
-        raise click.ClickException(f"Manifest already exists: {manifest}")
-    source.parent.mkdir(parents=True, exist_ok=True)
-    template = """"$schema" = "https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"
-schema_version = 1
-sources = ["source/book.md"]
-pronunciations = "pronunciations.toml"
-
-[book]
-title = "My Audiobook"
-author = "Author Name"
-narrator = "Narrator Name"
-language = "en"
-
-[voices.narrator]
-display_name = "Narrator"
-rights_basis = "not_applicable"
-
-[profiles.default]
-backend = "fake"
-voice = "narrator"
-sample_rate = 16000
-
-[targets.default]
-profile = "default"
-output_root = "build/yakbox"
-chunk_chars = 2800
-mastering = true
-wav_sample_rate = 44100
-mp3_bitrate = "192k"
-m4b = false
-provider_concurrency = 5
-media_concurrency = 2
-
-[targets.draft]
-extends = "default"
-output_root = "build/yakbox-draft"
-chunk_chars = 1200
-mastering = false
-through_stage = "synthesize"
-
-[targets.proof]
-extends = "default"
-output_root = "build/yakbox-proof"
-mastering = false
-
-[targets.release]
-extends = "default"
-output_root = "build/yakbox-release"
-m4b = true
-quality_min_lufs = -23.0
-quality_max_lufs = -16.0
-quality_max_true_peak_dbfs = -1.0
-quality_max_leading_silence_seconds = 2.0
-quality_max_trailing_silence_seconds = 2.0
-
-[repairs]
-mode = "context"
-takes = 4
-whisper_qa = true
-rebuild_on_approval = true
-
-[retention]
-keep_successful_runs = 3
-audition_days = 30
-preview_days = 7
-raw_until_release = true
-"""
-    pronunciations = """schema_version = 1
-
-# [[terms]]
-# written = "Example"
-# spoken = "Egg zample"
-# language = "en"
-# match = "whole_word"
-# case = "sensitive"
-# priority = 100
-# status = "approved"
-# enabled = true
-"""
-    atomic_write_bytes(manifest, template.encode())
-    atomic_write_bytes(root / "pronunciations.toml", pronunciations.encode())
-    if not source.exists():
-        atomic_write_bytes(
-            source,
-            b"# Chapter One\n\nReplace this text with your manuscript.\n",
-        )
-    _emit({"manifest": str(manifest), "source": str(source)}, f"Created {manifest}")
 
 
 @main.command("validate")
@@ -1133,6 +1036,7 @@ def explain_command(
 @click.option("--backend")
 @click.option("--network", is_flag=True)
 @click.option("--deep", is_flag=True)
+@click.option("--strict", is_flag=True, help="Return failure for diagnostic warnings.")
 @click.option(
     "--whisper",
     "check_whisper",
@@ -1146,6 +1050,7 @@ def doctor_command(  # noqa: PLR0917 - Click injects CLI parameters.
     network: bool,
     deep: bool,
     check_whisper: bool,
+    strict: bool,
 ) -> None:
     """Run read-only installation and workspace diagnostics."""
     config = _load_config()
@@ -1163,19 +1068,23 @@ def doctor_command(  # noqa: PLR0917 - Click injects CLI parameters.
         )
     except (YakboxError, OSError) as error:
         _fail(error)
+    accepted = report.healthy and not (
+        strict
+        and any(item.status is DiagnosticStatus.WARN for item in report.diagnostics)
+    )
     if _context().json_output:
         _emit(
             report.to_dict(),
             "",
-            status="ok" if report.healthy else "partial_failure",
-            exit_code=0 if report.healthy else 1,
+            status="ok" if accepted else "partial_failure",
+            exit_code=0 if accepted else 1,
         )
     elif not _context().quiet:
         table = Table("Check", "Status", "Summary", "Action")
         for item in report.diagnostics:
             table.add_row(item.id, item.status.value, item.summary, item.action or "")
         console.print(table)
-    if not report.healthy:
+    if not accepted:
         raise click.exceptions.Exit(1)
 
 
@@ -1188,7 +1097,15 @@ def artifacts_group() -> None:
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--target", default="default")
 @click.option("--kind", type=click.Choice([item.value for item in ArtifactKind]))
-def artifacts_list_command(manifest: Path, target: str, kind: str | None) -> None:
+@click.option(
+    "--voice", help="Filter artifacts by logical voice, including mixed audio."
+)
+@click.option(
+    "--limit", type=click.IntRange(min=1), help="Return at most this many artifacts."
+)
+def artifacts_list_command(
+    manifest: Path, target: str, kind: str | None, voice: str | None, limit: int | None
+) -> None:
     loaded = _manifest(manifest)
     report = inventory_artifacts(loaded.target(target).output_root)
     records = [
@@ -1196,6 +1113,14 @@ def artifacts_list_command(manifest: Path, target: str, kind: str | None) -> Non
         for record in report.records
         if kind is None or record.kind is ArtifactKind(kind)
     ]
+    if voice is not None:
+        records = [
+            record
+            for record in records
+            if record.logical_voice == voice or voice in record.logical_voices
+        ]
+    if limit is not None:
+        records = records[:limit]
     _emit(
         {"artifacts": [record.to_dict(root=loaded.root) for record in records]},
         "\n".join(f"{record.kind.value:10} {record.path}" for record in records)
@@ -2981,4 +2906,5 @@ register_migration_commands(main, emit=_emit, fail=_fail)
 register_repair_commands(main, emit=_emit, fail=_fail)
 register_runtime_commands(main, emit=_emit, fail=_fail)
 register_whisper_commands(main, emit=_emit, fail=_fail)
+register_workspace_commands(main, emit=_emit)
 configure_cli_help(main)

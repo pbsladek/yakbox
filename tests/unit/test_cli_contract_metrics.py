@@ -33,6 +33,7 @@ EXPECTED_LEAF_COMMANDS = {
     "cloud tts",
     "cloud voices list",
     "cloud voices recordings create",
+    "completion",
     "config auth login",
     "config auth logout",
     "config auth status",

@@ -21,12 +21,21 @@ but never adopted or removed automatically.
 
 ```console
 yakbox artifacts list
+yakbox artifacts list --limit 10
+yakbox artifacts list --voice narrator --kind delivery --limit 10
 yakbox artifacts usage
 yakbox artifacts verify
 yakbox artifacts cache list
 yakbox status
 yakbox explain --chapter 0001
 ```
+
+Artifact listings retain deterministic path ordering. `--voice` matches both
+a single recorded logical voice and a voice included in mixed narration.
+`--kind` and `--voice` filter first, then `--limit` selects up to that many
+matching artifacts. The limit must be a positive integer; omitting it lists
+all matches. These options also apply to `--json artifacts list` and never
+change artifact files or metadata.
 
 `artifacts verify --repair-metadata` is explicit recovery: it first validates
 the current audio/JSON payload, then accepts those bytes and refreshes only
