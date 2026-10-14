@@ -199,6 +199,46 @@ class _GitHub:
             raise ReleasePreflightError("Invalid merged release version")
         return version
 
+    def publication_handoff(self, commit: str) -> str | None:
+        title = f"Release publish-{commit}"
+        runs = self.json(
+            "run",
+            "list",
+            "--workflow",
+            "release.yml",
+            "--event",
+            "workflow_dispatch",
+            "--limit",
+            "50",
+            "--json",
+            "displayTitle,status,conclusion",
+        )
+        if not isinstance(runs, list):
+            raise ReleasePreflightError("GitHub returned invalid publication runs")
+        for raw in runs:
+            run = _mapping(raw)
+            if run.get("displayTitle") == title:
+                return title if _publication_can_finish(run) else None
+        bridges = self.json(
+            "run",
+            "list",
+            "--workflow",
+            "release-publish.yml",
+            "--event",
+            "push",
+            "--commit",
+            commit,
+            "--limit",
+            "1",
+            "--json",
+            "status,conclusion",
+        )
+        if not isinstance(bridges, list):
+            raise ReleasePreflightError("GitHub returned invalid publication handoffs")
+        if bridges and _publication_can_finish(_mapping(bridges[0])):
+            return title
+        return None
+
     def retry_publication(self, ref: str, pr: _ReleasePR) -> str:
         if pr.merged is None:
             raise ReleasePreflightError(
@@ -258,7 +298,9 @@ def automate_release(
     github = _GitHub(repository, executable, runner or _run)
     pending = github.pending(ref, "merged")
     if pending is not None and pending.merged is not None:
-        title = github.retry_publication(ref, pending)
+        title = github.publication_handoff(pending.merged)
+        if title is None:
+            title = github.retry_publication(ref, pending)
     else:
         request = uuid.uuid4().hex
         github.command(
@@ -286,6 +328,10 @@ def automate_release(
         title = f"Release publish-{merged}"
     sys.stdout.write("Waiting for the checked GitHub publication...\n")
     return github.wait_run("release.yml", title)
+
+
+def _publication_can_finish(run: dict[str, object]) -> bool:
+    return run.get("status") != "completed" or run.get("conclusion") == "success"
 
 
 def _run(command: tuple[str, ...]) -> str:

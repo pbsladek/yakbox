@@ -559,9 +559,11 @@ def test_release_pr_resolution_reports_merged_pending_publication(
         ),
     )
     result = _resolve_release_pr()
-    assert result.returncode != 0
-    assert "::error::Merged release PR(s) 24" in result.stdout
+    assert result.returncode == 0, result.stderr
+    assert "::notice::Merged release PR(s) 24" in result.stdout
     assert "make release" in result.stdout
+    assert "No release PR: no releasable" not in result.stdout
+    assert "::error::" not in result.stdout
     assert not output.exists()
 
 

@@ -50,9 +50,12 @@ Conventional Commits. Release preparation refreshes `uv.lock` with uv and
 rebuilds the packaged worker before explicitly dispatching CI on that head.
 Preparation takes the PR number directly from the action output. A fallback
 uses the pull-request API rather than GitHub's eventually consistent search.
-The fallback paginates the API and reports merged release PRs still awaiting
-publication as a preparation failure. Successful GitHub publication marks the
-release PR as tagged before dispatching preparation for changes now on `main`.
+The fallback paginates the API. A merged release awaiting publication is a
+normal handoff: preparation reports a notice and defers the next PR. Successful
+GitHub publication marks the release PR as tagged before dispatching
+preparation for changes now on `main`. `make release` joins a queued or running
+publication, including a dispatch still becoming visible, before considering
+a retry of a failed publication.
 The package job uses `uv run --locked` so a stale lock fails before uv can
 modify the checkout and obscure the cause with a dirty-worktree error.
 Quality, test, and release build jobs check lock freshness before installing

@@ -125,10 +125,13 @@ another version bump. The selected manifest must still match the pending
 version, and all publication checks run against that exact commit. Existing
 tags must always point to the release commit.
 
-Release preparation reports an error when a merged release PR still carries
-`autorelease: pending`, rather than silently skipping the next PR. Retry with
-`make release` after merging any required fix; do not remove the pending label
-to bypass a failed publication. Successful GitHub publication marks the PR
+Release preparation and publication start independently after a release PR
+merges. While the PR carries `autorelease: pending`, preparation reports a
+notice and defers the next PR; the waiting state does not fail the workflow.
+`make release` waits for an existing publication or its dispatch instead of
+starting a duplicate. If publication failed, it retries after any required fix
+has been merged. Keep the pending label until publication succeeds.
+Successful GitHub publication marks the PR
 `autorelease: tagged` and dispatches preparation on `main` again, so changes
 merged while publication was pending can receive the next release PR.
 
