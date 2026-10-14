@@ -18,6 +18,11 @@ also include a license review; a vulnerability result is not a license result.
 The required PyYAML configuration parser is MIT-licensed and is invoked only
 through its safe loaders.
 
+Release PRs use Google's Apache-2.0-licensed
+[Release Please action](https://github.com/googleapis/release-please-action/blob/v5.0.0/LICENSE),
+pinned to the v5.0.0 commit. It runs in GitHub Actions; its source is not vendored
+or included as a Yakbox runtime dependency.
+
 The release metadata checker uses Apache-2.0 Twine, Readme Renderer,
 Requests Toolbelt, `id`, and `rfc3986`, plus MIT `nh3`. These are development
 dependencies and are not vendored in Yakbox. Docutils is also used by the

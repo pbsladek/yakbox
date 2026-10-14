@@ -72,117 +72,100 @@ produces build-provenance and SBOM attestations. Verify a downloaded wheel with:
 gh attestation verify yakbox-0.2.0-py3-none-any.whl --repo pbsladek/yakbox
 ```
 
-## Trigger a GitHub Release locally
+## Release with one command
 
-The project version in `pyproject.toml` is authoritative. The next release
-version is `0.2.1`, with tag `v0.2.1`. Commit and merge the version and workflow
-changes to `main` before running the release workflow. Authenticate `gh` with
-`gh auth login` if needed, then run:
+After these workflows have been merged to `main`, authenticate GitHub CLI with
+`gh auth login` and run:
 
 ```console
 make release
+```
+
+The command waits through preparation, CI, merge, and publication. It uses the
+remote `main` branch; commit and merge application changes before releasing.
+Local uncommitted or unpushed work is not included.
+
+Google's [Release Please](https://github.com/googleapis/release-please-action)
+maintains a release PR from Conventional Commits. Use PR titles such as
+`fix: preserve cached chunks`, `feat: add an output format`, or
+`perf: reduce chunking copies` when squash-merging application changes.
+Release Please chooses the next version and writes the changelog,
+`pyproject.toml`, source version fallback, and release manifest. Preparation
+then refreshes `uv.lock` with uv and rebuilds the packaged worker. None of
+these files needs a manual version edit for routine releases.
+
+`make release` does the following:
+
+1. Runs the pinned Release Please action to create or update the release PR.
+2. Waits for CI on the exact prepared PR commit.
+3. Squash-merges that commit using the caller's GitHub credentials. Required
+   reviews, branch rules, and merge queues still apply; it never uses `--admin`.
+4. Waits for the existing release workflow to build, audit, test, attest, and
+   publish the merged commit to GitHub.
+
+The workflows also maintain the PR on pushes to `main`. Merging that PR through
+GitHub starts publication automatically. The built-in `GITHUB_TOKEN` does not
+start PR-triggered CI for bot-created changes, so preparation explicitly
+dispatches `ci.yml` on the prepared release branch. The manifest merge likewise
+explicitly dispatches publication. No additional PAT or publishing secret is
+needed for GitHub releases.
+
+Repository Settings > Actions > General must permit GitHub Actions to create
+pull requests. Workflow permissions remain read-only by default; each job
+requests only its required permissions. Release Please's initial manifest
+records the already published 0.2.1 release. Adding that manifest does not
+republish the historical version.
+
+If there are no releasable Conventional Commits, the command reports that no
+release PR is available. CI failure or a changed PR head stops the command
+before merging. A publication failure leaves the merged version pending;
+running `make release` again retries that exact version and commit rather than
+bumping another version. Existing tags must always point to the release commit.
+
+`make help` lists the available settings. Automatic release preparation targets
+`main`; `RELEASE_REPO` selects another repository with the same workflows, and
+`UV` and `GH` select executable paths. Explicit tags retain direct workflow
+dispatch for a prepared version or another ref:
+
+```console
+make release RELEASE_REF=main RELEASE_TAG=v0.2.2
 make release-runs
 make release-watch RUN_ID=12345
 ```
 
-Replace `12345` with the ID returned by `make release-runs`. The workflow must
-exist on the repository's default branch before it can be dispatched.
-`RELEASE_REF` selects the remote branch or tag to release; uncommitted or
-unpushed local changes are not included. `make release` defaults to repository
-`pbsladek/yakbox`, ref `main`, and GitHub publication. An empty `RELEASE_TAG`
-derives the tag from the selected
-commit's project version. A supplied tag must match that version. Override these
-settings when needed:
+Replace the example tag with the prepared project version, and `12345` with a
+run ID from `make release-runs`. Watching a run returns failure if it fails.
+An explicit tag must match the selected commit's project version. Reusing a
+published version for new changes is rejected; ordinary `make release` lets
+Release Please prepare the next version instead.
 
-```console
-make release RELEASE_REPO=pbsladek/yakbox RELEASE_REF=main RELEASE_TAG=v0.2.1
-```
+The release workflow runs lock freshness, formatting, lint, typing, import,
+test, and dependency-audit gates, including audits for the Whisper, Parakeet,
+and Qwen worker slices. It builds distributions once, verifies isolated wheel
+and source installs, and exports checksums, SBOMs, and a JSON preflight report.
+Twine checks package metadata and README rendering before publication. Both
+macOS and Linux test the merged source and verify the same wheel. Publication
+jobs verify every downloaded asset against `SHA256SUMS`.
 
-The equivalent GitHub CLI command is:
-
-```console
-gh workflow run release.yml --repo pbsladek/yakbox --ref main \
-  -f tag=v0.2.1 -f publish_to=github
-```
-
-`make help` lists all release targets and settings; `UV` and `GH` can select
-alternate executable paths. Watching a run returns a failure status if the
-workflow fails.
-
-The workflow runs the lock, formatting, lint, typing, test, and universal
-dependency-audit gates, including exact audits for the Whisper, Parakeet, and
-Qwen worker dependency slices. It builds the distributions once, verifies
-isolated installs, and exports checksums, SBOMs, and a JSON preflight report.
-Twine validates the wheel and source metadata and README before publication.
-Both distributions embed the full Git commit selected for the release.
-`yakbox --version` prints it alongside the package version:
+Both distributions embed the full tested commit. `yakbox --version` prints it
+alongside the package version without needing Git:
 
 ```text
-yakbox, version 0.2.1 (commit 0123456789abcdef0123456789abcdef01234567)
+yakbox, version 0.2.2 (commit 0123456789abcdef0123456789abcdef01234567)
 ```
 
-Preflight checks isolated installs of the wheel and source archive against
-the release version and commit; the macOS and Linux release jobs also check
-the installed wheel. Metadata remains embedded when the source archive is
-rebuilt after installation. Version output reads the installed package and
-does not require Git or inspect the caller's working directory.
-An unstamped development package prints `commit unknown`. For a package build
-from a clean Git checkout, use `uv run python -m yakbox._build`;
-`make release-preflight` already embeds the commit and restores the source file
-after packaging. Commit-stamped builds reject uncommitted changes so their
-commit identifier describes the packaged source.
-
-Both macOS and Linux then run the offline test suite and verify the same wheel.
-Release test failures retain coverage and JUnit diagnostics. Every publication
-job verifies the downloaded assets against `SHA256SUMS` before uploading them.
-Only after those jobs pass does the GitHub job publish the tested artifacts
-and create the tag at the tested commit. Existing tags must already point to
-that commit. GitHub publication needs no PyPI account or publishing token.
-
-Each new release needs a new version. For subsequent patch releases, run:
-
-```console
-uv version --bump patch
-```
-
-This updates `pyproject.toml` and refreshes `uv.lock`. Update the source-only
-version fallback in `src/yakbox/__init__.py` to match and rebuild the packaged
-worker, which includes that initializer:
-
-```console
-uv run python -m yakbox.speech.analysis_worker_artifact --write-packaged
-```
-
-Commit and merge the changes before running `make release`.
-
-If preflight says a tag does not point to the release commit, the selected
-version already belongs to another commit. For example, `v0.2.0` remains tied
-to the published 0.2.0 source even after `main` advances. Bump the version to
-release the new changes. Keep published tags at their original commits. To
-publish an existing version to PyPI, select its tag as `RELEASE_REF`, as shown
-below.
-
-You can also run preflight locally from a clean worktree before publishing:
+An unstamped development package prints `commit unknown`. For a local package
+build from a clean checkout, use `uv run python -m yakbox._build`. To run the
+complete preflight locally, use:
 
 ```console
 make release-preflight
 ```
 
-This derives the tag from the local project version; `RELEASE_TAG=v0.2.1` can
-set it explicitly. It runs `uv run yakbox-release-preflight --tag v0.2.1` and
-writes distributions under `dist/` and release evidence under
-`release-metadata/`. `make release` runs preflight in GitHub Actions; it does
-not require a separate local preflight. Alternatively, pushing a reviewed
-version tag starts the GitHub release workflow automatically:
-
-```console
-git tag -a v0.2.1 -m "yakbox v0.2.1"
-git push origin v0.2.1
-```
-
-Use either the manual dispatch or tag push for a new GitHub Release. A tag push
-publishes to GitHub only. Releases are immutable versions; bump the project
-version and refresh `uv.lock` before publishing the next one.
+Local preflight derives its tag from the local project version and writes
+`dist/` and `release-metadata/`. It does not prepare or merge a release PR.
+Alternatively, pushing an already prepared version tag runs the publication
+workflow directly. Routine releases need only `make release`.
 
 ## Optional PyPI publishing
 

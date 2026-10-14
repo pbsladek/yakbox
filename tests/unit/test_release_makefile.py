@@ -66,17 +66,16 @@ def test_make_release_defaults_to_github_and_remote_version(tmp_path: Path) -> N
     assert result.returncode == 0, result.stderr
     assert commands == [
         [
-            "workflow",
             "run",
-            "release.yml",
+            "python",
+            "-m",
+            "yakbox.release_automation",
             "--repo",
             "pbsladek/yakbox",
             "--ref",
             "main",
-            "-f",
-            "tag=",
-            "-f",
-            "publish_to=github",
+            "--gh",
+            str(tmp_path / "cli"),
         ]
     ]
 
