@@ -128,7 +128,11 @@ def ensure_tag_points_to_head(
     ).strip()
     if tagged != head_sha:
         raise ReleasePreflightError(
-            f"Tag {tag!r} does not point to release commit {head_sha}"
+            f"Tag {tag!r} does not point to release commit {head_sha}; "
+            f"it points to {tagged}. To release new changes, run "
+            "'uv version --bump patch', commit and merge the version update, "
+            "then run 'make release'. "
+            f"To use the existing tag, select RELEASE_REF={tag}."
         )
 
 
