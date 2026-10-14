@@ -4,6 +4,7 @@ import hashlib
 import itertools
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -398,3 +399,116 @@ def test_release_please_prepares_generated_files_and_explicitly_runs_ci() -> Non
     )
     assert '-f "commit=$RELEASE_COMMIT"' in publication
     assert "publish_to=github" in publication
+
+
+@pytest.mark.parametrize("created", [True, False])
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_release_pr_resolution_uses_action_output_and_direct_api(
+    tmp_path: Path, created: bool, unavailable: bool
+) -> None:
+    steps = cast(
+        list[dict[str, object]],
+        _job(_workflow("release-please.yml"), "prepare")["steps"],
+    )
+    script = next(step["run"] for step in steps if step.get("id") == "pr")
+    gh = tmp_path / "gh"
+    log = tmp_path / "requests"
+    gh.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\nfrom pathlib import Path\n"
+        "args = sys.argv[1:]\n"
+        f"with Path({str(log)!r}).open('a') as stream:\n"
+        "    stream.write(json.dumps(args) + '\\n')\n"
+        "assert args[0] == 'api', 'Search must not resolve a newly created PR'\n"
+        "if os.environ['UNAVAILABLE'] == '1': sys.exit(1)\n"
+        "print('release-please--branches--main' if args[1].endswith('/24') else '24')\n"
+    )
+    gh.chmod(0o755)
+    shell = shutil.which("bash")
+    assert shell is not None
+    output = tmp_path / "outputs"
+    result = subprocess.run(  # noqa: S603 - checked-in lookup script and fake GitHub API
+        [shell, "-e", "-o", "pipefail", "-c", str(script)],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+            "CREATED_PR": json.dumps({"number": 24}) if created else "",
+            "GH_REPO": "example/yakbox",
+            "TARGET_BRANCH": "main",
+            "GITHUB_OUTPUT": str(output),
+            "UNAVAILABLE": "1" if unavailable else "0",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    assert (result.returncode == 0) is not unavailable, result.stderr
+    if unavailable:
+        assert not output.exists()
+    else:
+        assert (
+            output.read_text() == "number=24\nbranch=release-please--branches--main\n"
+        )
+        requests = [json.loads(line) for line in log.read_text().splitlines()]
+        assert len(requests) == (1 if created else 2)
+
+
+def test_ci_package_rejects_stale_lock_without_rewriting_it(tmp_path: Path) -> None:
+    uv = shutil.which("uv")
+    assert uv is not None
+    project = tmp_path / "pyproject.toml"
+    project.write_text(
+        '[project]\nname = "release-fixture"\nversion = "0.2.1"\n'
+        'requires-python = ">=3.14,<3.15"\n'
+    )
+    environment = {**os.environ, "UV_OFFLINE": "true", "UV_PYTHON": sys.executable}
+    subprocess.run(  # noqa: S603 - installed uv, dependency-free temporary project
+        [uv, "lock"],
+        cwd=tmp_path,
+        env=environment,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    lock = tmp_path / "uv.lock"
+    original = lock.read_bytes()
+    project.write_text(
+        project.read_text().replace('version = "0.2.1"', 'version = "0.2.2"')
+    )
+    steps = cast(list[dict[str, object]], _job(_workflow("ci.yml"), "package")["steps"])
+    script = next(
+        str(step["run"])
+        for step in steps
+        if step.get("name") == "Build distributions with their source commit"
+    )
+    arguments = shlex.split(script)
+    result = subprocess.run(  # noqa: S603 - checked-in CI argv, installed uv, temporary project
+        [uv, *arguments[1:]],
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert "lockfile" in result.stderr.lower()
+    assert lock.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("workflow", "job"),
+    [("ci.yml", "quality"), ("ci.yml", "test"), ("release.yml", "build")],
+)
+def test_jobs_check_lock_freshness_before_uv_can_refresh_it(
+    workflow: str, job: str
+) -> None:
+    steps = cast(list[dict[str, object]], _job(_workflow(workflow), job)["steps"])
+    commands = [str(step["run"]) for step in steps if "run" in step]
+    check = commands.index("uv lock --check")
+    assert check < next(
+        index
+        for index, command in enumerate(commands)
+        if command.startswith(("uv run", "uv sync"))
+    )

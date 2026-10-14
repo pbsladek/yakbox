@@ -48,6 +48,12 @@ Dependency upgrades should arrive through pull requests and pass `CI gate`.
 Google Release Please maintains the release PR, version, and changelog from
 Conventional Commits. Release preparation refreshes `uv.lock` with uv and
 rebuilds the packaged worker before explicitly dispatching CI on that head.
+Preparation takes the PR number directly from the action output. A fallback
+uses the pull-request API rather than GitHub's eventually consistent search.
+The package job uses `uv run --locked` so a stale lock fails before uv can
+modify the checkout and obscure the cause with a dirty-worktree error.
+Quality, test, and release build jobs check lock freshness before installing
+or running project tools, so an implicit uv refresh cannot hide a stale lock.
 `make release` waits for that CI, merges with an exact head check under normal
 repository rules, and waits for checked GitHub publication. Published tags
 remain immutable. PyPI and TestPyPI publication remain explicit options.

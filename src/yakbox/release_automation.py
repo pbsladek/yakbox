@@ -78,19 +78,46 @@ class _GitHub:
             ) from error
 
     def pending(self, ref: str, state: str) -> _ReleasePR | None:
-        values = self.json(
-            "pr",
-            "list",
-            "--base",
-            ref,
-            "--state",
-            state,
-            "--label",
-            "autorelease: pending",
-            "--json",
-            _PR_FIELDS,
+        query = (
+            '[.[] | select(any(.labels[]; .name == "autorelease: pending"))'
+            + (" | select(.merged_at != null)" if state == "merged" else "")
+            + " | {number, headRefName: .head.ref, headRefOid: .head.sha,"
+            " isCrossRepository: (.head.repo.full_name != .base.repo.full_name),"
+            " mergeCommit: (if .merged_at then {oid: .merge_commit_sha} else null end),"
+            ' state: (if .merged_at then "MERGED" else "OPEN" end)}] | @json'
         )
-        if not isinstance(values, list) or len(values) > 1:
+        raw = self.runner(
+            (
+                self.executable,
+                "api",
+                "--method",
+                "GET",
+                f"repos/{self.repository}/pulls",
+                "-f",
+                f"base={ref}",
+                "-f",
+                f"state={'closed' if state == 'merged' else 'open'}",
+                "-f",
+                "per_page=100",
+                "--paginate",
+                "--jq",
+                query,
+            )
+        )
+        try:
+            values: list[object] = []
+            for line in raw.splitlines():
+                page = json.loads(line)
+                if not isinstance(page, list):
+                    raise ReleasePreflightError(
+                        "GitHub returned invalid release PR pages"
+                    )
+                values.extend(page)
+        except json.JSONDecodeError as error:
+            raise ReleasePreflightError(
+                "GitHub returned invalid release PR JSON"
+            ) from error
+        if len(values) > 1:
             raise ReleasePreflightError("Expected at most one pending release PR")
         return _pull_request(values[0]) if values else None
 
@@ -150,8 +177,7 @@ class _GitHub:
             time.sleep(5)
         raise ReleasePreflightError("Timed out waiting for the release merge queue")
 
-    def retry_publication(self, ref: str, commit: str) -> str:
-        request = uuid.uuid4().hex
+    def manifest_version(self, commit: str) -> str:
         # gh api has no --repo option; keep the repository in its fixed endpoint.
         output = self.runner(
             (
@@ -171,6 +197,30 @@ class _GitHub:
             or re.fullmatch(r"\d+\.\d+\.\d+", version) is None
         ):
             raise ReleasePreflightError("Invalid merged release version")
+        return version
+
+    def retry_publication(self, ref: str, pr: _ReleasePR) -> str:
+        if pr.merged is None:
+            raise ReleasePreflightError(
+                "Publication retries require a merged release PR"
+            )
+        version = self.manifest_version(pr.merged)
+        commit = self.runner(
+            (
+                self.executable,
+                "api",
+                f"repos/{self.repository}/commits/{ref}",
+                "--jq",
+                ".sha",
+            )
+        ).strip()
+        if _SHA.fullmatch(commit) is None:
+            raise ReleasePreflightError("Cannot resolve the publication retry commit")
+        if self.manifest_version(commit) != version:
+            raise ReleasePreflightError(
+                "The selected ref no longer matches the pending release version"
+            )
+        request = uuid.uuid4().hex
         self.command(
             "workflow",
             "run",
@@ -185,6 +235,8 @@ class _GitHub:
             "publish_to=github",
             "-f",
             f"request_id={request}",
+            "-f",
+            f"release_pr={pr.number}",
         )
         return f"Release {request}"
 
@@ -206,7 +258,7 @@ def automate_release(
     github = _GitHub(repository, executable, runner or _run)
     pending = github.pending(ref, "merged")
     if pending is not None and pending.merged is not None:
-        title = github.retry_publication(ref, pending.merged)
+        title = github.retry_publication(ref, pending)
     else:
         request = uuid.uuid4().hex
         github.command(
@@ -244,7 +296,7 @@ def _run(command: tuple[str, ...]) -> str:
     except (OSError, subprocess.SubprocessError) as error:
         raise ReleasePreflightError("Cannot run GitHub release automation") from error
     if result.returncode:
-        detail = (result.stderr or result.stdout).strip()[-2048:]
+        detail = (result.stderr or result.stdout).strip()[:2048]
         raise ReleasePreflightError(f"GitHub release command failed: {detail}")
     return result.stdout
 

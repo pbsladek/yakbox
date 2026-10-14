@@ -69,8 +69,8 @@ class FakeGitHub:
                     }
                 ]
             )
-        if command[1:3] == ("pr", "list"):
-            state = command[command.index("--state") + 1]
+        if command[1] == "api" and "--paginate" in command:
+            state = "merged" if "state=closed" in command else "open"
             return json.dumps(
                 [self.pr(merged=True)]
                 if state == "merged" and self.resume
@@ -86,7 +86,11 @@ class FakeGitHub:
         if command[1:3] == ("pr", "view"):
             return json.dumps(self.pr(merged=True))
         if command[1] == "api":
-            return json.dumps({".": "0.2.2"})
+            return (
+                "c" * 40
+                if command[2].endswith("/commits/main")
+                else json.dumps({".": "0.2.2"})
+            )
         raise AssertionError(command)
 
 
@@ -127,7 +131,7 @@ def test_ci_for_another_commit_cannot_authorize_the_merge() -> None:
     assert not any(command[1:3] == ("pr", "merge") for command in github.commands)
 
 
-def test_publication_retry_uses_the_already_merged_commit_and_version() -> None:
+def test_publication_retry_uses_corrected_main_with_the_same_pending_version() -> None:
     github = FakeGitHub(resume=True)
 
     assert automate_release("example/yakbox", runner=github) == 30
@@ -136,9 +140,43 @@ def test_publication_retry_uses_the_already_merged_commit_and_version() -> None:
         command for command in github.commands if command[1:3] == ("workflow", "run")
     )
     assert "release.yml" in dispatch
-    assert f"commit={MERGED}" in dispatch
+    assert f"commit={'c' * 40}" in dispatch
     assert "tag=v0.2.2" in dispatch
+    assert "release_pr=25" in dispatch
     assert not any(command[1:3] == ("pr", "merge") for command in github.commands)
+
+
+def test_publication_retry_rejects_a_different_version_on_main() -> None:
+    github = FakeGitHub(resume=True)
+
+    def runner(command: tuple[str, ...]) -> str:
+        result = github(command)
+        if command[1] == "api" and command[2].endswith(f"ref={'c' * 40}"):
+            return json.dumps({".": "0.3.0"})
+        return result
+
+    with pytest.raises(ReleasePreflightError, match="pending release version"):
+        automate_release("example/yakbox", runner=runner)
+
+    assert not any(command[1:3] == ("workflow", "run") for command in github.commands)
+
+
+def test_pending_release_lookup_combines_direct_api_pages() -> None:
+    pr = FakeGitHub().pr(merged=True)
+    github = _GitHub("example/yakbox", "gh", lambda _: f"[]\n{json.dumps([pr])}\n[]\n")
+
+    pending = github.pending("main", "merged")
+
+    assert pending is not None
+    assert pending.number == 25
+    assert pending.merged == MERGED
+
+
+@pytest.mark.parametrize("payload", ["not JSON", "{}"])
+def test_pending_release_lookup_rejects_invalid_pages(payload: str) -> None:
+    github = _GitHub("example/yakbox", "gh", lambda _: payload)
+    with pytest.raises(ReleasePreflightError, match="invalid release PR"):
+        github.pending("main", "open")
 
 
 def test_run_discovery_waits_for_the_matching_dispatch(

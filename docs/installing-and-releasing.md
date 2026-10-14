@@ -119,8 +119,11 @@ republish the historical version.
 If there are no releasable Conventional Commits, the command reports that no
 release PR is available. CI failure or a changed PR head stops the command
 before merging. A publication failure leaves the merged version pending;
-running `make release` again retries that exact version and commit rather than
-bumping another version. Existing tags must always point to the release commit.
+running `make release` again retries that version from the selected remote
+`main` commit. This permits a fix to release preparation to be merged without
+another version bump. The selected manifest must still match the pending
+version, and all publication checks run against that exact commit. Existing
+tags must always point to the release commit.
 
 `make help` lists the available settings. Automatic release preparation targets
 `main`; `RELEASE_REPO` selects another repository with the same workflows, and
