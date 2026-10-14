@@ -45,14 +45,21 @@ jobs:
         run: |
           number=$(printf '%s' "${CREATED_PR:-null}" | jq -r '.number // empty')
           if [ -z "$number" ]; then
-            number=$(gh api --method GET "repos/$GH_REPO/pulls" -f state=open -f "base=$TARGET_BRANCH" -f per_page=100 --jq '[.[] | select(any(.labels[]; .name == "autorelease: pending"))] | if length > 1 then error("Multiple release PRs") else .[0].number // empty end')
+            number=$(gh api --method GET "repos/$GH_REPO/pulls" -f state=open -f "base=$TARGET_BRANCH" -f per_page=100 --paginate --slurp --jq '[.[][] | select(any(.labels[]; .name == "autorelease: pending"))] | if length > 1 then error("Multiple release PRs") else .[0].number // empty end')
           fi
           if [ -n "$number" ]; then
             branch=$(gh api "repos/$GH_REPO/pulls/$number" --jq '.head.ref')
             printf 'number=%s\nbranch=%s\n' "$number" "$branch" >> "$GITHUB_OUTPUT"
-          elif [ -n "$CREATED_PR" ]; then
+          elif [ -n "$CREATED_PR" ] && [ "$CREATED_PR" != null ]; then
             echo 'Release Please returned a PR but it could not be resolved.' >&2
             exit 1
+          else
+            pending=$(gh api --method GET "repos/$GH_REPO/pulls" -f state=closed -f "base=$TARGET_BRANCH" -f per_page=100 --paginate --slurp --jq '[.[][] | select(.merged_at != null) | select(any(.labels[]; .name == "autorelease: pending")) | .number | tostring] | join(", ")')
+            if [ -n "$pending" ]; then
+              echo "::error::Merged release PR(s) $pending are still awaiting publication. Run make release to retry publication before preparing the next release."
+              exit 1
+            fi
+            echo 'No release PR: no releasable Conventional Commits were found.'
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.pr.outputs.number != ''

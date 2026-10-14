@@ -125,6 +125,13 @@ another version bump. The selected manifest must still match the pending
 version, and all publication checks run against that exact commit. Existing
 tags must always point to the release commit.
 
+Release preparation reports an error when a merged release PR still carries
+`autorelease: pending`, rather than silently skipping the next PR. Retry with
+`make release` after merging any required fix; do not remove the pending label
+to bypass a failed publication. Successful GitHub publication marks the PR
+`autorelease: tagged` and dispatches preparation on `main` again, so changes
+merged while publication was pending can receive the next release PR.
+
 `make help` lists the available settings. Automatic release preparation targets
 `main`; `RELEASE_REPO` selects another repository with the same workflows, and
 `UV` and `GH` select executable paths. Explicit tags retain direct workflow
@@ -186,10 +193,48 @@ owned by your account. Create the corresponding GitHub environment and, if
 desired, require reviewer approval. This uses short-lived OIDC credentials;
 no PyPI API token is needed in GitHub secrets.
 
+For a new project, sign in to
+[PyPI account publishing settings](https://pypi.org/manage/account/publishing/)
+and fill the GitHub pending-publisher form:
+
+| Field | Value |
+| --- | --- |
+| PyPI Project Name | `yakbox` |
+| Owner | `pbsladek` |
+| Repository name | `yakbox` |
+| Workflow name | `release.yml` |
+| Environment name | `pypi` |
+
+Use the workflow filename, without `.github/workflows/`. If your account
+already owns `yakbox`, add the publisher under that project's **Manage >
+Publishing** instead. A pending publisher does not reserve the project name;
+the first successful upload creates the project and converts the publisher
+to a normal publisher.
+
+The matching GitHub environment lives under
+[repository Settings > Environments](https://github.com/pbsladek/yakbox/settings/environments).
+Its name must be exactly `pypi`. You may add required reviewers there if you
+want a separate approval before each upload. The `publish-pypi` job in
+`.github/workflows/release.yml` uses that environment, grants `id-token: write`,
+and invokes the pinned PyPA publishing action after all release checks pass.
+Registering the publisher on PyPI is an account action; configuring GitHub
+alone does not register it.
+
 After setup, publish the reviewed tagged version from your terminal:
 
 ```console
-make release RELEASE_REF=v0.2.0 PUBLISH_TO=pypi
+make release RELEASE_REF=v0.2.2 PUBLISH_TO=pypi
+```
+
+Replace `v0.2.2` with the reviewed GitHub release tag you want to publish. From
+the GitHub interface, open **Actions > Release > Run workflow**, choose that
+tag, and select `pypi` as the publish destination. After dispatch, use
+`make release-runs` and `make release-watch RUN_ID=...` to follow the result.
+After successful publication, verify the project page and install by name:
+
+```console
+uv tool install --python 3.14 yakbox
+yakbox --version
 ```
 
 `PUBLISH_TO=pypi` publishes to PyPI only; it does not recreate the GitHub
