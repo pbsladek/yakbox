@@ -48,6 +48,68 @@ The defaults remain `My Audiobook` and `Author Name`. Titles and authors must
 contain non-whitespace text. Quotes, backslashes, and Unicode are safely
 encoded in `yakbox.toml`. Initialization refuses an existing manifest.
 
+Choose a backend when creating the project:
+
+```console
+yakbox init local-book --backend chatterbox-local
+yakbox init hosted-book --backend resemble --voice-uuid YOUR_VOICE_ID
+```
+
+`--backend` accepts `fake` (the default), `chatterbox-local`, or `resemble`.
+The local starter uses CPU execution with one model process and one thread.
+Install the local dependencies separately using the
+[installation guide](installing-and-releasing.md). For voice cloning, configure
+your authorized reference audio and its rights basis in the manifest.
+Resemble requires a nonblank `--voice-uuid`; other backends reject that option.
+Configure credentials separately through the keyring or environment. Creating
+a project does not load models, download anything, or contact a provider.
+
+## Listen to previews and auditions
+
+Add `--play` to open generated audio in the desktop's default audio player:
+
+```console
+yakbox preview --text "A short listening check." --play
+yakbox audition --profile default --text "Compare this voice." --play
+yakbox audition --profile narrator --profile guest --text "Compare voices." --play
+```
+
+The last command requires profiles named `narrator` and `guest`. Audition
+samples open in render order; whether they queue or use separate windows
+depends on the player. Playback uses `open` on macOS and `xdg-open` on Linux,
+so it requires a configured desktop audio application. Player-launch attempts
+have a 15-second timeout. A launch failure returns an error and leaves the
+generated audio available at the path in the message.
+
+Without `--play`, these commands only generate and report their artifacts.
+`--json` can be combined with `--play`: player diagnostics stay out of the
+single JSON response. Launching a player does not approve a listening review
+or establish narration quality.
+
+## Watch a build
+
+In another terminal, run:
+
+```console
+yakbox status --watch
+yakbox status --target draft --watch
+```
+
+Each command refreshes every two seconds until Ctrl+C, which exits with code
+130. It follows the most recently active run for the selected target and
+shows completed chapters and stages, reused stages, failures, and active
+chapter/stage pairs. It can display an in-progress build before `run.json`
+exists and wait for the first build in a new project. An unfinished run with
+no target lock is shown as `stopped`.
+
+Watch mode is read-only. It ignores an incomplete final journal append until
+the next refresh and never repairs or truncates the journal. Complete corrupt
+records stop the command with an error. Interactive terminals update in
+place; redirected output appends a plain snapshot at each refresh.
+
+`--watch` cannot be combined with `--json` or `--quiet`. Use ordinary
+`yakbox --json status` for the existing single-document status response.
+
 ## Configuration
 
 User configuration is optional TOML at
