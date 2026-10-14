@@ -37,7 +37,7 @@ uv tool install ./yakbox-*.whl
 
 Releases include `SHA256SUMS`. See the
 [installation and release guide](docs/installing-and-releasing.md) for checksum
-verification, local release commands, and optional PyPI publishing.
+verification and the automated GitHub and PyPI release process.
 
 ## Build an audiobook
 

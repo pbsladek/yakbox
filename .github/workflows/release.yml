@@ -1,5 +1,5 @@
 name: Release
-run-name: Release ${{ inputs.request_id || inputs.commit || github.sha }}
+run-name: Release ${{ inputs.tag || github.ref_name }}
 
 on:
   push:
@@ -11,10 +11,6 @@ on:
         description: Pending release PR to mark after a publication retry
         required: false
         type: string
-      request_id:
-        description: Correlation ID for make release
-        required: false
-        type: string
       commit:
         description: Exact prepared source commit (defaults to the selected ref)
         required: false
@@ -23,15 +19,6 @@ on:
         description: Release tag (defaults to v plus the project version)
         required: false
         type: string
-      publish_to:
-        description: Publish destination
-        required: true
-        default: github
-        type: choice
-        options:
-          - github
-          - pypi
-          - testpypi
 
 permissions:
   contents: read
@@ -42,6 +29,7 @@ concurrency:
 
 jobs:
   build:
+    name: Build and audit
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -72,31 +60,11 @@ jobs:
         env:
           REQUESTED_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
           REQUESTED_COMMIT: ${{ inputs.commit }}
-        run: |
-          uv run python - <<'PY'
-          import os
-          import subprocess
-          from pathlib import Path
-          from yakbox.release_preflight import project_version, validate_release_tag
-
-          tag = os.environ["REQUESTED_TAG"] or f"v{project_version(Path.cwd())}"
-          validate_release_tag(tag, project_version(Path.cwd()))
-          commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, timeout=10).strip()
-          if os.environ.get("REQUESTED_COMMIT") and os.environ["REQUESTED_COMMIT"] != commit:
-              raise SystemExit("Release checkout does not match the requested commit")
-          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
-              output.write(f"tag={tag}\ncommit={commit}\n")
-          PY
+        run: uv run --no-sync python -m yakbox.release_workflow resolve
       - name: Run release preflight
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          PUBLISH_TO: ${{ inputs.publish_to || 'github' }}
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == "push" || "$PUBLISH_TO" != "github" ]] || git show-ref --verify --quiet "refs/tags/${RELEASE_TAG}"; then
-            uv run yakbox-release-preflight --tag "$RELEASE_TAG" --require-tag-ref
-          else
-            uv run yakbox-release-preflight --tag "$RELEASE_TAG"
-          fi
+        run: uv run --no-sync python -m yakbox.release_workflow preflight
       - name: Attest build provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -120,6 +88,7 @@ jobs:
           retention-days: 7
 
   test:
+    name: Test on ${{ matrix.os }}
     needs: build
     strategy:
       fail-fast: false
@@ -177,116 +146,74 @@ jobs:
           .release-venv/bin/python tests/package_sdk_consumer.py
           .release-venv/bin/python tests/package_worker_consumer.py
 
-  publish-pypi:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'pypi'
+  github-release:
+    name: Publish GitHub release
     needs: [build, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.commit }}
+          persist-credentials: false
+      - uses: ./.github/actions/release-assets
+      - name: Publish the tested files to GitHub
+        run: uv run --no-sync python -m yakbox.release_publication publish-github
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [build, test, github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/p/yakbox
     permissions:
+      contents: read
       id-token: write
+    env:
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
     steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: python-package-distributions
-          path: dist/
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: python-package-release-metadata
-          path: release-metadata/
-      - name: Verify release checksums
-        run: |
-          mkdir release-assets
-          cp dist/* release-metadata/* release-assets/
-          (cd release-assets && sha256sum --check SHA256SUMS)
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-
-  publish-testpypi:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'testpypi'
-    needs: [build, test]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/p/yakbox
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: python-package-distributions
-          path: dist/
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: python-package-release-metadata
-          path: release-metadata/
-      - name: Verify release checksums
-        run: |
-          mkdir release-assets
-          cp dist/* release-metadata/* release-assets/
-          (cd release-assets && sha256sum --check SHA256SUMS)
+          ref: ${{ needs.build.outputs.commit }}
+          persist-credentials: false
+      - uses: ./.github/actions/release-assets
+      - name: Reject conflicting PyPI files before retrying
+        run: uv run --no-sync python -m yakbox.release_publication check-pypi
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
-  github-release:
-    if: github.event_name == 'push' || inputs.publish_to == 'github'
-    needs: [build, test]
+  finish:
+    name: Complete release
+    needs: [build, github-release, publish-pypi]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
       issues: write
       actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
+      RELEASE_PR: ${{ inputs.release_pr }}
     steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: python-package-distributions
-          path: dist/
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: python-package-release-metadata
-          path: release-metadata/
-      - name: Verify release checksums
-        run: |
-          mkdir release-assets
-          cp dist/* release-metadata/* release-assets/
-          (cd release-assets && sha256sum --check SHA256SUMS)
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.build.outputs.tag }}
-          RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
-        run: >-
-          gh release create "$RELEASE_TAG" dist/* release-metadata/*
-          --target "$RELEASE_COMMIT" --generate-notes --title "yakbox $RELEASE_TAG"
-      - name: Mark the release pull request as published
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
-          RELEASE_PR: ${{ inputs.release_pr }}
-        run: |
-          number="$RELEASE_PR"
-          if [ -z "$number" ]; then
-            number=$(gh api "repos/$GH_REPO/commits/$RELEASE_COMMIT/pulls" --jq '.[] | select(.merged_at != null) | select(any(.labels[]; .name == "autorelease: pending")) | .number')
-          fi
-          if [ -n "$number" ]; then
-            case "$number" in
-              *[!0-9]*) echo 'Invalid release PR number.' >&2; exit 1 ;;
-            esac
-            gh label create 'autorelease: tagged' --color 0e8a16 --force
-            gh pr edit "$number" --remove-label 'autorelease: pending' --add-label 'autorelease: tagged'
-          fi
-      - name: Prepare the next release pull request
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          REQUEST_ID: after-publication-${{ github.run_id }}
-        run: >-
-          gh workflow run release-please.yml --ref main
-          -f "request_id=$REQUEST_ID"
+          ref: ${{ needs.build.outputs.commit }}
+          persist-credentials: false
+      - uses: ./.github/actions/release-assets
+      - name: Verify both destinations and finish the release
+        run: uv run --no-sync python -m yakbox.release_publication finish

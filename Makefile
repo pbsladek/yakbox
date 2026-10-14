@@ -5,11 +5,10 @@ GH ?= gh
 RELEASE_REPO ?= pbsladek/yakbox
 RELEASE_REF ?= main
 RELEASE_TAG ?=
-PUBLISH_TO ?= github
 RUN_ID ?=
 
 # Pass settings as environment values so recipes preserve spaces and punctuation.
-export RELEASE_REPO RELEASE_REF RELEASE_TAG PUBLISH_TO RUN_ID
+export RELEASE_REPO RELEASE_REF RELEASE_TAG RUN_ID
 
 .PHONY: help release release-preflight release-runs release-watch
 
@@ -21,20 +20,16 @@ help:
 	  'make release-watch RUN_ID=12345  Watch one run and return its exit status.' \
 	  '' \
 	  'Settings: RELEASE_REPO=pbsladek/yakbox RELEASE_REF=main RELEASE_TAG=' \
-	  '          PUBLISH_TO=github|pypi|testpypi UV=uv GH=gh' \
-	  'An empty RELEASE_TAG automates GitHub releases; explicit tags or PyPI dispatch directly.'
+	  '          UV=uv GH=gh' \
+	  'Every release publishes the same tested files to GitHub and PyPI.'
 
 release:
-	@case "$$PUBLISH_TO" in \
-	  github|pypi|testpypi) ;; \
-	  *) printf '%s\n' 'PUBLISH_TO must be github, pypi, or testpypi.' >&2; exit 2 ;; \
-	esac
-	@if [ "$$PUBLISH_TO" = github ] && [ -z "$$RELEASE_TAG" ]; then \
+	@if [ -z "$$RELEASE_TAG" ]; then \
 	  $(UV) run python -m yakbox.release_automation --repo "$$RELEASE_REPO" \
 	    --ref "$$RELEASE_REF" --gh "$(GH)"; \
 	else \
 	  $(GH) workflow run release.yml --repo "$$RELEASE_REPO" --ref "$$RELEASE_REF" \
-	    -f "tag=$$RELEASE_TAG" -f "publish_to=$$PUBLISH_TO"; \
+	    -f "tag=$$RELEASE_TAG"; \
 	fi
 
 release-preflight:

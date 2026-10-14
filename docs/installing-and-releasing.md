@@ -4,18 +4,17 @@
 
 Yakbox supports macOS and Linux with Python 3.14. Windows is not supported.
 The default installation is small and does not install PyTorch. Install the
-published v0.2.0 wheel directly:
+latest release from PyPI:
 
 ```console
-uv tool install --python 3.14 \
-  https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl
+uv tool install --python 3.14 yakbox
 yakbox --version
 yakbox doctor
 ```
 
-To upgrade, use `uv tool install --force --python 3.14` with the new release's
-wheel URL. Direct URL installs do not require a Yakbox project on PyPI;
-dependencies still come from the configured package index.
+To upgrade, run `uv tool upgrade yakbox`. You can also install a specific
+wheel URL from GitHub Releases; dependencies still come from the configured
+package index.
 
 For library use inside a Python 3.14 environment, pip also accepts the wheel URL:
 
@@ -101,14 +100,16 @@ these files needs a manual version edit for routine releases.
 3. Squash-merges that commit using the caller's GitHub credentials. Required
    reviews, branch rules, and merge queues still apply; it never uses `--admin`.
 4. Waits for the existing release workflow to build, audit, test, attest, and
-   publish the merged commit to GitHub.
+   publish the same wheel and source archive to GitHub and PyPI.
+5. Verifies both destinations, marks the release PR as published, and resumes
+   preparation for any changes merged during publication.
 
 The workflows also maintain the PR on pushes to `main`. Merging that PR through
 GitHub starts publication automatically. The built-in `GITHUB_TOKEN` does not
 start PR-triggered CI for bot-created changes, so preparation explicitly
 dispatches `ci.yml` on the prepared release branch. The manifest merge likewise
 explicitly dispatches publication. No additional PAT or publishing secret is
-needed for GitHub releases.
+needed. PyPI uses the configured Trusted Publisher described below.
 
 Repository Settings > Actions > General must permit GitHub Actions to create
 pull requests. Workflow permissions remain read-only by default; each job
@@ -119,11 +120,11 @@ republish the historical version.
 If there are no releasable Conventional Commits, the command reports that no
 release PR is available. CI failure or a changed PR head stops the command
 before merging. A publication failure leaves the merged version pending;
-running `make release` again retries that version from the selected remote
-`main` commit. This permits a fix to release preparation to be merged without
-another version bump. The selected manifest must still match the pending
-version, and all publication checks run against that exact commit. Existing
-tags must always point to the release commit.
+running `make release` again retries that version. If a tag already exists,
+the retry keeps its original commit even if `main` has advanced. Before a tag
+exists, a retry can use a corrected `main` commit with the same manifest version.
+All publication checks run again. Published tags and distributions remain
+immutable: conflicting hashes stop the retry.
 
 Release preparation and publication start independently after a release PR
 merges. While the PR carries `autorelease: pending`, preparation reports a
@@ -131,7 +132,7 @@ notice and defers the next PR; the waiting state does not fail the workflow.
 `make release` waits for an existing publication or its dispatch instead of
 starting a duplicate. If publication failed, it retries after any required fix
 has been merged. Keep the pending label until publication succeeds.
-Successful GitHub publication marks the PR
+Successful publication to both GitHub and PyPI marks the PR
 `autorelease: tagged` and dispatches preparation on `main` again, so changes
 merged while publication was pending can receive the next release PR.
 
@@ -158,7 +159,15 @@ and Qwen worker slices. It builds distributions once, verifies isolated wheel
 and source installs, and exports checksums, SBOMs, and a JSON preflight report.
 Twine checks package metadata and README rendering before publication. Both
 macOS and Linux test the merged source and verify the same wheel. Publication
-jobs verify every downloaded asset against `SHA256SUMS`.
+jobs share a download-and-verify action that checks every asset against
+`SHA256SUMS` and binds the preflight report to the release version and commit.
+Python helpers in `release_workflow.py` and `release_publication.py` implement
+the workflow decisions and have offline regression tests.
+
+The workflow list shows `Prepare release · main`, `Start release · main`, and
+`Release vX.Y.Z`. Release CI identifies its preparation number. The CLI uses
+GitHub’s dispatch run IDs to track preparation and retries; UUIDs and full
+commit hashes are kept out of run titles.
 
 Both distributions embed the full tested commit. `yakbox --version` prints it
 alongside the package version without needing Git:
@@ -180,13 +189,11 @@ Local preflight derives its tag from the local project version and writes
 Alternatively, pushing an already prepared version tag runs the publication
 workflow directly. Routine releases need only `make release`.
 
-## Optional PyPI publishing
+## PyPI Trusted Publishing
 
-GitHub Releases host distribution files, rather than a PyPI-compatible package
-index. Direct wheel URLs work with
-[pip](https://pip.pypa.io/en/stable/cli/pip_install/) and
-[uv](https://docs.astral.sh/uv/guides/tools/). For installation by name with
-`uv tool install yakbox` or `pip install yakbox`, publish Yakbox to PyPI.
+Every release publishes to GitHub and PyPI. There is no destination selector
+or TestPyPI job. The `pypi` environment and Trusted Publisher are required
+for a release to complete; no PyPI API token is stored in GitHub.
 
 Create a PyPI account and configure a
 [pending Trusted Publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
@@ -223,26 +230,27 @@ and invokes the pinned PyPA publishing action after all release checks pass.
 Registering the publisher on PyPI is an account action; configuring GitHub
 alone does not register it.
 
-After setup, publish the reviewed tagged version from your terminal:
+After setup, run `make release` for routine releases. To retry an already
+prepared version explicitly, select its tag:
 
 ```console
-make release RELEASE_REF=v0.2.2 PUBLISH_TO=pypi
+make release RELEASE_REF=v0.3.2 RELEASE_TAG=v0.3.2
 ```
 
-Replace `v0.2.2` with the reviewed GitHub release tag you want to publish. From
-the GitHub interface, open **Actions > Release > Run workflow**, choose that
-tag, and select `pypi` as the publish destination. After dispatch, use
-`make release-runs` and `make release-watch RUN_ID=...` to follow the result.
-After successful publication, verify the project page and install by name:
+Replace the example with the version being retried. The retry verifies any
+existing GitHub distributions and PyPI files before accepting them. Identical
+files are retained, and a partial PyPI upload can finish without recreating the
+GitHub release. A mismatched digest fails the release instead of overwriting or
+silently skipping a different package.
+
+The release PR keeps `autorelease: pending` if either destination fails. Only
+the completion job, after verifying both published files on PyPI and the
+GitHub release, marks it `autorelease: tagged` and starts the next preparation.
+Use `make release-runs` and `make release-watch RUN_ID=...` to follow a run.
+
+After publication, verify installation by name:
 
 ```console
 uv tool install --python 3.14 yakbox
 yakbox --version
 ```
-
-`PUBLISH_TO=pypi` publishes to PyPI only; it does not recreate the GitHub
-Release. `PUBLISH_TO=testpypi` likewise publishes only to TestPyPI, using the
-`testpypi` environment and a separately configured TestPyPI Trusted Publisher.
-Package-index publication requires an existing matching tag that resolves to
-the tested commit; an untagged branch cannot publish to either index.
-Every destination requires the same preflight and macOS/Linux verification.
