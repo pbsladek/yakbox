@@ -16,28 +16,26 @@ To upgrade, run `uv tool upgrade yakbox`. You can also install a specific
 wheel URL from GitHub Releases; dependencies still come from the configured
 package index.
 
-For library use inside a Python 3.14 environment, pip also accepts the wheel URL:
+For library use inside a Python 3.14 environment, install from PyPI:
 
 ```console
-python -m pip install \
-  https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl
+python -m pip install yakbox
 ```
 
-Install optional extras with a named URL requirement:
+Install optional extras by name. Local extras use the matching release's
+reviewed security overrides:
 
+<!-- x-release-please-start-version -->
 ```console
-uv tool install --python 3.14 \
-  "yakbox[credentials] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl"
-uv tool install --python 3.14 \
-  "yakbox[local] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
-uv tool install --python 3.14 \
-  "yakbox[credentials,local] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
-uv tool install --python 3.14 \
-  "yakbox[local,alignment] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[credentials]"
+uv tool install --python 3.14 "yakbox[local]==0.3.2" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.3.2/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[credentials,local]==0.3.2" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.3.2/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local,alignment]==0.3.2" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.3.2/constraints/chatterbox-security-overrides.txt
 ```
+<!-- x-release-please-end -->
 
 Local Chatterbox has a much larger machine-learning dependency graph. Install
 it only on a machine that will run the model. The versioned override file
@@ -57,19 +55,23 @@ Each GitHub Release contains a platform-independent wheel, a source archive,
 `SHA256SUMS`, four CycloneDX SBOMs, and a preflight report. Download every asset
 so all entries in the checksum manifest can be verified:
 
+<!-- x-release-please-start-version -->
 ```console
-gh release download v0.2.0 --repo pbsladek/yakbox --dir yakbox-v0.2.0
-cd yakbox-v0.2.0
+gh release download v0.3.2 --repo pbsladek/yakbox --dir yakbox-v0.3.2
+cd yakbox-v0.3.2
 shasum -a 256 -c SHA256SUMS
-uv tool install --python 3.14 ./yakbox-0.2.0-py3-none-any.whl
+uv tool install --python 3.14 ./yakbox-0.3.2-py3-none-any.whl
 ```
+<!-- x-release-please-end -->
 
 On Linux, use `sha256sum -c SHA256SUMS` for the checksum step. GitHub also
 produces build-provenance and SBOM attestations. Verify a downloaded wheel with:
 
+<!-- x-release-please-start-version -->
 ```console
-gh attestation verify yakbox-0.2.0-py3-none-any.whl --repo pbsladek/yakbox
+gh attestation verify yakbox-0.3.2-py3-none-any.whl --repo pbsladek/yakbox
 ```
+<!-- x-release-please-end -->
 
 ## Release with one command
 
@@ -92,6 +94,9 @@ Release Please chooses the next version and writes the changelog,
 `pyproject.toml`, source version fallback, and release manifest. Preparation
 then refreshes `uv.lock` with uv and rebuilds the packaged worker. None of
 these files needs a manual version edit for routine releases.
+
+Release Please also updates the marked installation examples in the README and
+guides, keeping local-extra pins and security override URLs on the same release.
 
 `make release` does the following:
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -54,6 +55,27 @@ def test_readme_local_links_resolve() -> None:
 
     assert links
     assert all((root / link).exists() for link in links)
+
+
+@pytest.mark.parametrize(
+    "path", ["README.md", "docs/getting-started.md", "docs/installing-and-releasing.md"]
+)
+def test_installation_pins_match_the_version_and_are_updated_by_release_please(
+    path: str,
+) -> None:
+    root = Path(__file__).parents[2]
+    config = json.loads((root / "release-please-config.json").read_text())
+    assert path in config["packages"]["."]["extra-files"]
+    version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    blocks = re.findall(
+        r"x-release-please-start-version -->(.*?)<!-- x-release-please-end",
+        (root / path).read_text(),
+        re.DOTALL,
+    )
+    assert blocks
+    for block in blocks:
+        versions = re.findall(r"\d+\.\d+\.\d+", block)
+        assert versions and set(versions) == {version}
 
 
 def test_example_index_links_resolve() -> None:

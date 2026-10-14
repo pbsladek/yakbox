@@ -9,33 +9,37 @@ backends also power direct text-to-speech commands.
 
 ## Install
 
-Yakbox supports macOS and Linux with Python 3.14. Install the CLI from a
-[GitHub Release](https://github.com/pbsladek/yakbox/releases) with
+Yakbox supports macOS and Linux with Python 3.14. Install the CLI from
+[PyPI](https://pypi.org/project/yakbox/) with
 [uv](https://docs.astral.sh/uv/):
 
 ```console
-uv tool install --python 3.14 \
-  https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl
+uv tool install --python 3.14 yakbox
+yakbox --version
 yakbox doctor
 ```
 
-For local Chatterbox synthesis:
+To upgrade, run `uv tool upgrade yakbox`.
 
+For local Chatterbox synthesis, install the `local` extra with the matching
+security overrides:
+
+<!-- x-release-please-start-version -->
 ```console
-uv tool install --python 3.14 \
-  "yakbox[local] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local]==0.3.2" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.3.2/constraints/chatterbox-security-overrides.txt
 ```
+<!-- x-release-please-end -->
 
 FFmpeg and FFprobe are required to master, encode, inspect, and assemble audio.
-You can also install a wheel downloaded from the
+Alternatively, install a wheel downloaded from the
 [GitHub Releases](https://github.com/pbsladek/yakbox/releases) page:
 
 ```console
-uv tool install ./yakbox-*.whl
+uv tool install --python 3.14 ./yakbox-*.whl
 ```
 
-Releases include `SHA256SUMS`. See the
+GitHub Releases include `SHA256SUMS`. See the
 [installation and release guide](docs/installing-and-releasing.md) for checksum
 verification and the automated GitHub and PyPI release process.
 
@@ -52,6 +56,9 @@ yakbox release check --write-manifest
 
 New projects use the fast offline fake backend. Change the profile in
 `yakbox.toml` to use local Chatterbox or Resemble.ai for real narration.
+For a new local project, use `yakbox init my-book --backend chatterbox-local`.
+Add `--play` to `preview` or `audition` to listen, and use `yakbox status --watch`
+in another terminal to follow a build. See the [operations guide](docs/operations.md).
 
 ## Examples
 

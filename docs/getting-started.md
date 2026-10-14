@@ -3,27 +3,30 @@
 ## Install
 
 Yakbox supports macOS and Linux with Python 3.14. Install the default CLI without
-PyTorch:
+PyTorch from [PyPI](https://pypi.org/project/yakbox/):
 
 ```console
-uv tool install --python 3.14 \
-  https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl
+uv tool install --python 3.14 yakbox
 ```
 
 Install local Chatterbox only on a machine intended to run the model:
 
+<!-- x-release-please-start-version -->
 ```console
-uv tool install --python 3.14 "yakbox[local] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local]==0.3.2" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.3.2/constraints/chatterbox-security-overrides.txt
 ```
+<!-- x-release-please-end -->
 
 On Apple Silicon, add the local MLX Whisper aligner when using verified
 context extraction for short utterances:
 
+<!-- x-release-please-start-version -->
 ```console
-uv tool install --python 3.14 "yakbox[local,alignment] @ https://github.com/pbsladek/yakbox/releases/download/v0.2.0/yakbox-0.2.0-py3-none-any.whl" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.2.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local,alignment]==0.3.2" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.3.2/constraints/chatterbox-security-overrides.txt
 ```
+<!-- x-release-please-end -->
 
 The aligner is optional and runs locally. Install the pinned Whisper model
 explicitly with `yakbox whisper models install`; audiobook builds never
@@ -54,7 +57,15 @@ yakbox release check --write-manifest
 The starter manifest uses the fake backend, so this workflow is fast and
 offline. The fake backend produces test fixtures, not listening-quality audio.
 Switch the profile to `chatterbox-local` or `resemble` when the source and plan
-are correct.
+are correct. For a new project, select the backend at creation instead:
+
+```console
+yakbox init local-book --backend chatterbox-local
+yakbox init hosted-book --backend resemble --voice-uuid YOUR_VOICE_ID
+```
+
+Backend dependencies and credentials must be configured separately; see
+[workspace initialization](operations.md#initialize-a-workspace).
 
 The normal build DAG is:
 
@@ -78,6 +89,17 @@ Use `yakbox audition` for short, isolated profile comparisons. Use
 Then run `yakbox build`; unchanged nodes are digest-verified and reused.
 The local Chatterbox worker stays alive for the build so the model is loaded
 once, while hosted profiles use one pooled client and bounded concurrency.
+
+Add `--play` to `preview` or `audition` to open generated audio in the default
+desktop player. For example:
+
+```console
+yakbox preview --text "A short listening check." --play
+```
+
+In another terminal, `yakbox status --watch` refreshes chapter and stage
+progress every two seconds. Press Ctrl+C to stop watching. See the
+[operations guide](operations.md#watch-a-build) for output modes and recovery.
 
 Interrupted builds retain append-only journals and resume by default:
 

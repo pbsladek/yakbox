@@ -21,12 +21,34 @@ def register_workspace_commands(
     @click.argument("directory", type=click.Path(path_type=Path), default=".")
     @click.option("--title", default="My Audiobook", help="Set the new book title.")
     @click.option("--author", default="Author Name", help="Set the new book author.")
-    def init_command(directory: Path, title: str, author: str) -> None:
+    @click.option(
+        "--backend",
+        type=click.Choice(["fake", "chatterbox-local", "resemble"]),
+        default="fake",
+        help="Configure the starter profile for this speech backend.",
+    )
+    @click.option(
+        "--voice-uuid",
+        help="Set the Resemble voice ID; required with --backend resemble.",
+    )
+    def init_command(
+        directory: Path, title: str, author: str, backend: str, voice_uuid: str | None
+    ) -> None:
         """Initialize a minimal audiobook workspace."""
         for name, value in (("title", title), ("author", author)):
             if not value.strip():
                 raise click.BadParameter("must not be blank", param_hint=f"--{name}")
-        manifest, source = _initialize_workspace(directory, title, author)
+        if backend == "resemble" and (voice_uuid is None or not voice_uuid.strip()):
+            raise click.BadParameter(
+                "is required with --backend resemble", param_hint="--voice-uuid"
+            )
+        if backend != "resemble" and voice_uuid is not None:
+            raise click.BadParameter(
+                "requires --backend resemble", param_hint="--voice-uuid"
+            )
+        manifest, source = _initialize_workspace(
+            directory, title, author, _starter_profile(backend, voice_uuid)
+        )
         emit({"manifest": str(manifest), "source": str(source)}, f"Created {manifest}")
 
     @main.command("completion")
@@ -53,7 +75,7 @@ def register_workspace_commands(
 
 
 def _initialize_workspace(
-    directory: Path, title: str, author: str
+    directory: Path, title: str, author: str, profile: str
 ) -> tuple[Path, Path]:
     root = directory.resolve()
     manifest = root / "yakbox.toml"
@@ -67,8 +89,8 @@ sources = ["source/book.md"]
 pronunciations = "pronunciations.toml"
 
 [book]
-title = {json.dumps(title)}
-author = {json.dumps(author)}
+title = {_toml_string(title)}
+author = {_toml_string(author)}
 narrator = "Narrator Name"
 language = "en"
 
@@ -77,9 +99,7 @@ display_name = "Narrator"
 rights_basis = "not_applicable"
 
 [profiles.default]
-backend = "fake"
-voice = "narrator"
-sample_rate = 16000
+{profile}
 
 [targets.default]
 profile = "default"
@@ -146,3 +166,21 @@ raw_until_release = true
             b"# Chapter One\n\nReplace this text with your manuscript.\n",
         )
     return manifest, source
+
+
+def _starter_profile(backend: str, voice_uuid: str | None) -> str:
+    settings = [f"backend = {_toml_string(backend)}", 'voice = "narrator"']
+    if backend == "fake":
+        settings.append("sample_rate = 16000")
+    elif backend == "chatterbox-local":
+        settings.extend(
+            ('device = "cpu"', "max_processes = 1", "threads_per_process = 1")
+        )
+    else:
+        settings.append(f"voice_uuid = {_toml_string(voice_uuid or '')}")
+    return "\n".join(settings)
+
+
+def _toml_string(value: str) -> str:
+    # TOML requires Unicode scalar values and escapes for DEL as well as C0.
+    return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")

@@ -6,6 +6,11 @@
     ".": {
       "release-type": "python",
       "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        "README.md",
+        "docs/getting-started.md",
+        "docs/installing-and-releasing.md"
+      ],
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
         { "type": "fix", "section": "Bug Fixes" },

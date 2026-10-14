@@ -64,6 +64,7 @@ from yakbox.cli_options import (
 )
 from yakbox.cli_repair import register_repair_commands
 from yakbox.cli_runtime import register_runtime_commands
+from yakbox.cli_status import watch_status
 from yakbox.cli_whisper import register_whisper_commands
 from yakbox.cli_workspace import register_workspace_commands
 from yakbox.cloud import (
@@ -102,6 +103,7 @@ from yakbox.errors import (
     YakboxError,
     stable_error_code,
 )
+from yakbox.playback import play_audio
 from yakbox.speech import (
     AudioFormat,
     BackendCapabilities,
@@ -736,6 +738,9 @@ def _emit_build_result(result: BuildResult) -> None:
 @click.option("--chapter", "--chapters")
 @explicit_text_options
 @click.option(
+    "--play", is_flag=True, help="Open generated samples in the default audio player."
+)
+@click.option(
     "--matrix",
     multiple=True,
     metavar="KEY=VALUE[,VALUE...]",
@@ -751,6 +756,7 @@ def audition_command(  # noqa: PLR0917 - Click injects one parameter per CLI opt
     text_file: Path | None,
     matrix: tuple[str, ...],
     api_key: str | None,
+    play: bool,
 ) -> None:
     """Render a short profile comparison for local listening."""
     config = _load_config()
@@ -771,6 +777,9 @@ def audition_command(  # noqa: PLR0917 - Click injects one parameter per CLI opt
                 matrix=matrix,
             )
         )
+        if play:
+            for record in records:
+                play_audio(record.path)
     except (YakboxError, OSError) as error:
         _fail(error)
     _emit(
@@ -789,6 +798,11 @@ def audition_command(  # noqa: PLR0917 - Click injects one parameter per CLI opt
 @click.option("--profile")
 @click.option("--chapter", "--chapters")
 @explicit_text_options
+@click.option(
+    "--play",
+    is_flag=True,
+    help="Open the generated preview in the default audio player.",
+)
 @deprecated_api_key_option
 def preview_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
     manifest: Path,
@@ -798,6 +812,7 @@ def preview_command(  # noqa: PLR0917 - Click injects one parameter per CLI opti
     text: str | None,
     text_file: Path | None,
     api_key: str | None,
+    play: bool,
 ) -> None:
     """Generate a bounded preview without mutating production artifacts."""
 
@@ -818,6 +833,8 @@ def preview_command(  # noqa: PLR0917 - Click injects one parameter per CLI opti
                 api_key=_optional_api_key(api_key, config),
             )
         )
+        if play:
+            play_audio(record.path)
     except (YakboxError, OSError) as error:
         _fail(error)
     _emit(
@@ -934,10 +951,21 @@ def release_diff_command(
 @main.command("status")
 @click.argument("manifest", type=click.Path(path_type=Path), default="yakbox.toml")
 @click.option("--target", default="default", show_default=True)
-def status_command(manifest: Path, target: str) -> None:
+@click.option(
+    "--watch",
+    is_flag=True,
+    help="Refresh build progress every two seconds until Ctrl+C.",
+)
+def status_command(manifest: Path, target: str, watch: bool) -> None:
     """Show run and managed-artifact status."""
+    if watch and (_context().json_output or _context().quiet):
+        raise click.UsageError("--watch cannot be combined with --json or --quiet")
     try:
         loaded = load_manifest(manifest)
+        loaded.target(target)
+        if watch:
+            watch_status(loaded.root, target, console)
+            return
         run_files = sorted((loaded.root / ".yakbox" / "runs").glob("*/run.json"))
         runs = [json.loads(path.read_text(encoding="utf-8")) for path in run_files]
         inventory = inventory_artifacts(loaded.target(target).output_root)
