@@ -80,11 +80,14 @@ The updated optional dependency graph includes BSD-3-Clause Cloudpickle and
 Apache-2.0 OpenTelemetry API. These packages remain dependencies rather than
 vendored source. CI validates workflows with MIT-licensed Actionlint 1.7.12
 and distribution metadata with Apache-2.0-licensed Twine 7.0.0.
+Release preparation uses Google's Apache-2.0-licensed Release Please action
+v5.0.0, pinned by commit in the workflow. It is not vendored in Yakbox.
 
 - Cloudpickle license: <https://github.com/cloudpipe/cloudpickle/blob/master/LICENSE>
 - OpenTelemetry license: <https://github.com/open-telemetry/opentelemetry-python/blob/main/LICENSE>
 - Actionlint license: <https://github.com/rhysd/actionlint/blob/v1.7.12/LICENSE.txt>
 - Twine license: <https://github.com/pypa/twine/blob/7.0.0/LICENSE>
+- Release Please action license: <https://github.com/googleapis/release-please-action/blob/v5.0.0/LICENSE>
 
 ## Optional phoneme forced-alignment runtime and model
 

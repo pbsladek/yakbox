@@ -1,0 +1,42 @@
+name: Publish merged release
+
+on:
+  push:
+    branches: [main]
+    paths: [.release-please-manifest.json]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: latest
+          python-version: '3.14'
+      - name: Resolve the merged release
+        id: release
+        env:
+          PREVIOUS_COMMIT: ${{ github.event.before }}
+        run: uv run --no-project python .github/scripts/merged_release.py
+      - name: Dispatch checked publication
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: >-
+          gh workflow run release.yml --ref main
+          -f "tag=$RELEASE_TAG" -f "commit=$RELEASE_COMMIT" -f publish_to=github
+          -f "request_id=publish-$RELEASE_COMMIT"

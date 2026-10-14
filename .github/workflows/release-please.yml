@@ -1,0 +1,84 @@
+name: Release preparation
+run-name: Release preparation ${{ inputs.request_id || github.sha }}
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Correlation ID for make release
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-preparation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          target-branch: ${{ github.ref_name }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
+      - name: Find the release pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          number=$(gh pr list --base "$TARGET_BRANCH" --state open --label 'autorelease: pending' --json number --jq 'if length > 1 then error("Multiple release PRs") else .[0].number // empty end')
+          if [ -n "$number" ]; then
+            branch=$(gh pr view "$number" --json headRefName --jq .headRefName)
+            printf 'number=%s\nbranch=%s\n' "$number" "$branch" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.pr.outputs.number != ''
+        with:
+          ref: ${{ steps.pr.outputs.branch }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        if: steps.pr.outputs.number != ''
+        with:
+          version: latest
+          python-version: '3.14'
+          enable-cache: true
+      - name: Refresh the release lock and worker
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_BRANCH: ${{ steps.pr.outputs.branch }}
+        run: |
+          uv lock
+          uv sync --frozen --all-groups
+          uv run python -m yakbox.speech.analysis_worker_artifact --write-packaged
+          git add -- uv.lock src/yakbox/__init__.py src/yakbox/runtimes/analysis-worker.pyz
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git -c commit.gpgsign=false commit -m 'chore: refresh release artifacts'
+            gh auth setup-git
+            git push origin "HEAD:refs/heads/$RELEASE_BRANCH"
+          fi
+      - name: Start CI for the prepared commit
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_BRANCH: ${{ steps.pr.outputs.branch }}
+          REQUEST_ID: release-${{ github.run_id }}
+        run: gh workflow run ci.yml --ref "$RELEASE_BRANCH" -f "request_id=$REQUEST_ID"

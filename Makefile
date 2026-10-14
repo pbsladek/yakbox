@@ -15,23 +15,27 @@ export RELEASE_REPO RELEASE_REF RELEASE_TAG PUBLISH_TO RUN_ID
 
 help:
 	@printf '%s\n' \
-	  'make release             Dispatch the checked release workflow (GitHub by default).' \
+	  'make release             Prepare, test, merge, and publish with Google Release Please.' \
 	  'make release-preflight   Check and build the local version from a clean worktree.' \
 	  'make release-runs        List release workflow runs.' \
 	  'make release-watch RUN_ID=12345  Watch one run and return its exit status.' \
 	  '' \
 	  'Settings: RELEASE_REPO=pbsladek/yakbox RELEASE_REF=main RELEASE_TAG=' \
 	  '          PUBLISH_TO=github|pypi|testpypi UV=uv GH=gh' \
-	  'An empty RELEASE_TAG uses the selected commit version (local for preflight).'
+	  'An empty RELEASE_TAG automates GitHub releases; explicit tags or PyPI dispatch directly.'
 
 release:
 	@case "$$PUBLISH_TO" in \
 	  github|pypi|testpypi) ;; \
 	  *) printf '%s\n' 'PUBLISH_TO must be github, pypi, or testpypi.' >&2; exit 2 ;; \
 	esac
-	$(GH) workflow run release.yml --repo "$$RELEASE_REPO" --ref "$$RELEASE_REF" \
-	  -f "tag=$$RELEASE_TAG" -f "publish_to=$$PUBLISH_TO"
-	@printf '%s\n' 'Release dispatched. Use make release-runs, then make release-watch RUN_ID=<id>.'
+	@if [ "$$PUBLISH_TO" = github ] && [ -z "$$RELEASE_TAG" ]; then \
+	  $(UV) run python -m yakbox.release_automation --repo "$$RELEASE_REPO" \
+	    --ref "$$RELEASE_REF" --gh "$(GH)"; \
+	else \
+	  $(GH) workflow run release.yml --repo "$$RELEASE_REPO" --ref "$$RELEASE_REF" \
+	    -f "tag=$$RELEASE_TAG" -f "publish_to=$$PUBLISH_TO"; \
+	fi
 
 release-preflight:
 	@set -eu; \

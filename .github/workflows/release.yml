@@ -1,4 +1,5 @@
 name: Release
+run-name: Release ${{ inputs.request_id || inputs.commit || github.sha }}
 
 on:
   push:
@@ -6,6 +7,14 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      request_id:
+        description: Correlation ID for make release
+        required: false
+        type: string
+      commit:
+        description: Exact prepared source commit (defaults to the selected ref)
+        required: false
+        type: string
       tag:
         description: Release tag (defaults to v plus the project version)
         required: false
@@ -42,6 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.commit || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -56,6 +66,7 @@ jobs:
         id: release
         env:
           REQUESTED_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          REQUESTED_COMMIT: ${{ inputs.commit }}
         run: |
           uv run python - <<'PY'
           import os
@@ -66,6 +77,8 @@ jobs:
           tag = os.environ["REQUESTED_TAG"] or f"v{project_version(Path.cwd())}"
           validate_release_tag(tag, project_version(Path.cwd()))
           commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, timeout=10).strip()
+          if os.environ.get("REQUESTED_COMMIT") and os.environ["REQUESTED_COMMIT"] != commit:
+              raise SystemExit("Release checkout does not match the requested commit")
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
               output.write(f"tag={tag}\ncommit={commit}\n")
           PY
@@ -220,6 +233,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      pull-requests: write
+      issues: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -243,3 +258,14 @@ jobs:
         run: >-
           gh release create "$RELEASE_TAG" dist/* release-metadata/*
           --target "$RELEASE_COMMIT" --generate-notes --title "yakbox $RELEASE_TAG"
+      - name: Mark the release pull request as published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          number=$(gh api "repos/$GH_REPO/commits/$RELEASE_COMMIT/pulls" --jq '.[] | select(.merged_at != null) | select(any(.labels[]; .name == "autorelease: pending")) | .number')
+          if [ -n "$number" ]; then
+            gh label create 'autorelease: tagged' --color 0e8a16 --force
+            gh pr edit "$number" --remove-label 'autorelease: pending' --add-label 'autorelease: tagged'
+          fi

@@ -45,6 +45,12 @@ with `yakbox --version`, matching the commit tested by CI.
 
 Dependabot checks all four uv projects and pinned GitHub Actions weekly.
 Dependency upgrades should arrive through pull requests and pass `CI gate`.
+Google Release Please maintains the release PR, version, and changelog from
+Conventional Commits. Release preparation refreshes `uv.lock` with uv and
+rebuilds the packaged worker before explicitly dispatching CI on that head.
+`make release` waits for that CI, merges with an exact head check under normal
+repository rules, and waits for checked GitHub publication. Published tags
+remain immutable. PyPI and TestPyPI publication remain explicit options.
 Worker packaging tests check that each adapter is exactly pinned, matches its
 frozen lockfile, and stays isolated from the other adapter families. They read
 the version from the packaged project so a dependency update does not require

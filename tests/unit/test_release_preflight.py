@@ -87,8 +87,8 @@ def test_preflight_explains_how_to_release_new_changes_after_a_tag_exists(
     diagnostic = capsys.readouterr().err
     assert tagged_commit in diagnostic
     assert release_commit in diagnostic
-    assert "uv version --bump patch" in diagnostic
-    assert "commit and merge" in diagnostic
+    assert "make release" in diagnostic
+    assert "Release Please" in diagnostic
     assert not (tmp_path / "dist").exists()
     assert not (tmp_path / "release-metadata").exists()
 

@@ -1,4 +1,5 @@
 name: CI
+run-name: CI ${{ inputs.request_id || github.ref_name }}
 
 on:
   push:
@@ -7,6 +8,11 @@ on:
     branches: [main]
   merge_group:
   workflow_dispatch:
+    inputs:
+      request_id:
+        description: Correlation ID for release preparation
+        type: string
+        required: false
 
 permissions:
   contents: read

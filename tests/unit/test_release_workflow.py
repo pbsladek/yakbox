@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import json
 import os
 import shutil
 import subprocess
@@ -320,8 +321,9 @@ def _release_resolver_script() -> str:
     ("requested", "accepted"),
     [("", True), ("v0.2.0", True), ("v0.1.0", False), ("v0.2.0\ncommit=wrong", False)],
 )
+@pytest.mark.parametrize("requested_commit", ["", "c" * 40])
 def test_manual_dispatch_resolves_the_version_and_commit_before_publication(
-    tmp_path: Path, requested: str, accepted: bool
+    tmp_path: Path, requested: str, accepted: bool, requested_commit: str
 ) -> None:
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.2.0"\n')
     git = shutil.which("git")
@@ -349,14 +351,19 @@ def test_manual_dispatch_resolves_the_version_and_commit_before_publication(
     result = subprocess.run(  # noqa: S603 - execute reviewed workflow Python; no shell
         (sys.executable, "-c", _release_resolver_script()),
         cwd=tmp_path,
-        env={**os.environ, "REQUESTED_TAG": requested, "GITHUB_OUTPUT": str(output)},
+        env={
+            **os.environ,
+            "REQUESTED_TAG": requested,
+            "REQUESTED_COMMIT": requested_commit,
+            "GITHUB_OUTPUT": str(output),
+        },
         check=False,
         capture_output=True,
         text=True,
         timeout=10,
     )
 
-    if accepted:
+    if accepted and not requested_commit:
         assert result.returncode == 0, result.stderr
         commit = subprocess.check_output(  # noqa: S603 - fixed Git fixture argv
             (git, "rev-parse", "HEAD"), cwd=tmp_path, text=True, timeout=10
@@ -365,3 +372,29 @@ def test_manual_dispatch_resolves_the_version_and_commit_before_publication(
     else:
         assert result.returncode != 0
         assert not output.exists()
+
+
+def test_release_please_prepares_generated_files_and_explicitly_runs_ci() -> None:
+    config = json.loads((ROOT / "release-please-config.json").read_text())
+    assert config["packages"]["."]["release-type"] == "python"
+    assert config["include-component-in-tag"] is False
+    prepare = _job(_workflow("release-please.yml"), "prepare")
+    steps = cast(list[dict[str, object]], prepare["steps"])
+    action = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("googleapis/release-please-action@")
+    )
+    assert _mapping(action["with"])["skip-github-release"] is True
+    commands = "\n".join(str(step.get("run", "")) for step in steps)
+    assert "uv lock" in commands
+    assert "analysis_worker_artifact --write-packaged" in commands
+    assert 'gh workflow run ci.yml --ref "$RELEASE_BRANCH"' in commands
+    assert _mapping(prepare["permissions"])["actions"] == "write"
+    publish = _job(_workflow("release-publish.yml"), "dispatch")
+    publication = "\n".join(
+        str(step.get("run", ""))
+        for step in cast(list[dict[str, object]], publish["steps"])
+    )
+    assert '-f "commit=$RELEASE_COMMIT"' in publication
+    assert "publish_to=github" in publication
