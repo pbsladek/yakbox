@@ -57,21 +57,19 @@ so all entries in the checksum manifest can be verified:
 
 <!-- x-release-please-start-version -->
 ```console
-gh release download v0.3.2 --repo pbsladek/yakbox --dir yakbox-v0.3.2
-cd yakbox-v0.3.2
+gh release download v0.3.2 --repo pbsladek/yakbox --dir yakbox-release
+cd yakbox-release
 shasum -a 256 -c SHA256SUMS
-uv tool install --python 3.14 ./yakbox-0.3.2-py3-none-any.whl
+uv tool install --python 3.14 ./yakbox-*.whl
 ```
 <!-- x-release-please-end -->
 
 On Linux, use `sha256sum -c SHA256SUMS` for the checksum step. GitHub also
 produces build-provenance and SBOM attestations. Verify a downloaded wheel with:
 
-<!-- x-release-please-start-version -->
 ```console
-gh attestation verify yakbox-0.3.2-py3-none-any.whl --repo pbsladek/yakbox
+gh attestation verify yakbox-*.whl --repo pbsladek/yakbox
 ```
-<!-- x-release-please-end -->
 
 ## Release with one command
 

@@ -76,6 +76,11 @@ def test_installation_pins_match_the_version_and_are_updated_by_release_please(
     for block in blocks:
         versions = re.findall(r"\d+\.\d+\.\d+", block)
         assert versions and set(versions) == {version}
+        for line in block.splitlines():
+            # The generic updater replaces one match per line and interprets
+            # wheel platform tags as SemVer prereleases. Keep both unambiguous.
+            assert len(re.findall(r"\d+\.\d+\.\d+", line)) <= 1
+            assert re.search(r"\d+\.\d+\.\d+-", line) is None
 
 
 def test_example_index_links_resolve() -> None:
