@@ -2,6 +2,13 @@
 
 Release Please maintains this file from Conventional Commits.
 
+## [0.3.1](https://github.com/pbsladek/yakbox/compare/v0.3.0...v0.3.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **release:** handle pending publication as a normal handoff ([#29](https://github.com/pbsladek/yakbox/issues/29)) ([397eb67](https://github.com/pbsladek/yakbox/commit/397eb67b1eb08d2689b31cc1c063f8083a8fcebb))
+
 ## [0.3.0](https://github.com/pbsladek/yakbox/compare/v0.2.2...v0.3.0) (2026-10-14)
 
 
