@@ -14,7 +14,7 @@ from yakbox.errors import (
 try:
     __version__ = version("yakbox")
 except PackageNotFoundError:  # pragma: no cover - source tree without install
-    __version__ = "0.3.2"
+    __version__ = "0.4.0"
 
 __all__ = [
     "ArtifactError",

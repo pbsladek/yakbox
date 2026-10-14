@@ -2,6 +2,18 @@
 
 Release Please maintains this file from Conventional Commits.
 
+## [0.4.0](https://github.com/pbsladek/yakbox/compare/v0.3.2...v0.4.0) (2026-10-14)
+
+
+### Features
+
+* **cli:** add backend setup, playback, and live build status ([#33](https://github.com/pbsladek/yakbox/issues/33)) ([be3aa91](https://github.com/pbsladek/yakbox/commit/be3aa91e34ecb102f01578b7702194114533de96))
+
+
+### Bug Fixes
+
+* **release:** keep generated installation examples executable ([#35](https://github.com/pbsladek/yakbox/issues/35)) ([5c91eab](https://github.com/pbsladek/yakbox/commit/5c91eab56ff2ad26fa2bd10fc7da4a1dbd99279e))
+
 ## [0.3.2](https://github.com/pbsladek/yakbox/compare/v0.3.1...v0.3.2) (2026-10-14)
 
 

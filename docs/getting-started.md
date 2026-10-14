@@ -13,8 +13,8 @@ Install local Chatterbox only on a machine intended to run the model:
 
 <!-- x-release-please-start-version -->
 ```console
-uv tool install --python 3.14 "yakbox[local]==0.3.2" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.3.2/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local]==0.4.0" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.4.0/constraints/chatterbox-security-overrides.txt
 ```
 <!-- x-release-please-end -->
 
@@ -23,8 +23,8 @@ context extraction for short utterances:
 
 <!-- x-release-please-start-version -->
 ```console
-uv tool install --python 3.14 "yakbox[local,alignment]==0.3.2" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.3.2/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local,alignment]==0.4.0" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.4.0/constraints/chatterbox-security-overrides.txt
 ```
 <!-- x-release-please-end -->
 
