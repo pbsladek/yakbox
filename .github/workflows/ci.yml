@@ -34,12 +34,12 @@ jobs:
           version: "latest"
           python-version: "3.14"
           enable-cache: true
+      - run: uv lock --check
       - run: uv sync --frozen --all-groups
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run ty check
       - run: uv run lint-imports --no-cache
-      - run: uv lock --check
       - run: uv audit --frozen
       - name: Check and audit packaged worker lockfiles
         run: |
@@ -76,6 +76,7 @@ jobs:
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
+      - run: uv lock --check
       - run: uv sync --frozen --all-groups
       - name: Test
         run: >-
@@ -112,7 +113,7 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - name: Build distributions with their source commit
-        run: uv run python -m yakbox._build
+        run: uv run --locked python -m yakbox._build
       - name: Validate PyPI metadata and README
         run: uv run twine check --strict dist/*
       - run: uv run --isolated --no-project --with dist/*.whl yakbox --help

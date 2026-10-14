@@ -7,6 +7,10 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      release_pr:
+        description: Pending release PR to mark after a publication retry
+        required: false
+        type: string
       request_id:
         description: Correlation ID for make release
         required: false
@@ -61,6 +65,7 @@ jobs:
           enable-cache: true
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - run: uv lock --check
       - run: uv sync --frozen --all-groups
       - name: Resolve and validate the release tag
         id: release
@@ -263,9 +268,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
+          RELEASE_PR: ${{ inputs.release_pr }}
         run: |
-          number=$(gh api "repos/$GH_REPO/commits/$RELEASE_COMMIT/pulls" --jq '.[] | select(.merged_at != null) | select(any(.labels[]; .name == "autorelease: pending")) | .number')
+          number="$RELEASE_PR"
+          if [ -z "$number" ]; then
+            number=$(gh api "repos/$GH_REPO/commits/$RELEASE_COMMIT/pulls" --jq '.[] | select(.merged_at != null) | select(any(.labels[]; .name == "autorelease: pending")) | .number')
+          fi
           if [ -n "$number" ]; then
+            case "$number" in
+              *[!0-9]*) echo 'Invalid release PR number.' >&2; exit 1 ;;
+            esac
             gh label create 'autorelease: tagged' --color 0e8a16 --force
             gh pr edit "$number" --remove-label 'autorelease: pending' --add-label 'autorelease: tagged'
           fi
