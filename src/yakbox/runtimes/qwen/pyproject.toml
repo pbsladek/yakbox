@@ -3,7 +3,7 @@ name = "yakbox-analysis-qwen-runtime"
 version = "0"
 requires-python = ">=3.14,<3.15"
 dependencies = [
-  "mlx-audio[stt]==0.4.8",
+  "mlx-audio[stt]==0.6.2",
   "regex>=2026.7.19,<2027",
 ]
 
