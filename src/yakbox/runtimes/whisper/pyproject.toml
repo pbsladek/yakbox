@@ -9,6 +9,15 @@ dependencies = [
 
 [tool.uv]
 # Keep the model loaders on the reviewed Hugging Face Hub API generation.
-constraint-dependencies = ["huggingface-hub<2"]
-override-dependencies = ["cryptography>=50.0.0", "urllib3>=2.8.0"]
+constraint-dependencies = [
+  "huggingface-hub<2",
+  # Torch 2.15 adds proprietary nvidia-cuda-cccl on Linux; retain the reviewed line.
+  "torch<2.15",
+]
+override-dependencies = [
+  "cryptography>=50.0.0",
+  "filelock>=4.2.1",
+  "setuptools>=84.1.0",
+  "urllib3>=2.8.0",
+]
 

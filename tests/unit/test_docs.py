@@ -165,11 +165,14 @@ def test_local_extra_and_distributed_security_overrides_stay_aligned() -> None:
     root = Path(__file__).parents[2]
     project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     expected = {
+        "brotli",
         "cryptography",
         "diffusers",
+        "filelock",
         "gradio",
         "numpy",
         "onnx",
+        "pillow",
         "safetensors",
         "setuptools",
         "starlette",
@@ -191,15 +194,54 @@ def test_local_extra_and_distributed_security_overrides_stay_aligned() -> None:
         .read_text(encoding="utf-8")
         .splitlines()
     )
-    distributed = {
-        Requirement(line).name
+    distributed_requirements = {
+        Requirement(line).name: Requirement(line)
         for line in override_lines
         if line and not line.startswith("#")
     }
+    locked = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
+    versions = {package["name"]: package["version"] for package in locked["package"]}
 
-    assert expected - {"cryptography", "urllib3"} <= local
+    assert expected - {"brotli", "cryptography", "filelock", "urllib3"} <= local
     assert configured == expected
-    assert distributed == expected
+    assert distributed_requirements.keys() == expected
+    for name, requirement in distributed_requirements.items():
+        assert str(requirement.specifier) == f"=={versions[name]}"
+
+
+@pytest.mark.parametrize(
+    ("project_path", "requirements"),
+    [
+        (
+            ".",
+            (
+                "brotli>=1.2.1",
+                "filelock>=4.2.1",
+                "pillow>=13.0.0",
+                "setuptools>=84.1.0",
+                "virtualenv>=21.14.9",
+            ),
+        ),
+        (
+            "src/yakbox/runtimes/whisper",
+            ("filelock>=4.2.1", "setuptools>=84.1.0"),
+        ),
+        ("src/yakbox/runtimes/parakeet", ("filelock>=4.2.1",)),
+        ("src/yakbox/runtimes/qwen", ("filelock>=4.2.1",)),
+    ],
+)
+def test_lockfiles_include_dependabot_security_fixes(
+    project_path: str, requirements: tuple[str, ...]
+) -> None:
+    root = Path(__file__).parents[2]
+    locked = tomllib.loads(
+        (root / project_path / "uv.lock").read_text(encoding="utf-8")
+    )
+    versions = {package["name"]: package["version"] for package in locked["package"]}
+
+    for value in requirements:
+        requirement = Requirement(value)
+        assert versions[requirement.name] in requirement.specifier
 
 
 def test_live_workflow_and_canaries_are_explicitly_bounded() -> None:
