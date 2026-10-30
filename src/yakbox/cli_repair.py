@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import NoReturn, Protocol, cast
@@ -201,7 +200,6 @@ def repair_generate_command(  # noqa: PLR0917 - Click option boundary.
                 whisper_qa=(
                     loaded.repairs.whisper_qa if use_whisper is None else use_whisper
                 ),
-                api_key=os.environ.get("RESEMBLE_API_KEY"),
             )
         )
     except (YakboxError, OSError, ValueError) as error:
@@ -350,7 +348,6 @@ def repair_batch_generate_command(
                 whisper_qa=(
                     loaded.repairs.whisper_qa if use_whisper is None else use_whisper
                 ),
-                api_key=os.environ.get("RESEMBLE_API_KEY"),
             )
         )
     except (YakboxError, OSError, TypeError, ValueError) as error:

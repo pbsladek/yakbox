@@ -49,15 +49,11 @@ from yakbox.audiobook.sources import (
     AttributionTagKind,
     normalize_sources,
 )
-from yakbox.cloud.usage import HostedUsageGate
 from yakbox.errors import BuildError, ValidationError
 from yakbox.speech import (
     BackendCapabilities,
     ChatterboxSynthesisOptions,
     FakeSpeechService,
-    HostedUsageBudget,
-    HostedUsageRecorder,
-    HostedUsageSnapshot,
     SpeechArtifact,
     SpeechSynthesisRequest,
     TextToSpeechService,
@@ -729,13 +725,12 @@ async def test_audition_matrix_is_deterministic_and_reports_persistable_settings
     async def tracked_open(
         name: str,
         *,
-        api_key: str | None = None,
         device: str | None = None,
         **_options: object,
     ) -> AsyncGenerator[TextToSpeechService]:
         nonlocal opened
         opened += 1
-        async with original_open(name, api_key=api_key, device=device) as service:
+        async with original_open(name, device=device) as service:
             yield service
 
     monkeypatch.setattr(build_module, "open_speech_backend", tracked_open)
@@ -903,41 +898,6 @@ async def test_storage_budget_fails_before_build_state_or_backend(
     assert not (book_workspace / "build").exists()
 
 
-class _HostedTrackingService:
-    capabilities = BackendCapabilities(
-        name="hosted-test",
-        synthesis=True,
-        transformation=False,
-        streaming=False,
-        hosted=True,
-        output_formats=("wav",),
-    )
-
-    def __init__(self) -> None:
-        self.active = 0
-        self.maximum_active = 0
-        self.delegate = FakeSpeechService()
-
-    async def synthesize_to_file(
-        self,
-        request: SpeechSynthesisRequest,
-        destination: Path,
-        *,
-        overwrite: bool = False,
-    ) -> SpeechArtifact:
-        self.active += 1
-        self.maximum_active = max(self.maximum_active, self.active)
-        try:
-            await asyncio.sleep(0.02)
-            return await self.delegate.synthesize_to_file(
-                request,
-                destination,
-                overwrite=overwrite,
-            )
-        finally:
-            self.active -= 1
-
-
 class _BlockingSpeechService:
     capabilities = BackendCapabilities(
         name="blocking",
@@ -1067,80 +1027,6 @@ class _FailingFakeService(FakeSpeechService):
             destination,
             overwrite=overwrite,
         )
-
-
-class _JournaledHostedService(_HostedTrackingService):
-    def __init__(self) -> None:
-        super().__init__()
-        self.gate = HostedUsageGate(HostedUsageBudget(max_provider_requests=1))
-        self.provider_sends = 0
-
-    def set_usage_recorder(self, recorder: HostedUsageRecorder | None) -> None:
-        self.gate.set_recorder(recorder)
-
-    async def restore_usage(self, snapshot: HostedUsageSnapshot) -> None:
-        await self.gate.restore_prior_usage(
-            logical_items=snapshot.logical_items,
-            provider_attempts=snapshot.provider_attempts,
-            submitted_characters=snapshot.submitted_characters,
-            ambiguous_attempts=snapshot.ambiguous_attempts,
-        )
-
-    async def usage_snapshot(self) -> HostedUsageSnapshot:
-        return await self.gate.snapshot()
-
-    async def synthesize_to_file(
-        self,
-        request: SpeechSynthesisRequest,
-        destination: Path,
-        *,
-        overwrite: bool = False,
-    ) -> SpeechArtifact:
-        await self.gate.add_logical_item()
-        await self.gate.reserve_attempt(len(request.text))
-        self.provider_sends += 1
-        return await super().synthesize_to_file(
-            request,
-            destination,
-            overwrite=overwrite,
-        )
-
-
-@pytest.mark.asyncio
-async def test_hosted_audiobook_scheduling_is_bounded_and_overlapping(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    (tmp_path / "book.md").write_text(
-        "\n".join(f"# Chapter {index}\n\nHi {index}." for index in range(1, 5)),
-        encoding="utf-8",
-    )
-    manifest_path = tmp_path / "yakbox.toml"
-    manifest_path.write_text(
-        '"$schema" = '
-        '"https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"\n'
-        'schema_version = 1\nsources = ["book.md"]\n'
-        '[book]\ntitle = "Hosted"\n'
-        '[voices.narrator]\ndisplay_name = "Narrator"\n'
-        '[profiles.remote]\nbackend = "resemble"\nvoice = "narrator"\n'
-        'voice_uuid = "provider-voice"\n'
-        '[targets.default]\nprofile = "remote"\nmastering = false\n'
-        "provider_concurrency = 3\n",
-        encoding="utf-8",
-    )
-    service = _HostedTrackingService()
-
-    @asynccontextmanager
-    async def backend(
-        _name: str, **_options: object
-    ) -> AsyncGenerator[TextToSpeechService]:
-        yield service
-
-    monkeypatch.setattr(build_module, "open_speech_backend", backend)
-    result = await build_audiobook(load_manifest(manifest_path), api_key="test")
-
-    assert result.status == "complete"
-    assert service.maximum_active == 3
 
 
 @pytest.mark.asyncio
@@ -1455,73 +1341,6 @@ async def test_failed_chapter_resumes_from_verified_file_backed_chunk_cache(
 
     assert result.status == "complete"
     assert resumed.calls == expected_requests - 1
-
-
-@pytest.mark.asyncio
-async def test_hosted_audiobook_reservation_survives_failed_run_resume(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    (tmp_path / "book.md").write_text("# One\n\nTiny text.", encoding="utf-8")
-    manifest_path = tmp_path / "yakbox.toml"
-    manifest_path.write_text(
-        '"$schema" = '
-        '"https://yakbox.dev/schemas/audiobook-manifest-v1.schema.json"\n'
-        'schema_version = 1\nsources = ["book.md"]\n'
-        '[book]\ntitle = "Hosted resume"\n'
-        '[voices.narrator]\ndisplay_name = "Narrator"\n'
-        '[profiles.remote]\nbackend = "resemble"\nvoice = "narrator"\n'
-        'voice_uuid = "provider-voice"\n'
-        '[targets.default]\nprofile = "remote"\nmastering = true\n'
-        "max_provider_requests = 1\n",
-        encoding="utf-8",
-    )
-    services: list[_JournaledHostedService] = []
-
-    @asynccontextmanager
-    async def backend(
-        _name: str, **_options: object
-    ) -> AsyncGenerator[TextToSpeechService]:
-        service = _JournaledHostedService()
-        services.append(service)
-        yield service
-
-    monkeypatch.setattr(build_module, "open_speech_backend", backend)
-    original_master = build_module.master_wav
-
-    def fail_master(_source: Path, _destination: Path, *, sample_rate: int) -> None:
-        del sample_rate
-        raise BuildError("injected mastering failure")
-
-    monkeypatch.setattr(build_module, "master_wav", fail_master)
-    manifest = load_manifest(manifest_path)
-    with pytest.raises(BuildError, match="Build failed"):
-        await build_audiobook(manifest, api_key="test")
-
-    run_directory = next((tmp_path / ".yakbox" / "runs").iterdir())
-    events = [
-        json.loads(line)
-        for line in (run_directory / "journal.ndjson")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    event_names = [event["event"] for event in events]
-    assert event_names.index("usage_reserved") < event_names.index("node_failed")
-    assert services[0].provider_sends == 1
-
-    raw = next((tmp_path / "build" / "yakbox" / "raw").glob("*.wav"))
-    raw.unlink()
-    raw.with_suffix(".wav.artifact.json").unlink()
-    monkeypatch.setattr(build_module, "master_wav", original_master)
-    resumed = await build_audiobook(manifest, api_key="test")
-
-    assert resumed.status == "complete"
-    assert resumed.preflight.hosted_work is not None
-    assert resumed.preflight.hosted_work.logical_items == 0
-    assert len(services) == 2
-    assert services[1].provider_sends == 0
-    restored = await services[1].usage_snapshot()
-    assert restored.provider_attempts == 1
 
 
 @pytest.mark.asyncio

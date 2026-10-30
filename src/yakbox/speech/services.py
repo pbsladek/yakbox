@@ -6,7 +6,6 @@ import struct
 import wave
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from decimal import Decimal
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -16,7 +15,6 @@ from yakbox.speech.accelerator import AcceleratorLease
 from yakbox.speech.capabilities import BackendCapabilities
 from yakbox.speech.models import (
     AudioFormat,
-    HostedUsageBudget,
     HostedUsageSnapshot,
     SpeechArtifact,
     SpeechBackendOptions,
@@ -175,11 +173,7 @@ def _tone_wav(seed: str, *, rate: int, seconds: float) -> bytes:
 async def open_speech_backend(
     name: str,
     *,
-    api_key: str | None = None,
     isolated_local: bool = False,
-    hosted_budget: HostedUsageBudget | None = None,
-    price_per_character: Decimal | None = None,
-    max_connections: int | None = None,
     device: str | None = None,
     local_worker_timeout_seconds: float = 3_600,
     local_threads_per_process: int = 1,
@@ -237,44 +231,9 @@ async def open_speech_backend(
 
             yield LocalChatterboxService(device=device or "cpu")
         return
-    if normalized in {"resemble", "cloud"}:
-        if not api_key:
-            raise BackendUnavailableError(
-                "Resemble API key is required; set RESEMBLE_API_KEY"
-            )
-        from yakbox.cloud import (  # noqa: PLC0415 - optional hosted backend
-            ClientOptions,
-            HostedUsageGate,
-            ResembleClient,
-            ResembleSpeechService,
-        )
-
-        usage = HostedUsageGate(
-            hosted_budget or HostedUsageBudget(),
-            price_per_character=price_per_character,
-        )
-        connections = max(20, max_connections or 20)
-        options = ClientOptions(
-            max_connections=connections,
-            max_keepalive_connections=connections,
-        )
-        async with ResembleClient(
-            api_key,
-            options=options,
-            usage_gate=usage,
-        ) as client:
-            service = ResembleSpeechService(
-                client,
-                concurrency=max_connections or 1,
-            )
-            try:
-                yield service
-            finally:
-                await service.aclose()
-        return
-    if normalized in {"remote", "chatterbox-remote"}:
+    if normalized in {"resemble", "cloud", "remote", "chatterbox-remote"}:
         raise BackendUnavailableError(
-            "Remote Chatterbox is not available: no verified service contract exists"
+            "Hosted speech backends have been removed; use chatterbox-local"
         )
     raise BackendUnavailableError(f"Unknown speech backend: {name}")
 
@@ -308,11 +267,7 @@ async def open_configured_speech_backend(
     """Open a speech backend from one evolvable typed options object."""
     async with open_speech_backend(
         name,
-        api_key=options.api_key,
         isolated_local=options.isolated_local,
-        hosted_budget=options.hosted_budget,
-        price_per_character=options.price_per_character,
-        max_connections=options.max_connections,
         device=options.device,
         local_worker_timeout_seconds=options.local_worker_timeout_seconds,
         local_threads_per_process=options.local_threads_per_process,

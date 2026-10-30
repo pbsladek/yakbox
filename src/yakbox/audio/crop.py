@@ -338,8 +338,32 @@ def pad_wav_silence(
 
 def wav_duration_seconds(path: Path) -> float:
     """Return the duration of a readable PCM WAV."""
-    audio = _read_pcm_wave(path)
-    return len(audio.frames) / audio.sample_rate
+    try:
+        with wave.open(str(path), "rb") as reader:
+            channels, width, rate = (
+                reader.getnchannels(),
+                reader.getsampwidth(),
+                reader.getframerate(),
+            )
+            count = reader.getnframes()
+            if (
+                reader.getcomptype() != "NONE"
+                or channels < 1
+                or width not in {1, 2, 3, 4}
+                or rate < 1
+                or count < 1
+            ):
+                raise ArtifactError(f"Unsupported or empty PCM WAV: {path}")
+            # Seek to the final frame to detect truncation without decoding the
+            # payload. A second frame also exposes a partial trailing frame.
+            reader.setpos(count - 1)
+            if len(reader.readframes(2)) != channels * width:
+                raise ArtifactError(
+                    f"PCM WAV has truncated or invalid frame data: {path}"
+                )
+    except (OSError, EOFError, wave.Error) as error:
+        raise ArtifactError(f"Cannot read PCM WAV: {path}") from error
+    return count / rate
 
 
 def _read_pcm_wave(path: Path) -> _PcmWave:

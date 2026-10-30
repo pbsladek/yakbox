@@ -32,6 +32,19 @@ library and is not redistributed by Yakbox. This review accepts the parser
 for development metadata checks; it does not authorize bundling the editor
 support. See [Docutils copying terms](https://docutils.sourceforge.io/COPYING.html).
 
+The 2026-10-30 dependency refresh adds no new distributions to the four locked
+environments. PyPI metadata for the updated releases was checked for license
+changes. Pillow 13.0.0 retains MIT-CMU terms: preserve its copyright and
+permission notice when redistributing it. The existing MPL-2.0 dependencies
+Certifi and Hypothesis retain their file-level source and notice obligations;
+Distlib retains PSF-2.0 terms, and Python Dateutil retains its Apache-2.0/BSD
+choice. These updates do not vendor their code into Yakbox.
+
+The Whisper worker keeps Torch below 2.15 because that release introduces
+[`nvidia-cuda-cccl`](https://pypi.org/project/nvidia-cuda-cccl/13.3.4.3.1/),
+which declares `LicenseRef-NVIDIA-Proprietary`. The refresh excludes that new
+dependency under this repository's software policy.
+
 ## Media, reference voices, and documentation assets
 
 Bundled media must be public domain, CC0, or CC BY 4.0. Attribution required by

@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import json
 import math
-import re
 import shutil
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
+from yakbox.audio.measurements import QualityCapture, QualityMeasurements
+from yakbox.audio.processes import run_command
 from yakbox.contracts import runtime_metadata
 from yakbox.errors import ArtifactError, BackendUnavailableError
-
-_SILENCE_EDGE_TOLERANCE_SECONDS = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,15 +79,39 @@ def inspect_audio(
     return inspection
 
 
-@lru_cache(maxsize=2_048)
 def _inspect_snapshot(
     path_value: str,
     quality: AudioQualityPolicy | None,
-    _size: int,
-    _mtime_ns: int,
-    _ctime_ns: int,
-    _inode: int,
+    *signature: int,
 ) -> AudioInspection:
+    baseline = _probe_snapshot(path_value, *signature)
+    if quality is None:
+        return baseline
+    loudness = _quality_snapshot(path_value, baseline.duration_seconds, *signature)
+    issues = (
+        *baseline.issues,
+        *_quality_issues(
+            integrated_loudness_lufs=loudness[0],
+            true_peak_dbfs=loudness[1],
+            leading_silence_seconds=loudness[3],
+            trailing_silence_seconds=loudness[4],
+            policy=quality,
+        ),
+    )
+    return replace(
+        baseline,
+        integrated_loudness_lufs=loudness[0],
+        true_peak_dbfs=loudness[1],
+        loudness_range_lu=loudness[2],
+        leading_silence_seconds=loudness[3],
+        trailing_silence_seconds=loudness[4],
+        valid=not issues,
+        issues=issues,
+    )
+
+
+@lru_cache(maxsize=2_048)
+def _probe_snapshot(path_value: str, *_signature: int) -> AudioInspection:
     path = Path(path_value)
     raw = _run_ffprobe(path)
     stream, media_format, duration, sample_rate, channels = _parse_ffprobe(raw, path)
@@ -106,22 +129,9 @@ def _inspect_snapshot(
         reported_size=reported_size,
         path=path,
     )
-    loudness: tuple[float | None, float | None, float, float, float] | None = None
-    if quality is not None:
-        loudness = _run_quality_analysis(path, duration)
-        issues = (
-            *issues,
-            *_quality_issues(
-                integrated_loudness_lufs=loudness[0],
-                true_peak_dbfs=loudness[1],
-                leading_silence_seconds=loudness[3],
-                trailing_silence_seconds=loudness[4],
-                policy=quality,
-            ),
-        )
     return AudioInspection(
         schema_version=1,
-        path=path.resolve(),
+        path=path,
         format_name=format_name,
         codec=codec,
         duration_seconds=duration,
@@ -129,14 +139,16 @@ def _inspect_snapshot(
         channels=channels,
         bit_rate=_integer_or_none(media_format.get("bit_rate")),
         size=actual_size,
-        integrated_loudness_lufs=loudness[0] if loudness else None,
-        true_peak_dbfs=loudness[1] if loudness else None,
-        loudness_range_lu=loudness[2] if loudness else None,
-        leading_silence_seconds=loudness[3] if loudness else None,
-        trailing_silence_seconds=loudness[4] if loudness else None,
         valid=not issues,
-        issues=tuple(issues),
+        issues=issues,
     )
+
+
+@lru_cache(maxsize=2_048)
+def _quality_snapshot(
+    path_value: str, duration: float, *_signature: int
+) -> QualityMeasurements:
+    return _run_quality_analysis(Path(path_value), duration)
 
 
 def _file_signature(path: Path) -> tuple[int, int, int, int]:
@@ -151,8 +163,8 @@ def _file_signature(path: Path) -> tuple[int, int, int, int]:
 
 def _run_ffprobe(path: Path) -> object:
     try:
-        result = subprocess.run(  # noqa: S603 - fixed ffprobe argv
-            [  # noqa: S607 - executable availability is checked before use
+        result = run_command(
+            [
                 "ffprobe",
                 "-v",
                 "error",
@@ -165,9 +177,6 @@ def _run_ffprobe(path: Path) -> object:
                 "json",
                 str(path),
             ],
-            check=False,
-            capture_output=True,
-            text=True,
             timeout=60,
         )
     except subprocess.TimeoutExpired as error:
@@ -238,28 +247,30 @@ def _inspection_issues(
     return tuple(issues)
 
 
-def _run_quality_analysis(
-    path: Path,
-    duration: float,
-) -> tuple[float | None, float | None, float, float, float]:
+def _run_quality_analysis(path: Path, duration: float) -> QualityMeasurements:
+    capture = QualityCapture()
     try:
-        result = subprocess.run(  # noqa: S603 - fixed ffmpeg argv
-            [  # noqa: S607 - executable availability is checked before use
+        result = run_command(
+            [
                 "ffmpeg",
                 "-nostdin",
+                "-nostats",
                 "-hide_banner",
                 "-i",
                 str(path),
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-sn",
+                "-dn",
                 "-af",
-                "silencedetect=noise=-50dB:d=0.25,ebur128=peak=true",
+                "silencedetect=noise=-50dB:d=0,ebur128=peak=true:framelog=verbose",
                 "-f",
                 "null",
                 "-",
             ],
-            check=False,
-            capture_output=True,
-            text=True,
             timeout=300,
+            stderr_line=capture.consume,
         )
     except subprocess.TimeoutExpired as error:
         raise ArtifactError(f"FFmpeg quality analysis timed out for {path}") from error
@@ -269,54 +280,7 @@ def _run_quality_analysis(
         raise ArtifactError(
             f"FFmpeg quality analysis failed: {result.stderr.strip()[-2048:]}"
         )
-    stderr = result.stderr
-    integrated = _last_metric(stderr, r"\bI:\s*(-?(?:inf|\d+(?:\.\d+)?))\s+LUFS")
-    true_peak = _last_metric(
-        stderr,
-        r"\bPeak:\s*(-?(?:inf|\d+(?:\.\d+)?))\s+dBFS",
-    )
-    loudness_range = _last_metric(stderr, r"\bLRA:\s*(\d+(?:\.\d+)?)\s+LU")
-    if loudness_range is None:
-        raise ArtifactError("FFmpeg quality analysis returned no loudness range")
-    leading, trailing = _silence_edges(stderr, duration)
-    return integrated, true_peak, loudness_range, leading, trailing
-
-
-def _last_metric(value: str, pattern: str) -> float | None:
-    matches = re.findall(pattern, value, flags=re.IGNORECASE)
-    if not matches:
-        raise ArtifactError("FFmpeg quality analysis omitted a required metric")
-    raw = matches[-1].casefold()
-    if raw in {"-inf", "inf"}:
-        return None
-    return float(raw)
-
-
-def _silence_edges(value: str, duration: float) -> tuple[float, float]:
-    events = [
-        (match.group(1), float(match.group(2)))
-        for match in re.finditer(
-            r"silence_(start|end):\s*(\d+(?:\.\d+)?)",
-            value,
-        )
-    ]
-    leading = 0.0
-    trailing = 0.0
-    if (
-        events
-        and events[0][0] == "start"
-        and events[0][1] <= _SILENCE_EDGE_TOLERANCE_SECONDS
-    ):
-        end = next((time for kind, time in events[1:] if kind == "end"), duration)
-        leading = min(duration, max(0.0, end))
-    starts = [time for kind, time in events if kind == "start"]
-    ends = [time for kind, time in events if kind == "end"]
-    if starts:
-        last_start = starts[-1]
-        later_end = next((time for time in ends if time >= last_start), None)
-        if later_end is None or later_end >= duration - _SILENCE_EDGE_TOLERANCE_SECONDS:
-            trailing = max(0.0, duration - last_start)
-    return leading, trailing
+    return capture.result(duration)
 
 
 def _quality_issues(

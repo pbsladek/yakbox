@@ -23,31 +23,17 @@ def register_workspace_commands(
     @click.option("--author", default="Author Name", help="Set the new book author.")
     @click.option(
         "--backend",
-        type=click.Choice(["fake", "chatterbox-local", "resemble"]),
+        type=click.Choice(["fake", "chatterbox-local"]),
         default="fake",
         help="Configure the starter profile for this speech backend.",
     )
-    @click.option(
-        "--voice-uuid",
-        help="Set the Resemble voice ID; required with --backend resemble.",
-    )
-    def init_command(
-        directory: Path, title: str, author: str, backend: str, voice_uuid: str | None
-    ) -> None:
+    def init_command(directory: Path, title: str, author: str, backend: str) -> None:
         """Initialize a minimal audiobook workspace."""
         for name, value in (("title", title), ("author", author)):
             if not value.strip():
                 raise click.BadParameter("must not be blank", param_hint=f"--{name}")
-        if backend == "resemble" and (voice_uuid is None or not voice_uuid.strip()):
-            raise click.BadParameter(
-                "is required with --backend resemble", param_hint="--voice-uuid"
-            )
-        if backend != "resemble" and voice_uuid is not None:
-            raise click.BadParameter(
-                "requires --backend resemble", param_hint="--voice-uuid"
-            )
         manifest, source = _initialize_workspace(
-            directory, title, author, _starter_profile(backend, voice_uuid)
+            directory, title, author, _starter_profile(backend)
         )
         emit({"manifest": str(manifest), "source": str(source)}, f"Created {manifest}")
 
@@ -168,7 +154,7 @@ raw_until_release = true
     return manifest, source
 
 
-def _starter_profile(backend: str, voice_uuid: str | None) -> str:
+def _starter_profile(backend: str) -> str:
     settings = [f"backend = {_toml_string(backend)}", 'voice = "narrator"']
     if backend == "fake":
         settings.append("sample_rate = 16000")
@@ -176,8 +162,6 @@ def _starter_profile(backend: str, voice_uuid: str | None) -> str:
         settings.extend(
             ('device = "cpu"', "max_processes = 1", "threads_per_process = 1")
         )
-    else:
-        settings.append(f"voice_uuid = {_toml_string(voice_uuid or '')}")
     return "\n".join(settings)
 
 

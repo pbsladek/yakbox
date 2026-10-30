@@ -39,27 +39,39 @@ book/
 Do not import the old project as a runtime dependency. Preserve old outputs as
 external evidence until the yakbox release passes digest/media checks.
 
-## Cloud rewrite compatibility
+## Local models only
 
-Existing direct cloud TTS/stream behavior remains file-oriented. Batch parsing
-matches local `.txt`, `.csv`, `.yaml`, and `.yml`. Convert a JSON Lines batch
-to a YAML sequence or one mapping per YAML document. The canonical recording
-command is:
+Hosted Resemble support has been removed after the provider discontinued its
+commercial voice-generation service. This is an intentional breaking change
+for the next minor release; the reviewed SDK surface is now
+`tests/public-api-v2.yaml`. The earlier snapshot remains as historical evidence.
 
-```console
-yakbox cloud voices recordings create VOICE_UUID AUDIO_FILE \
-  --name NAME --text TRANSCRIPT
-```
+The `cloud` and `config auth` commands, the `credentials` extra,
+`yakbox.cloud`, and `ResembleOptions` are removed. Build, preview, audition,
+repair, speech-factory, and Doctor APIs no longer accept provider credentials;
+build and direct TTS commands no longer expose hosted spending options.
+Doctor's provider-only `--network` option is removed.
 
-The old `cloud voices recording` spelling remains a deprecated hidden alias.
-Deprecated `--api-key` remains accepted but warns; migrate to environment or
-keyring profiles. `is_public` is not a Resemble project-create field and is
-never sent.
+For an existing project:
 
-Credential profiles use `config auth ... --credential-profile NAME` and
-`cloud --credential-profile NAME`; `--profile` remains a compatibility alias.
-Cloud batch resume journals use `--resume-from PATH`; `--resume` remains a
-compatibility alias.
+1. Change each hosted profile to `backend = "chatterbox-local"`.
+2. Remove `voice_uuid`, `project_uuid`, `use_hd`, and hosted-only profile fields.
+3. Set the profile's logical `voice` and configure an authorized local reference
+   recording and rights basis when cloning a voice.
+4. Install the local dependencies using the versioned overrides in the
+   [installation guide](installing-and-releasing.md).
+5. Run `yakbox validate`, a short audition, and `yakbox build --dry-run` before
+   rebuilding. Local and hosted audio have different fingerprints and cannot
+   share synthesis-cache entries.
+
+Legacy `[cloud]` configuration and provider environment variables are ignored.
+Yakbox does not read or delete old keyring entries; remove saved Resemble tokens
+using your operating system's credential manager if desired.
+
+Existing JSON schema versions and historical usage fields remain readable.
+New local build reports set `hosted_work` and `hosted_usage` to `null`.
+Legacy target spending/concurrency fields and backend-neutral usage types remain accepted
+for record compatibility but have no effect on local execution.
 
 ## Versioned contracts
 

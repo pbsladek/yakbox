@@ -19,7 +19,6 @@ does not change the TOML or YAML format of the file that references it.
 yakbox doctor
 yakbox doctor yakbox.toml --target default
 yakbox doctor yakbox.toml --backend chatterbox-local --deep
-yakbox doctor yakbox.toml --backend resemble --network
 yakbox --json doctor
 yakbox doctor --strict
 ```
@@ -27,8 +26,7 @@ yakbox doctor --strict
 The default is offline and read-only. It checks Python/package configuration,
 FFmpeg/FFprobe, workspace paths, source readability, free storage, locks, and
 atomic writes. `--deep` inspects local runtime/device readiness without loading
-a model. `--network` performs only safe provider discovery (`GET` voices); it
-never synthesizes or mutates.
+a model. Doctor does not contact hosted speech services.
 
 `--strict` also returns exit code 1 when a diagnostic has `warn` status. Skipped
 checks remain allowed. Without `--strict`, warnings retain exit code 0 when
@@ -52,17 +50,14 @@ Choose a backend when creating the project:
 
 ```console
 yakbox init local-book --backend chatterbox-local
-yakbox init hosted-book --backend resemble --voice-uuid YOUR_VOICE_ID
 ```
 
-`--backend` accepts `fake` (the default), `chatterbox-local`, or `resemble`.
+`--backend` accepts `fake` (the default) or `chatterbox-local`.
 The local starter uses CPU execution with one model process and one thread.
 Install the local dependencies separately using the
 [installation guide](installing-and-releasing.md). For voice cloning, configure
 your authorized reference audio and its rights basis in the manifest.
-Resemble requires a nonblank `--voice-uuid`; other backends reject that option.
-Configure credentials separately through the keyring or environment. Creating
-a project does not load models, download anything, or contact a provider.
+Creating a project does not load models or download anything.
 
 ## Listen to previews and auditions
 
@@ -118,41 +113,50 @@ User configuration is optional TOML at
 ```toml
 [defaults]
 backend = "fake"
-
-[cloud]
-voice_uuid = "..."
-project_uuid = "..."
-concurrency = 5
 ```
 
-Supported environment overrides include `YAKBOX_BACKEND`,
-`YAKBOX_CLOUD_VOICE_UUID`, `YAKBOX_CLOUD_PROJECT_UUID`,
-`YAKBOX_CLOUD_CONCURRENCY`, and `RESEMBLE_API_KEY`. Legacy
-`RESEMBLE_VOICE_UUID`/`RESEMBLE_PROJECT_UUID` aliases remain accepted.
+Supported environment overrides are `YAKBOX_CONFIG` and `YAKBOX_BACKEND`.
+Legacy `[cloud]` settings and provider environment variables are ignored.
+See the [migration guide](migration.md#local-models-only) for retired commands.
 
 Missing or malformed manifests are application failures because manifest
 loading performs domain validation and may report several related issues.
-Direct file arguments such as audio, recording, batch, resume, and shard inputs
-are validated by Click as usage errors before an operation begins.
+Direct file arguments such as audio, batch, and shard inputs are validated by Click as usage errors before an operation begins.
 
 ## Security
 
-- Do not place API keys in `yakbox.toml`, source control, batch rows, or shell
-  arguments.
-- Use environment secrets in automation and OS keyring profiles interactively.
-- Worker children do not inherit the Resemble token.
-- Provider bodies and request IDs are bounded and token-redacted in errors.
+- Worker environments omit credentials and unrelated process settings.
 - Output and restore paths are contained beneath declared roots.
 - Reference voice use requires an explicit rights basis. Keep licenses and
   consent evidence with project records.
-- Hosted confirmation and budget caps are independent of concurrency.
 
 ## Failure recovery
 
 Every build stage journals its start, completion, or failure. A failed or
 cancelled build releases its target lock and is resumed by the next ordinary
 `yakbox build`. Completed artifacts are reused only after their sidecar,
-fingerprint, size, and digest match.
+planned path, identity, dependencies, fingerprint, size, and digest match.
+Sidecar paths must stay inside the target's managed output root.
+
+Cancellation stops active FFmpeg/FFprobe processes and waits for background
+writers to finish before releasing the target lock. A filesystem copy already
+in progress must finish before cancellation returns; another build cannot
+start writing the same target during that interval. Mixed-format chunk
+conversion uses the same media concurrency limit as mastering and encoding,
+and skips chunks already in the required PCM format.
+
+Audio inspection and canonical analysis use the first audio stream (`a:0`)
+consistently, including files with multiple audio tracks. Quality measurements
+are cached independently of policy limits for an unchanged file within the
+current process. Changing a policy re-evaluates the stored measurements;
+changing the file invalidates them. Edge-silence limits below 250 ms are
+measured without the former 250 ms detection floor. Decimal and scientific
+notation in FFmpeg timestamps are supported, including silence starts within
+one sample of zero. Media diagnostics are drained continuously with a bounded
+in-memory tail; required quality metrics are extracted as they arrive.
+
+Existing mastered, delivery, and inspection artifacts need to rebuild under
+the updated media algorithms.
 
 Use these read-only checks before repairing anything:
 
@@ -162,18 +166,10 @@ yakbox artifacts verify
 yakbox doctor yakbox.toml
 ```
 
-Provider authentication failures are never retried. Provider timeouts are
-bounded and leave no destination file. FFmpeg, FFprobe, local-worker, disk
-preflight, and stage failures retain the run journal and do not leave owned
+FFmpeg, FFprobe, local-worker, disk preflight, and stage failures retain the run journal and do not leave owned
 `.part` or chunk files. If valid audio was externally changed,
 `yakbox artifacts verify` reports the mismatch; rebuild from source rather
 than accepting unexplained bytes.
-
-The hosted client's `max_json_response_bytes` limit (64 MiB by default) is
-checked before buffering a declared oversized body and while reading decoded
-JSON bytes. It also applies to recording-upload responses. Provider errors
-retain at most a 4 KiB prefix before closing the response; an unreadable error
-body preserves the HTTP status used for retry decisions.
 
 Local worker timeouts cover stalled request writes as well as waits for
 per-item progress. Analysis batch deadlines cover the worker handshake,
@@ -182,11 +178,7 @@ Rejected analysis-worker handshakes and response frames discard the process,
 so the next request starts with a fresh handshake.
 
 Persistent-runtime idle shutdown counts time since the latest authenticated
-request or completed operation and keeps an active operation alive. Cancelling
-a queued hosted batch stops its dispatcher, including when the caller is still
-waiting for queue capacity. A cancelled journal acknowledgement does not stop
-durable writes; a writer failure wakes blocked producers so interruption
-handling can finish.
+request or completed operation and keeps an active operation alive.
 
 ## Troubleshooting
 
@@ -198,14 +190,6 @@ same environment using the versioned security override command in the
 [installation guide](installing-and-releasing.md). Start with a one-sentence
 direct test. Worker heartbeat logs are under
 `.yakbox/runs/RUN_ID/logs/local-worker.log`.
-
-`No Resemble API key found`: set `RESEMBLE_API_KEY` or install
-`yakbox[credentials]`, run `config auth login --credential-profile NAME`, and
-select the same profile before the cloud subcommand.
-
-`may have been accepted by the provider`: a management mutation failed after
-the request could have reached Resemble. Inspect the provider project/voice
-before retrying.
 
 `build already locked`: another target build/cleanup may be active. Do not
 delete an active lock. Use Doctor and inspect the recorded run first.

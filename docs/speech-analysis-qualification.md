@@ -38,6 +38,16 @@ Separate frozen audits also reported no known vulnerabilities in the Whisper
 Release preflight exports a CycloneDX 1.5 SBOM for each of those slices and
 includes all three documents in release checksums and metadata.
 
+On 2026-10-30, the dependency refresh retained the three model-loader versions
+above and the workers' `huggingface-hub<2` constraint. Frozen audits reported no
+known vulnerabilities or adverse project statuses in the root graph (186
+dependencies) and the Whisper (55), Parakeet (50), and Qwen (41) worker graphs.
+The updates include Filelock 4.2.5 and Setuptools 84.2.1 where present. The local
+extra uses Pillow 13.0.0 and Brotli 1.2.1; development tooling uses Virtualenv
+21.15.2. Gradio 6.31.0 still requires Pillow below 13, so the project
+and distributed security overrides explicitly select the patched Pillow line.
+These dependency audits do not renew real-model or narration qualification.
+
 ## Model provenance
 
 All four selected model snapshots are installed at immutable Hugging Face

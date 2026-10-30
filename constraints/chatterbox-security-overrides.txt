@@ -3,15 +3,19 @@
 # sets. SecretStorage otherwise permits cryptography releases affected by
 # GHSA-g6cj-pr64-35w5.
 # The download stack also requires the patched urllib3 2.8 transport.
+# Gradio's Pillow upper bound excludes security fixes in Pillow 13.
+brotli==1.2.1
 cryptography==50.0.2
-diffusers==0.41.0
-gradio==6.30.0
+diffusers==0.42.1
+filelock==4.2.5
+gradio==6.31.0
 numpy==2.4.6
 onnx==1.23.2
+pillow==13.0.0
 safetensors==0.8.0
-setuptools==84.0.0
-starlette==1.7.0
+setuptools==84.2.1
+starlette==1.10.0
 torch==2.13.0
 torchaudio==2.11.0
-transformers==5.19.0
+transformers==5.22.1
 urllib3==2.8.0

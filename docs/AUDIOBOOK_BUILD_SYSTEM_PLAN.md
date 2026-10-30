@@ -1,5 +1,8 @@
 # yakbox: production audiobook build system
 
+> Historical document: hosted Resemble support has since been removed.
+> Current behavior is local-only; see [migration](migration.md#local-models-only).
+
 Status: working design; Phases 1–7 implemented; Phase 8 substantially
 implemented with release evidence pending; Phases 9–10 parked
 

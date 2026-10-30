@@ -1,5 +1,8 @@
 # Code quality review
 
+> Historical document: hosted Resemble support has since been removed.
+> Current behavior is local-only; see [migration](migration.md#local-models-only).
+
 Review date: 2026-07-31
 
 This review covers the Python package, tests, CI workflows, dependency

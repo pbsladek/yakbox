@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from yakbox._files import commit_temporary_file
+from yakbox.audio.processes import run_command
 from yakbox.errors import ArtifactError, BackendUnavailableError
 
 
@@ -30,6 +31,9 @@ def master_wav(
         "error",
         "-i",
         str(source),
+        "-map",
+        "0:a:0",
+        "-vn",
         "-ar",
         str(sample_rate),
         "-ac",
@@ -93,6 +97,8 @@ def encode_mp3(
                 "attached_pic",
             ]
         )
+    else:
+        command.extend(["-map", "0:a:0"])
     command.extend(
         [
             "-c:a",
@@ -167,13 +173,7 @@ def _temporary_for(path: Path) -> Path:
 
 def _run(command: list[str], temporary: Path) -> None:
     try:
-        result = subprocess.run(  # noqa: S603 - validated argv; shell is disabled
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
+        result = run_command(command, timeout=600)
     except subprocess.TimeoutExpired as error:
         temporary.unlink(missing_ok=True)
         raise ArtifactError("FFmpeg timed out") from error

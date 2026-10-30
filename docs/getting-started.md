@@ -56,15 +56,14 @@ yakbox release check --write-manifest
 
 The starter manifest uses the fake backend, so this workflow is fast and
 offline. The fake backend produces test fixtures, not listening-quality audio.
-Switch the profile to `chatterbox-local` or `resemble` when the source and plan
+Switch the profile to `chatterbox-local` when the source and plan
 are correct. For a new project, select the backend at creation instead:
 
 ```console
 yakbox init local-book --backend chatterbox-local
-yakbox init hosted-book --backend resemble --voice-uuid YOUR_VOICE_ID
 ```
 
-Backend dependencies and credentials must be configured separately; see
+Local dependencies and voice references must be configured separately; see
 [workspace initialization](operations.md#initialize-a-workspace).
 
 The normal build DAG is:
@@ -88,7 +87,7 @@ Use `yakbox audition` for short, isolated profile comparisons. Use
 `yakbox preview` for a bounded sample that does not mutate production state.
 Then run `yakbox build`; unchanged nodes are digest-verified and reused.
 The local Chatterbox worker stays alive for the build so the model is loaded
-once, while hosted profiles use one pooled client and bounded concurrency.
+once. Whisper analysis runs in a separate local worker.
 
 Add `--play` to `preview` or `audition` to open generated audio in the default
 desktop player. For example:

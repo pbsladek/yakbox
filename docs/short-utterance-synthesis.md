@@ -182,7 +182,7 @@ the same order.
 
 The default attempt ceiling should be small. Short-utterance recovery cannot
 turn a chapter with many short tags into unbounded model work. Preflight must
-report the maximum additional local generations or hosted requests before the
+report the maximum additional local generations before the
 build starts.
 
 ## 4. Align the target

@@ -1,26 +1,8 @@
 # Live backend canaries
 
-Normal tests never contact a provider, download a model, or synthesize with
+Normal tests never download a model or synthesize with
 real Chatterbox. Live canaries are separately marked, disabled by default, and
 use only the text `Hi.`.
-
-## Resemble
-
-The hosted canary permits exactly one provider attempt and three submitted
-characters. Retries are disabled, the connection pool contains one
-connection, and the whole operation has a 90-second bound.
-
-```console
-YAKBOX_RUN_RESEMBLE_LIVE=1 \
-RESEMBLE_API_KEY=... \
-YAKBOX_CLOUD_VOICE_UUID=... \
-uv run pytest --force-enable-socket -m live \
-  tests/live/test_resemble_live.py
-```
-
-The `Live backend canary` GitHub workflow runs this test through the protected
-`live-resemble` environment. Configure `RESEMBLE_API_KEY` and
-`RESEMBLE_VOICE_UUID` as environment secrets.
 
 ## Local Chatterbox
 
@@ -35,7 +17,7 @@ uv run pytest --force-enable-socket -m live \
   tests/live/test_local_chatterbox_live.py
 ```
 
-The GitHub job requires a deliberately configured self-hosted runner carrying
+The `Local model canary` GitHub workflow requires a deliberately configured self-hosted runner carrying
 the `yakbox-chatterbox` label. It does not consume a general hosted runner or
 attempt a whole chapter.
 

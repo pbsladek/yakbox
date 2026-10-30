@@ -1,4 +1,4 @@
-"""Shared batch input conventions for local and hosted synthesis."""
+"""Batch input conventions for local synthesis."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from yakbox.yaml_config import iter_yaml_documents
 
 @dataclass(frozen=True, slots=True)
 class BatchRow:
-    """Normalized local or hosted batch-input row with validation state."""
+    """Normalized local batch-input row with validation state."""
 
     index: int
     text: str

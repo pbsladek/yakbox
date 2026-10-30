@@ -21,7 +21,7 @@ def test_inspection_translates_timeout_and_malformed_provider_output(
     with (
         patch("yakbox.audio.inspect.shutil.which", return_value="/ffprobe"),
         patch(
-            "yakbox.audio.inspect.subprocess.run",
+            "yakbox.audio.inspect.run_command",
             side_effect=subprocess.TimeoutExpired("ffprobe", 60),
         ),
         pytest.raises(ArtifactError, match="timed out"),
@@ -36,14 +36,16 @@ def test_inspection_translates_timeout_and_malformed_provider_output(
     )
     with (
         patch("yakbox.audio.inspect.shutil.which", return_value="/ffprobe"),
-        patch("yakbox.audio.inspect.subprocess.run", return_value=malformed),
+        patch("yakbox.audio.inspect.run_command", return_value=malformed),
         pytest.raises(ArtifactError, match="Invalid FFprobe response"),
     ):
         inspect_audio(audio)
 
 
+@pytest.mark.parametrize("silence_start", ["0", "4.16667e-05", "4.16667E-05"])
 def test_inspection_reports_loudness_silence_and_quality_gates(
     tmp_path: Path,
+    silence_start: str,
 ) -> None:
     audio = tmp_path / "quality.wav"
     audio.write_bytes(b"RIFF-quality")
@@ -63,19 +65,27 @@ def test_inspection_reports_loudness_silence_and_quality_gates(
         returncode=0,
         stdout="",
         stderr=(
-            "silence_start: 0\nsilence_end: 0.5\nsilence_start: 8.0\n"
+            f"silence_start: {silence_start}\n"
+            "silence_end: 0.5\nsilence_start: 8.0\n"
             "Integrated loudness:\n I: -24.0 LUFS\n"
             "Loudness range:\n LRA: 4.0 LU\n"
             "True peak:\n Peak: -0.5 dBFS\n"
         ),
     )
 
+    results = iter((probe, quality))
+
+    def command(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        result = next(results)
+        consumer = kwargs.get("stderr_line")
+        if callable(consumer):
+            for line in result.stderr.splitlines():
+                consumer(line)
+        return result
+
     with (
         patch("yakbox.audio.inspect.shutil.which", return_value="/ffprobe"),
-        patch(
-            "yakbox.audio.inspect.subprocess.run",
-            side_effect=[probe, quality],
-        ),
+        patch("yakbox.audio.inspect.run_command", side_effect=command),
     ):
         inspection = inspect_audio(
             audio,
@@ -111,7 +121,7 @@ def test_mastering_rejects_missing_output_and_cleans_temporary_file(
     with (
         patch("yakbox.audio.master.shutil.which", return_value="/ffmpeg"),
         patch(
-            "yakbox.audio.master.subprocess.run",
+            "yakbox.audio.master.run_command",
             return_value=success_without_output,
         ),
         pytest.raises(ArtifactError, match="produced no output"),
@@ -149,7 +159,7 @@ def test_failed_assembly_cleans_all_temporary_files(tmp_path: Path) -> None:
     with (
         patch("yakbox.audio.assemble.shutil.which", return_value="/ffmpeg"),
         patch("yakbox.audio.assemble.inspect_audio", return_value=inspection),
-        patch("yakbox.audio.assemble.subprocess.run", return_value=failed),
+        patch("yakbox.audio.assemble.run_command", return_value=failed),
         pytest.raises(ArtifactError, match="assembly failed"),
     ):
         assemble_m4b((chapter,), destination, title="Tiny book")

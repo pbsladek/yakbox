@@ -11,12 +11,9 @@ import time
 import wave
 from pathlib import Path
 
-import httpx
-
 from yakbox import __version__
 from yakbox.audiobook.manifest import load_manifest
 from yakbox.config import YakboxConfig, load_config
-from yakbox.credentials import resolve_resemble_credential
 from yakbox.diagnostics.models import (
     Diagnostic,
     DiagnosticSeverity,
@@ -40,10 +37,8 @@ async def run_doctor(
     *,
     backend: str | None = None,
     target: str | None = None,
-    network: bool = False,
     deep: bool = False,
     whisper: bool = False,
-    api_key: str | None = None,
 ) -> DoctorReport:
     """Inspect installation, workspace, and optional backend readiness."""
     checks: list[Diagnostic] = [
@@ -59,7 +54,7 @@ async def run_doctor(
         _tool("tool.ffmpeg", "ffmpeg"),
         _tool("tool.ffprobe", "ffprobe"),
     ]
-    config, config_check = _load_config_check()
+    _, config_check = _load_config_check()
     checks.append(config_check)
     if manifest is not None:
         checks.extend(_workspace_checks(manifest))
@@ -67,9 +62,6 @@ async def run_doctor(
     checks.extend(
         await _backend_checks(
             selected_backend,
-            config,
-            api_key=api_key,
-            network=network,
             deep=deep,
         )
     )
@@ -327,13 +319,13 @@ def _infer_backend(
 
 async def _backend_checks(
     selected_backend: str | None,
-    config: YakboxConfig | None,
     *,
-    api_key: str | None,
-    network: bool,
     deep: bool,
 ) -> list[Diagnostic]:
     checks: list[Diagnostic] = []
+    selected_backend = (
+        selected_backend.casefold() if selected_backend is not None else None
+    )
     if selected_backend in {"local", "chatterbox", "chatterbox-local"} or deep:
         installed = importlib.util.find_spec("chatterbox") is not None
         checks.append(
@@ -366,52 +358,14 @@ async def _backend_checks(
                     skipped_by_policy=True,
                 )
             )
-    if selected_backend in {"resemble", "cloud"} or network:
-        credential = resolve_resemble_credential(
-            explicit=api_key,
-            environment=os.environ.get("RESEMBLE_API_KEY"),
-            keyring=None,
-            legacy_config=config.legacy_resemble_api_key if config else None,
-            profile="default",
-        )
-        resolved_key = credential.value if credential is not None else None
-        has_key = bool(resolved_key)
+    if selected_backend in {"resemble", "cloud", "remote", "chatterbox-remote"}:
         checks.append(
             Diagnostic(
-                id="backend.resemble.credentials",
-                status=DiagnosticStatus.PASS if has_key else DiagnosticStatus.WARN,
-                severity=(
-                    DiagnosticSeverity.INFO if has_key else DiagnosticSeverity.WARNING
-                ),
-                summary=(
-                    "Resemble credential is present"
-                    if has_key
-                    else "Resemble credential is not configured"
-                ),
-                action=None if has_key else "Set RESEMBLE_API_KEY",
-            )
-        )
-        if network and has_key:
-            checks.append(await _resemble_network(resolved_key or ""))
-        elif not network:
-            checks.append(
-                Diagnostic(
-                    id="backend.resemble.network",
-                    status=DiagnosticStatus.SKIP,
-                    severity=DiagnosticSeverity.INFO,
-                    summary="Network check not requested",
-                    action="Run yakbox doctor --network to perform a read-only check",
-                    skipped_by_policy=True,
-                )
-            )
-    if selected_backend in {"remote", "chatterbox-remote"}:
-        checks.append(
-            Diagnostic(
-                id="backend.chatterbox_remote.contract",
-                status=DiagnosticStatus.SKIP,
-                severity=DiagnosticSeverity.WARNING,
-                summary="Remote Chatterbox has no verified service contract",
-                skipped_by_policy=True,
+                id="backend.unsupported",
+                status=DiagnosticStatus.FAIL,
+                severity=DiagnosticSeverity.ERROR,
+                summary="Hosted speech backends have been removed",
+                action="Choose chatterbox-local for speech or use whisper for analysis",
             )
         )
     return checks
@@ -554,49 +508,6 @@ def _workspace_checks(path: Path) -> list[Diagnostic]:
         )
     )
     return checks
-
-
-async def _resemble_network(api_key: str) -> Diagnostic:
-    started = time.monotonic()
-    try:
-        async with httpx.AsyncClient(
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10,
-        ) as client:
-            response = await client.get(
-                "https://app.resemble.ai/api/v2/voices",
-                params={"page": 1, "page_size": 1},
-            )
-    except httpx.HTTPError as error:
-        return Diagnostic(
-            id="backend.resemble.network",
-            status=DiagnosticStatus.FAIL,
-            severity=DiagnosticSeverity.ERROR,
-            summary="Resemble read-only connectivity check failed",
-            detail=_redact(str(error), api_key),
-            elapsed_seconds=time.monotonic() - started,
-        )
-    return Diagnostic(
-        id="backend.resemble.network",
-        status=(
-            DiagnosticStatus.PASS if response.is_success else DiagnosticStatus.FAIL
-        ),
-        severity=(
-            DiagnosticSeverity.INFO if response.is_success else DiagnosticSeverity.ERROR
-        ),
-        summary=(
-            "Resemble read-only connectivity check passed"
-            if response.is_success
-            else f"Resemble returned HTTP {response.status_code}"
-        ),
-        elapsed_seconds=time.monotonic() - started,
-        evidence={
-            "method": "GET",
-            "resource": "voices",
-            "status_code": response.status_code,
-            "mutating": False,
-        },
-    )
 
 
 def _local_deep() -> Diagnostic:

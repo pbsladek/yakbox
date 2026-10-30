@@ -7,10 +7,11 @@ public type explicitly names them.
 
 The wheel includes `py.typed`. Public signatures, enum members, exception
 codes, and `__all__` exports are checked against
-`tests/public-api-v1.yaml`. During the 0.x series, an incompatible change may
+`tests/public-api-v2.yaml`. During the 0.x series, an incompatible change may
 ship only in a minor release. A deprecated public name remains functional for
 at least two minor releases and 90 days. Patch releases preserve these
-contracts.
+contracts. The discontinued hosted API is an explicit retirement exception;
+see the [migration guide](migration.md#local-models-only).
 
 ## Errors
 
@@ -78,9 +79,10 @@ print(result.status.value, result.run_id)
 ```
 
 `BuildRequest` is the preferred evolvable call surface. The keyword-oriented
-`build_audiobook` function remains public for compatibility. Hosted Python
-callers pass a credential explicitly in `BuildRequest.api_key`; unlike the CLI,
-the SDK does not read environment variables or keyrings implicitly.
+`build_audiobook` function remains public. Build and speech factories accept
+local runtime options; provider credentials and spending options are removed.
+See [the migration guide](migration.md#local-models-only) for this intentional
+minor-version API break.
 
 Builds use a target lock, append-only journal, atomic file commits, and
 digest-verified reuse. `BuildProgressEvent`, `BuildStage`, and `BuildStatus`
@@ -96,7 +98,7 @@ artifacts into quarantine; `purge_trash` permanently deletes them.
 
 Manifest and backend models: `AudiobookManifest`, `BookMetadata`,
 `LogicalVoice`, `BackendOptions`, `BackendProfile`, `FakeOptions`,
-`ChatterboxOptions`, `ResembleOptions`, `CharacterRole`, `DialoguePolicy`,
+`ChatterboxOptions`, `CharacterRole`, `DialoguePolicy`,
 `BuildTarget`, `RetentionPolicy`, `RepairPolicy`, and `RuntimePolicy`.
 
 Normalized source and planning models: `Chapter`, `Pause`, `SpeechSegment`,
@@ -181,10 +183,13 @@ Request and result types: `AudioFormat`, `Precision`,
 `SpeechTransformationRequest`, `SpeechArtifact`, `BackendCapabilities`, and
 `SpeechBackendOptions`.
 
-Hosted guardrail types and functions: `CurrencyCode`, `PricingSourceId`,
+Compatibility-only hosted record types and helpers: `CurrencyCode`,
+`PricingSourceId`,
 `HostedUsageBudget`, `HostedUsageSnapshot`, `HostedWorkEstimate`,
 `estimate_hosted_work`, `hosted_confirmation_reasons`, and
-`validate_hosted_preflight`.
+`validate_hosted_preflight`. These retained helpers and hosted service
+protocols cannot open a provider connection. They preserve imports and types
+used with historical records; new local workflows do not use them.
 
 `CurrencyCode` strips whitespace, normalizes to three uppercase ASCII letters,
 and rejects other values. `PricingSourceId` strips whitespace and rejects an
@@ -198,84 +203,6 @@ Service protocols and implementations: `TextToSpeechService`,
 
 Factories: `open_configured_speech_backend`, `open_speech_backend`, and
 `open_transformation_backend`.
-
-## Resemble client and hosted batches
-
-Construct one `ResembleClient` per operation or run. The client owns its HTTP
-connection pool unless an `httpx.AsyncClient` is injected. Enter it once and
-close it through `async with`.
-
-```python
-import asyncio
-import os
-from pathlib import Path
-
-from yakbox.cloud import ResembleClient, SynthesisRequest
-
-
-async def render_hosted() -> None:
-    async with ResembleClient(os.environ["RESEMBLE_API_KEY"]) as client:
-        result = await client.synthesize_to_file(
-            SynthesisRequest(text="A short line.", voice_uuid="VOICE_UUID"),
-            Path("hosted.wav"),
-        )
-        print(result.request_id, result.attempts)
-
-
-asyncio.run(render_hosted())
-```
-
-`run_cloud_batch` is the public batch application service. It accepts
-`BatchRow` values and an open `TextToSpeechService`; it adds bounded
-concurrency, durable journals, resume validation, ordered reports, spending
-reservations, and cancellation recovery. Reuse one service across every row.
-
-```python
-from pathlib import Path
-
-from yakbox.cloud import BatchRow, run_cloud_batch
-from yakbox.speech import TextToSpeechService
-
-rows = (
-    BatchRow(index=1, row_id="intro", text="Opening line."),
-    BatchRow(index=2, row_id="chapter", text="Chapter one."),
-)
-
-
-async def render_batch(service: TextToSpeechService) -> None:
-    report = await run_cloud_batch(
-        rows,
-        service,
-        default_voice="VOICE_UUID",
-        project_uuid=None,
-        out_dir=Path("cloud-output"),
-    )
-    print(report.ok, report.failed)
-```
-
-`ResembleClient` provides `synthesize`, `synthesize_to_file`, `stream`,
-`stream_to_file`, `list_voices`, `create_recording`, `list_projects`,
-`create_project`, and `aclose`. When a `HostedUsageGate` is attached,
-`usage_snapshot`, `set_usage_recorder`, and `restore_usage` expose the durable
-accounting lifecycle used by resumed batches. `ResembleSpeechService` provides
-the neutral `synthesize_to_file` and `synthesize_many_to_files` methods plus
-the same usage lifecycle and `aclose`.
-
-### Cloud reference
-
-Client configuration and lifecycle: `ResembleClient`, `ClientOptions`,
-`RetryPolicy`, `HostedUsageGate`, and `ResembleSpeechService`.
-
-Provider requests and results: `AudioFormat`, `Precision`, `SynthesisRequest`,
-`StreamRequest`, `SynthesisResult`, `FileSynthesisResult`, `Voice`, `Project`,
-`Recording`, and `Page`.
-
-Batch API: `BatchRow`, `BatchStatus`, `BatchResult`, `BatchReport`,
-`ProgressCallback`, and `run_cloud_batch`.
-
-Cloud exceptions: `CloudError`, `ClientStateError`, `ProviderError`,
-`ProviderProtocolError`, `AmbiguousMutationError`, `RetryExhaustedError`,
-`HostedBudgetExceeded`, `BatchJournalError`, and `ResumeMismatchError`.
 
 ## Audio processing
 
@@ -296,9 +223,8 @@ unusable path.
 
 `run_doctor` returns a typed `DoctorReport`. Each `Diagnostic` has a
 `DiagnosticStatus`, `DiagnosticSeverity`, summary, optional action, timing, and
-bounded evidence. Network checks are opt-in and read-only. Deep local checks do
-not synthesize audio. Python callers may pass `api_key` explicitly when a
-credential or network check should include a hosted backend.
+bounded evidence. Diagnostics are offline. Deep local checks inspect device
+readiness without synthesizing audio.
 
 ```python
 import asyncio

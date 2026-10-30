@@ -4,8 +4,8 @@ Yakbox is a local-first audiobook build system. It turns Markdown manuscripts
 into generated narration, mastered WAV chapters, delivery MP3 chapters, and
 verified releases.
 
-It supports local Chatterbox and hosted Resemble.ai synthesis. The same speech
-backends also power direct text-to-speech commands.
+It uses local Chatterbox for narration and local Whisper for transcription,
+alignment, and speech QA. Audio and manuscript processing stay on your machine.
 
 ## Install
 
@@ -55,7 +55,7 @@ yakbox release check --write-manifest
 ```
 
 New projects use the fast offline fake backend. Change the profile in
-`yakbox.toml` to use local Chatterbox or Resemble.ai for real narration.
+`yakbox.toml` to use local Chatterbox for real narration.
 For a new local project, use `yakbox init my-book --backend chatterbox-local`.
 Add `--play` to `preview` or `audition` to listen, and use `yakbox status --watch`
 in another terminal to follow a build. See the [operations guide](docs/operations.md).
@@ -63,7 +63,7 @@ in another terminal to follow a build. See the [operations guide](docs/operation
 ## Examples
 
 The [examples](examples/README.md) cover a tiny offline book, local Chatterbox,
-Resemble.ai, multiple voice editions, pronunciations, selective rebuilding,
+multiple voice editions, pronunciations, selective rebuilding,
 and M4B assembly. Start with the tiny book:
 
 ```console
@@ -78,8 +78,6 @@ yakbox build
 
 ```console
 yakbox tts "A short local test." --backend chatterbox-local --out local.wav
-RESEMBLE_API_KEY=... yakbox cloud tts "A hosted test." \
-  --voice-uuid VOICE_UUID --out hosted.wav
 ```
 
 Use only voices and reference audio for which you have the necessary rights
@@ -97,5 +95,5 @@ QA](docs/whisper-and-short-audio.md).
 
 ## Documentation
 
-See the [documentation](docs/README.md) for manifests, backends, hosted
-budgets, cleanup, releases, troubleshooting, and the Python API.
+See the [documentation](docs/README.md) for manifests, local models, cleanup,
+releases, troubleshooting, and the Python API.
