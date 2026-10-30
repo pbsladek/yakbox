@@ -375,7 +375,7 @@ def plan_audiobook(
             )
         )
         master_fingerprint = _fingerprint(
-            "master-v1",
+            "master-v2",
             synthesis_fingerprint,
             str(target.wav_sample_rate),
             str(target.mastering),
@@ -428,7 +428,7 @@ def plan_audiobook(
                 stage=BuildStage.INSPECT,
                 chapter_id=chapter.id,
                 fingerprint=_fingerprint(
-                    "inspect-v2",
+                    "inspect-v3",
                     mp3_fingerprint,
                     media_runtime,
                     str(target.quality_min_lufs),

@@ -13,13 +13,13 @@ from tests.schema_helpers import validate_contract
 from yakbox._files import atomic_write_json
 from yakbox.audiobook import load_manifest, normalize_sources, plan_audiobook
 from yakbox.audiobook.journal import RunJournal, target_lock
-from yakbox.audiobook.manifest import ChatterboxOptions, FakeOptions, ResembleOptions
+from yakbox.audiobook.manifest import ChatterboxOptions, FakeOptions
 from yakbox.cli import main
 from yakbox.cli_status import watch_status
 from yakbox.errors import BuildError
 
 
-@pytest.mark.parametrize("backend", ["fake", "chatterbox-local", "resemble"])
+@pytest.mark.parametrize("backend", ["fake", "chatterbox-local"])
 def test_init_backend_produces_a_valid_profile_without_loading_or_contacting_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -32,11 +32,8 @@ def test_init_backend_produces_a_valid_profile_without_loading_or_contacting_it(
 
     workspace = tmp_path / "book"
     arguments = ["--json", "init", str(workspace), "--backend", backend]
-    voice_id = 'voice-"quoted"\\é\nline 🎙'
     title, author = "A book 📖", "Author 𐐀"
     arguments.extend(["--title", title, "--author", author])
-    if backend == "resemble":
-        arguments.extend(["--voice-uuid", voice_id])
     with monkeypatch.context() as initialization:
         initialization.setattr("subprocess.run", reject_process)
         result = CliRunner().invoke(main, arguments)
@@ -52,13 +49,10 @@ def test_init_backend_produces_a_valid_profile_without_loading_or_contacting_it(
     if backend == "fake":
         assert isinstance(profile.options, FakeOptions)
         assert profile.options.sample_rate == 16000
-    elif backend == "chatterbox-local":
+    else:
         assert isinstance(profile.options, ChatterboxOptions)
         assert profile.options.device == "cpu"
         assert profile.options.max_processes == profile.options.threads_per_process == 1
-    else:
-        assert isinstance(profile.options, ResembleOptions)
-        assert profile.options.voice_uuid == voice_id
     assert CliRunner().invoke(main, ["validate", str(manifest.path)]).exit_code == 0
 
 
@@ -80,7 +74,9 @@ def test_init_rejects_invalid_backend_options_before_creating_files(
     assert result.exit_code == 2
     payload = json.loads(result.output)
     validate_contract("cli-output", payload)
-    assert payload["error"]["code"] == "invalid_argument"
+    assert payload["error"]["code"] == (
+        "unknown_option" if "--voice-uuid" in options else "invalid_argument"
+    )
     assert not workspace.exists()
 
 

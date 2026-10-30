@@ -11,15 +11,11 @@ from typing import cast
 
 import yaml
 
-import yakbox.cloud
-import yakbox.speech
-
 ROOT = Path(__file__).parents[2]
 MODULES = (
     "yakbox",
     "yakbox.audio",
     "yakbox.audiobook",
-    "yakbox.cloud",
     "yakbox.diagnostics",
     "yakbox.speech",
 )
@@ -66,12 +62,12 @@ def _public_api() -> dict[str, object]:
         module_name: {"exports": _module_exports(module_name)}
         for module_name in MODULES
     }
-    return {"schema_version": 1, "modules": modules}
+    return {"schema_version": 2, "modules": modules}
 
 
 def test_public_api_matches_reviewed_manifest() -> None:
     expected = yaml.safe_load(
-        (ROOT / "tests" / "public-api-v1.yaml").read_text(encoding="utf-8")
+        (ROOT / "tests" / "public-api-v2.yaml").read_text(encoding="utf-8")
     )
 
     assert _public_api() == expected
@@ -133,16 +129,13 @@ def test_sdk_reference_names_every_public_export() -> None:
     assert missing == []
 
 
-def test_error_codes_and_shared_audio_types_are_stable() -> None:
+def test_error_codes_are_stable() -> None:
     for module_name in MODULES:
         module = importlib.import_module(module_name)
         for name in module.__all__:
             value = getattr(module, name)
             if inspect.isclass(value) and issubclass(value, Exception):
                 assert re.fullmatch(r"[a-z][a-z0-9_]*", value.code)
-
-    assert yakbox.cloud.AudioFormat is yakbox.speech.AudioFormat
-    assert yakbox.cloud.Precision is yakbox.speech.Precision
 
 
 def test_typed_distribution_marker_exists() -> None:

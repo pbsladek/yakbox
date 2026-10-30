@@ -8,6 +8,7 @@ from pathlib import Path
 
 from yakbox._files import commit_temporary_file
 from yakbox.audio.inspect import inspect_audio
+from yakbox.audio.processes import run_command
 from yakbox.errors import ArtifactError, BackendUnavailableError
 
 
@@ -153,9 +154,7 @@ def _validate_assembly_inputs(
 
 def _run_ffmpeg_assembly(command: list[str]) -> None:
     try:
-        result = subprocess.run(  # noqa: S603 - validated argv; shell is disabled
-            command, check=False, capture_output=True, text=True, timeout=1800
-        )
+        result = run_command(command, timeout=1800)
     except subprocess.TimeoutExpired as error:
         raise ArtifactError("FFmpeg assembly timed out") from error
     except OSError as error:

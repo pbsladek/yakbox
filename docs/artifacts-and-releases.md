@@ -126,6 +126,6 @@ book metadata and cover art; M4B chapters use manuscript titles. A later source
 rebuild replaces only mutable working artifacts, so older release snapshots
 remain byte-for-byte verifiable and are never silently replaced.
 
-For distributed hosted work, `yakbox shards export` creates stable shard
+For distributed local work, `yakbox shards export` creates stable shard
 manifests and `yakbox shards verify` proves complete, non-overlapping
 recombination before release.

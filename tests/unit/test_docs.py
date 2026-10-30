@@ -24,8 +24,6 @@ from yakbox.cli import main
         ("release", "check", "--help"),
         ("artifacts", "clean", "--help"),
         ("artifacts", "trash", "restore", "--help"),
-        ("cloud", "batch", "--help"),
-        ("cloud", "voices", "recordings", "create", "--help"),
         ("doctor", "--help"),
     ],
 )
@@ -88,7 +86,7 @@ def test_example_index_links_resolve() -> None:
     index = root / "examples" / "README.md"
     links = re.findall(r"\[[^]]+]\(([^)]+\.md)\)", index.read_text(encoding="utf-8"))
 
-    assert len(links) == 7
+    assert len(links) == 6
     assert all((index.parent / link).is_file() for link in links)
 
 
@@ -97,7 +95,7 @@ def test_every_packaged_example_validates_and_plans_every_target() -> None:
     manifests = tuple(sorted((root / "examples").glob("*/yakbox.toml")))
     runner = CliRunner()
 
-    assert len(manifests) == 7
+    assert len(manifests) == 6
     for manifest_path in manifests:
         validated = runner.invoke(main, ["validate", str(manifest_path)])
         assert validated.exit_code == 0, f"{manifest_path}: {validated.output}"
@@ -209,9 +207,6 @@ def test_live_workflow_and_canaries_are_explicitly_bounded() -> None:
     workflow = (root / ".github" / "workflows" / "live-canary.yml").read_text(
         encoding="utf-8"
     )
-    resemble = (root / "tests" / "live" / "test_resemble_live.py").read_text(
-        encoding="utf-8"
-    )
     local = (root / "tests" / "live" / "test_local_chatterbox_live.py").read_text(
         encoding="utf-8"
     )
@@ -221,10 +216,6 @@ def test_live_workflow_and_canaries_are_explicitly_bounded() -> None:
 
     assert "workflow_dispatch:" in workflow
     assert "schedule:" not in workflow
-    assert 'text = "Hi."' in resemble
-    assert "max_provider_requests=1" in resemble
-    assert "max_connections=1" in resemble
-    assert "max_attempts=1" in resemble
     assert 'text="Hi."' in local
     assert "threads_per_process=1" in local
     assert 'YAKBOX_RUN_LOCAL_E2E") != "1"' in local_e2e

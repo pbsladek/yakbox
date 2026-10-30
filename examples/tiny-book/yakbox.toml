@@ -26,7 +26,6 @@ mastering = true
 wav_sample_rate = 44100
 mp3_bitrate = "128k"
 m4b = false
-provider_concurrency = 5
 
 [retention]
 keep_successful_runs = 3

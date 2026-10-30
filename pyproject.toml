@@ -35,7 +35,6 @@ Documentation = "https://github.com/pbsladek/yakbox/tree/main/docs"
 Issues = "https://github.com/pbsladek/yakbox/issues"
 
 [project.optional-dependencies]
-credentials = ["keyring>=25.7,<26"]
 local = [
     "chatterbox-tts>=0.1.7,<0.2",
     "diffusers>=0.38.0",
@@ -99,8 +98,7 @@ default-groups = ["dev"]
 override-dependencies = [
     # chatterbox-tts 0.1.7 pins vulnerable releases. Keep these overrides
     # until upstream's published metadata moves to fixed versions.
-    # SecretStorage permits older cryptography releases affected by
-    # GHSA-g6cj-pr64-35w5; keep the complete optional-dependency graph fixed.
+    # Keep cryptography patched throughout the optional dependency graph.
     "cryptography>=50.0.0",
     "diffusers>=0.38.0",
     "gradio>=6.16.0",
@@ -150,7 +148,7 @@ branch = true
 source = ["yakbox"]
 
 [tool.coverage.report]
-fail_under = 75
+fail_under = 85
 show_missing = true
 skip_covered = true
 
@@ -175,7 +173,7 @@ source_modules = [
     "yakbox.speech.guardrails",
     "yakbox.speech.models",
 ]
-forbidden_modules = ["yakbox.cloud", "yakbox.local"]
+forbidden_modules = ["yakbox.local"]
 
 [[tool.importlinter.contracts]]
 id = "audio-is-backend-neutral"
@@ -185,7 +183,6 @@ source_modules = ["yakbox.audio"]
 forbidden_modules = [
     "yakbox.audiobook",
     "yakbox.cli",
-    "yakbox.cloud",
     "yakbox.diagnostics",
     "yakbox.local",
     "yakbox.speech",
@@ -233,21 +230,12 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-id = "backends-do-not-directly-couple"
-name = "Hosted and local backends do not directly depend on each other"
-type = "forbidden"
-source_modules = ["yakbox.cloud", "yakbox.local"]
-forbidden_modules = ["yakbox.cloud", "yakbox.local"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
 id = "subpackage-imports-are-acyclic"
 name = "Subpackage imports are acyclic"
 type = "acyclic_siblings"
 ancestors = [
     "yakbox.audio",
     "yakbox.audiobook",
-    "yakbox.cloud",
     "yakbox.diagnostics",
     "yakbox.speech",
 ]

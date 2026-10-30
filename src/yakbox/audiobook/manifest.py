@@ -72,17 +72,7 @@ class ChatterboxOptions:
     estimated_model_memory_bytes: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ResembleOptions:
-    """Voice, project, and output controls for the Resemble backend."""
-
-    voice_uuid: str
-    project_uuid: str | None = None
-    use_hd: bool = False
-    sample_rate: int | None = None
-
-
-type BackendOptions = FakeOptions | ChatterboxOptions | ResembleOptions
+type BackendOptions = FakeOptions | ChatterboxOptions
 MAX_PROVIDER_CONCURRENCY = 100
 MAX_MEDIA_CONCURRENCY = 32
 
@@ -724,26 +714,10 @@ def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
                     f"profiles.{name}.estimated_model_memory_bytes",
                 ),
             )
-        elif backend in {"resemble", "cloud"}:
-            _reject_unknown(
-                item,
-                common | {"voice_uuid", "project_uuid", "use_hd", "sample_rate"},
-                f"profiles.{name}",
-            )
-            options = ResembleOptions(
-                voice_uuid=_required_string(item, "voice_uuid", f"profiles.{name}"),
-                project_uuid=_optional_string(
-                    item.get("project_uuid"), f"profiles.{name}.project_uuid"
-                ),
-                use_hd=_boolean(item.get("use_hd", False), f"profiles.{name}.use_hd"),
-                sample_rate=_positive_int_or_none(
-                    item.get("sample_rate"), f"profiles.{name}.sample_rate"
-                ),
-            )
-        elif backend in {"remote", "chatterbox-remote"}:
+        elif backend in {"resemble", "cloud", "remote", "chatterbox-remote"}:
             raise ValidationError(
-                "Remote Chatterbox cannot be configured until its API "
-                "contract is defined"
+                f"profiles.{name}: hosted backend {backend!r} is no longer supported; "
+                "choose chatterbox-local and configure a local voice reference"
             )
         else:
             raise ValidationError(f"Unsupported backend in profile {name!r}: {backend}")

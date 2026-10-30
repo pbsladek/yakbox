@@ -5,8 +5,6 @@
 - [Local Chatterbox](local-chatterbox/README.md) — twenty-five qualified,
   provenance-tracked voices
   public-domain reference voices, auditions, and conservative worker controls.
-- [Resemble.ai](resemble/README.md) — hosted synthesis with request and
-  character budgets.
 - [Multiple voices](multiple-voices/README.md) — compare profiles and build
   separate voice editions.
 - [Pronunciation-heavy](pronunciation-heavy/README.md) — reviewed

@@ -1,8 +1,8 @@
 # yakbox documentation
 
 Yakbox is an audiobook build system first. Direct text-to-speech, voice
-conversion, local batch synthesis, and provider management use the same typed
-speech services as audiobook builds.
+conversion, and local batch synthesis use the same typed speech services as
+audiobook builds. Whisper supplies local transcription, alignment, and speech QA.
 
 - [Architecture and phased build-system plan](AUDIOBOOK_BUILD_SYSTEM_PLAN.md)
 - [Code quality standard](code-quality.md)
@@ -19,7 +19,6 @@ speech services as audiobook builds.
 - [Getting started](getting-started.md)
 - [Manifests, sources, and pronunciations](manifests-and-sources.md)
 - [Backends and direct speech](backends-and-speech.md)
-- [Resemble cloud, concurrency, and spending limits](cloud-and-budgets.md)
 - [Artifacts, cleanup, and releases](artifacts-and-releases.md)
 - [Doctor, configuration, security, and troubleshooting](operations.md)
 - [Python API](python-api.md)

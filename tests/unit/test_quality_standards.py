@@ -23,14 +23,13 @@ def test_quality_gates_are_configured() -> None:
     assert tool["ruff"]["lint"]["pylint"]["max-args"] <= 20
     assert tool["ruff"]["lint"]["pylint"]["max-positional-args"] <= 5
     assert tool["coverage"]["run"]["branch"] is True
-    assert tool["coverage"]["report"]["fail_under"] >= 75
+    assert tool["coverage"]["report"]["fail_under"] >= 85
 
     import_linter = tool["importlinter"]
     assert import_linter["root_package"] == "yakbox"
     contracts = {contract["id"]: contract for contract in import_linter["contracts"]}
     assert {
         "audio-is-backend-neutral",
-        "backends-do-not-directly-couple",
         "cli-is-an-entrypoint",
         "speech-analysis-domain-is-adapter-neutral",
         "speech-analysis-supervisor-uses-protocol",

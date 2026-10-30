@@ -167,10 +167,10 @@ def list_short_reviews(root: Path) -> tuple[dict[str, object], ...]:
     for report in sorted(root.rglob("report.json")):
         try:
             raw = _load_report(report)
-        except BuildError:
+            selected = raw.get("selected_candidate")
+            candidate = _selected_candidate(raw, selected)
+        except BuildError, ValidationError:
             continue
-        selected = raw.get("selected_candidate")
-        candidate = _selected_candidate(raw, selected)
         review_path = report.with_name("listening-review.toml")
         results.append(
             {

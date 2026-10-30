@@ -47,6 +47,7 @@ jobs:
 
   performance:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,7 +58,9 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --frozen --all-groups
-      - name: Run core performance baselines
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - name: Run core and media performance baselines
         run: uv run pytest --quiet --tb=line -m performance tests/performance
 
   audit:
@@ -72,7 +75,7 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - name: Audit default runtime
-        run: uv audit --frozen --no-extra local --no-extra credentials --no-dev
+        run: uv audit --frozen --no-extra local --no-dev
 
   local-extra-audit:
     runs-on: ubuntu-latest

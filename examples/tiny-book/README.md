@@ -23,7 +23,7 @@ Generate a completion script with `yakbox completion --shell zsh`; see the
 for installation commands for Bash, Zsh, and Fish.
 
 The fake backend creates test audio, not listening-quality narration. Replace
-the profile in `yakbox.toml` with a local Chatterbox or Resemble profile when
+the profile in `yakbox.toml` with a local Chatterbox profile when
 you are ready to render a real book.
 
 On a desktop, generate a sample and open it in your default audio player:
@@ -35,3 +35,8 @@ yakbox audition --profile default --text "Another voice check." --play
 
 While a build runs in another terminal, use `yakbox status --watch` to follow
 its chapter and stage progress. Press Ctrl+C to stop watching.
+
+To cancel the build itself, press Ctrl+C in its build terminal. Yakbox keeps
+the target locked until media writers stop; run `yakbox build` again to resume.
+See [failure recovery](../../docs/operations.md#failure-recovery) for artifact
+validation and media inspection behavior.

@@ -86,7 +86,7 @@ jobs:
           --maxfail=10
           --cov=yakbox
           --cov-branch
-          --cov-fail-under=75
+          --cov-fail-under=85
           --cov-report=xml:coverage.xml
           --junitxml=test-results.xml
       - name: Upload test diagnostics

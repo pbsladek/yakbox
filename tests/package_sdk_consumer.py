@@ -14,7 +14,6 @@ from yakbox.audiobook import (
     load_manifest,
     run_audiobook_build,
 )
-from yakbox.cloud import BatchReport, BatchRow, ResembleClient, SynthesisRequest
 from yakbox.diagnostics import DoctorReport, run_doctor
 from yakbox.speech import (
     AudioFormat,
@@ -28,7 +27,6 @@ PUBLIC_MODULES = (
     "yakbox",
     "yakbox.audio",
     "yakbox.audiobook",
-    "yakbox.cloud",
     "yakbox.diagnostics",
     "yakbox.speech",
 )
@@ -63,11 +61,9 @@ async def consume_speech() -> None:
 
 def type_surface(
     service: TextToSpeechService,
-    batch: BatchReport,
     doctor: DoctorReport,
-) -> tuple[int, int]:
-    del service, doctor
-    return batch.ok, batch.failed
+) -> tuple[bool, int]:
+    return service.capabilities.synthesis, len(doctor.diagnostics)
 
 
 def import_surface() -> None:
@@ -82,9 +78,6 @@ def references() -> tuple[object, ...]:
         ValidationError,
         YakboxError,
         load_manifest,
-        BatchRow,
-        ResembleClient,
-        SynthesisRequest,
         run_doctor,
     )
 

@@ -9,16 +9,15 @@ import os
 import re
 import shutil
 import wave
-from collections.abc import AsyncGenerator, Callable, Mapping
-from contextlib import AsyncExitStack, asynccontextmanager
+from collections.abc import Callable, Mapping
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
-from yakbox._files import atomic_write_json, sha256_file
+from yakbox._files import atomic_write_json, safe_child, sha256_file
 from yakbox.audio import (
     AudioQualityPolicy,
     assemble_m4b,
@@ -27,9 +26,11 @@ from yakbox.audio import (
     master_wav,
 )
 from yakbox.audio.master import copy_audio
+from yakbox.audio.processes import run_media
 from yakbox.audiobook.artifacts import (
     ArtifactKind,
     ArtifactRecord,
+    load_artifact_record,
     verify_artifact,
     write_artifact_record,
 )
@@ -46,7 +47,6 @@ from yakbox.audiobook.manifest import (
     ChatterboxOptions,
     FakeOptions,
     LogicalVoice,
-    ResembleOptions,
 )
 from yakbox.audiobook.performance import write_performance_report
 from yakbox.audiobook.planner import (
@@ -88,18 +88,11 @@ from yakbox.speech import (
     AudioFormat,
     BatchTextToSpeechService,
     ChatterboxSynthesisOptions,
-    CurrencyCode,
-    HostedUsageBudget,
-    HostedUsageJournalingService,
-    HostedUsageReportingService,
     HostedUsageSnapshot,
     HostedWorkEstimate,
-    PricingSourceId,
     SpeechSynthesisRequest,
     TextToSpeechService,
-    estimate_hosted_work,
     open_speech_backend,
-    validate_hosted_preflight,
 )
 from yakbox.speech.alignment import SpeechAligner, WindowSpeechAligner, lexical_tokens
 from yakbox.speech.chunking import CHATTERBOX_CHUNK_CHARACTERS, chunk_text
@@ -161,7 +154,7 @@ class BuildChangeSummary:
 
 @dataclass(frozen=True, slots=True)
 class BuildPreflight:
-    """Reuse, storage, and hosted-work estimates computed before a build."""
+    """Reuse, storage, and synthesis-work estimates computed before a build."""
 
     target: str
     profile: str
@@ -292,15 +285,6 @@ class BuildRequest:
     chapter_selector: str | None = None
     dry_run: bool = False
     resume: bool = True
-    api_key: str | None = None
-    max_submitted_characters: int | None = None
-    max_provider_requests: int | None = None
-    max_estimated_spend: Decimal | None = None
-    currency: str | None = None
-    pricing_source: str | None = None
-    price_per_character: Decimal | None = None
-    confirm_above_characters: int | None = None
-    confirm_above_requests: int | None = None
     from_stage: BuildStage | str | None = None
     through_stage: BuildStage | str | None = None
 
@@ -595,18 +579,6 @@ def _execution_collections() -> tuple[list[ArtifactRecord], list[str], list[str]
 
 
 @dataclass(frozen=True, slots=True)
-class _ExecutionContext:
-    plan: BuildPlan
-    document: NormalizedDocument
-    manifest: AudiobookManifest
-    run_id: str
-    service: TextToSpeechService
-    journal: RunJournal
-    media_semaphore: asyncio.Semaphore
-    progress: _BuildProgressTracker
-
-
-@dataclass(frozen=True, slots=True)
 class _PendingShortUtterance:
     request: SpeechSynthesisRequest
     destination: Path
@@ -631,15 +603,6 @@ async def build_audiobook(
     chapter_selector: str | None = None,
     dry_run: bool = False,
     resume: bool = True,
-    api_key: str | None = None,
-    max_submitted_characters: int | None = None,
-    max_provider_requests: int | None = None,
-    max_estimated_spend: Decimal | None = None,
-    currency: str | None = None,
-    pricing_source: str | None = None,
-    price_per_character: Decimal | None = None,
-    confirm_above_characters: int | None = None,
-    confirm_above_requests: int | None = None,
     from_stage: BuildStage | str | None = None,
     through_stage: BuildStage | str | None = None,
     progress: BuildProgressCallback | None = None,
@@ -661,33 +624,15 @@ async def build_audiobook(
         from_stage=from_stage,
         through_stage=through_stage,
     )
-    resolved_price = (
-        price_per_character
-        if price_per_character is not None
-        else target.price_per_character
-    )
-    budget = _hosted_budget(
-        target,
-        max_submitted_characters=max_submitted_characters,
-        max_provider_requests=max_provider_requests,
-        max_estimated_spend=max_estimated_spend,
-        currency=currency,
-        pricing_source=pricing_source,
-        confirm_above_characters=confirm_above_characters,
-        confirm_above_requests=confirm_above_requests,
-    )
     preflight = _preflight_for_plan(
         manifest,
         plan,
         profile,
         target,
-        price_per_character=resolved_price,
         execution_nodes=execution_nodes,
         from_stage=resolved_from,
         through_stage=resolved_through,
     )
-    if preflight.hosted_work is not None:
-        validate_hosted_preflight(budget, preflight.hosted_work)
     _validate_storage_preflight(preflight)
     _validate_stage_prerequisites(
         plan,
@@ -721,7 +666,6 @@ async def build_audiobook(
             resumed=False,
         )
     artifacts, reused, failed = _execution_collections()
-    hosted_usage: HostedUsageSnapshot | None = None
     progress_tracker = _BuildProgressTracker(progress, len(execution_nodes))
     with target_lock(manifest.root / ".yakbox", target_name):
         run_directory.mkdir(parents=True, exist_ok=resumed_run is not None)
@@ -741,9 +685,8 @@ async def build_audiobook(
                 overwrite=False,
             )
         journal = RunJournal(run_directory / "journal.ndjson", run_id)
-        prior_events: tuple[dict[str, object], ...] = ()
         if resumed_run is not None:
-            prior_events = journal.events()
+            journal.events()
             journal.append("run_resumed", fingerprint=plan.fingerprint)
         else:
             journal.append("run_started", fingerprint=plan.fingerprint)
@@ -751,11 +694,7 @@ async def build_audiobook(
             async with (
                 open_speech_backend(
                     profile.backend,
-                    api_key=api_key,
                     isolated_local=_is_local_backend(profile.backend),
-                    hosted_budget=budget,
-                    price_per_character=resolved_price,
-                    max_connections=target.provider_concurrency,
                     device=_profile_device(profile),
                     local_worker_timeout_seconds=_profile_worker_timeout(profile),
                     local_threads_per_process=_profile_threads(profile),
@@ -773,51 +712,34 @@ async def build_audiobook(
                         manifest.runtime.maximum_memory_bytes
                     ),
                 ) as service,
-                _journal_hosted_usage(service, journal, prior_events),
             ):
-                if service.capabilities.hosted:
-                    outcome = await _execute_hosted_plan(
-                        plan,
-                        execution_nodes=execution_nodes,
-                        document=document,
-                        manifest=manifest,
-                        run_id=run_id,
-                        service=service,
-                        journal=journal,
-                        concurrency=target.provider_concurrency,
-                        media_semaphore=asyncio.Semaphore(target.media_concurrency),
-                        progress=progress_tracker,
-                    )
-                else:
-                    outcome = await _execute_node_chain(
-                        execution_nodes,
-                        plan=plan,
-                        document=document,
-                        manifest=manifest,
-                        run_id=run_id,
-                        service=service,
-                        journal=journal,
-                        media_semaphore=asyncio.Semaphore(target.media_concurrency),
-                        progress=progress_tracker,
-                    )
+                outcome = await _execute_node_chain(
+                    execution_nodes,
+                    plan=plan,
+                    document=document,
+                    manifest=manifest,
+                    run_id=run_id,
+                    service=service,
+                    journal=journal,
+                    media_semaphore=asyncio.Semaphore(target.media_concurrency),
+                    progress=progress_tracker,
+                )
                 artifacts.extend(outcome.records)
                 reused.extend(outcome.reused)
                 failed.extend(outcome.failed)
-                if isinstance(service, HostedUsageReportingService):
-                    hosted_usage = await service.usage_snapshot()
         except asyncio.CancelledError:
             journal.append(
                 "run_interrupted",
                 fingerprint=plan.fingerprint,
                 error="build cancelled",
-                usage=_usage_dict(_latest_journaled_usage(journal.events())),
+                usage=None,
             )
             raise
         status = BuildStatus.FAILED if failed else BuildStatus.COMPLETE
         journal.append(
             f"run_{status.value}",
             fingerprint=plan.fingerprint,
-            usage=_usage_dict(hosted_usage),
+            usage=None,
         )
         write_performance_report(
             run_directory,
@@ -838,7 +760,7 @@ async def build_audiobook(
             reused_nodes=tuple(reused),
             failed_nodes=tuple(failed),
             run_directory=run_directory,
-            hosted_usage=hosted_usage,
+            hosted_usage=None,
             preflight=preflight,
             resumed=resumed_run is not None,
         )
@@ -864,15 +786,6 @@ async def run_audiobook_build(
         chapter_selector=request.chapter_selector,
         dry_run=request.dry_run,
         resume=request.resume,
-        api_key=request.api_key,
-        max_submitted_characters=request.max_submitted_characters,
-        max_provider_requests=request.max_provider_requests,
-        max_estimated_spend=request.max_estimated_spend,
-        currency=request.currency,
-        pricing_source=request.pricing_source,
-        price_per_character=request.price_per_character,
-        confirm_above_characters=request.confirm_above_characters,
-        confirm_above_requests=request.confirm_above_requests,
         from_stage=request.from_stage,
         through_stage=request.through_stage,
         progress=progress,
@@ -931,90 +844,12 @@ def _prepare_execution(
     )
 
 
-@asynccontextmanager
-async def _journal_hosted_usage(
-    service: TextToSpeechService,
-    journal: RunJournal,
-    prior_events: tuple[dict[str, object], ...],
-) -> AsyncGenerator[None]:
-    if not isinstance(service, HostedUsageJournalingService):
-        yield
-        return
-    previous = _latest_journaled_usage(prior_events)
-    if previous is not None:
-        await service.restore_usage(previous)
-
-    async def record(
-        snapshot: HostedUsageSnapshot,
-        submitted_characters: int,
-    ) -> None:
-        usage = _usage_dict(snapshot)
-        if usage is None:
-            raise BuildError("Hosted usage recorder received no snapshot")
-        usage["submitted_characters_this_attempt"] = submitted_characters
-        journal.append("usage_reserved", usage=usage)
-
-    service.set_usage_recorder(record)
-    try:
-        yield
-    finally:
-        service.set_usage_recorder(None)
-
-
-def _latest_journaled_usage(
-    events: tuple[dict[str, object], ...],
-) -> HostedUsageSnapshot | None:
-    for event in reversed(events):
-        value = event.get("usage")
-        if not isinstance(value, dict):
-            continue
-        usage = cast(dict[str, object], value)
-        logical_items = _journal_counter(usage.get("logical_items"), "logical_items")
-        provider_attempts = _journal_counter(
-            usage.get("provider_attempts"), "provider_attempts"
-        )
-        submitted_characters = _journal_counter(
-            usage.get("submitted_characters"), "submitted_characters"
-        )
-        ambiguous_attempts = _journal_counter(
-            usage.get("ambiguous_attempts", 0), "ambiguous_attempts"
-        )
-        spend_value = usage.get("estimated_spend")
-        try:
-            estimated_spend = (
-                Decimal(str(spend_value)) if spend_value is not None else None
-            )
-        except InvalidOperation as error:
-            raise BuildError("Invalid hosted spending value in run journal") from error
-        currency_value = usage.get("currency")
-        return HostedUsageSnapshot(
-            logical_items=logical_items,
-            provider_attempts=provider_attempts,
-            submitted_characters=submitted_characters,
-            estimated_spend=estimated_spend,
-            currency=(
-                CurrencyCode(currency_value)
-                if isinstance(currency_value, str)
-                else None
-            ),
-            ambiguous_attempts=ambiguous_attempts,
-        )
-    return None
-
-
-def _journal_counter(value: object, name: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise BuildError(f"Invalid hosted usage counter {name!r} in run journal")
-    return value
-
-
 def preflight_audiobook_build(
     manifest: AudiobookManifest,
     *,
     target_name: str = "default",
     profile_override: str | None = None,
     chapter_selector: str | None = None,
-    price_per_character: Decimal | None = None,
     from_stage: BuildStage | str | None = None,
     through_stage: BuildStage | str | None = None,
 ) -> BuildPreflight:
@@ -1050,116 +885,10 @@ def preflight_audiobook_build(
         plan,
         profile,
         target,
-        price_per_character=(
-            price_per_character
-            if price_per_character is not None
-            else target.price_per_character
-        ),
         execution_nodes=execution_nodes,
         from_stage=resolved_from,
         through_stage=resolved_through,
     )
-
-
-async def _execute_hosted_plan(
-    plan: BuildPlan,
-    *,
-    execution_nodes: tuple[PlanNode, ...],
-    document: NormalizedDocument,
-    manifest: AudiobookManifest,
-    run_id: str,
-    service: TextToSpeechService,
-    journal: RunJournal,
-    concurrency: int,
-    media_semaphore: asyncio.Semaphore,
-    progress: _BuildProgressTracker,
-) -> _ExecutionOutcome:
-    chapter_ids = tuple(dict.fromkeys(node.chapter_id for node in execution_nodes))
-    chains = tuple(
-        tuple(node for node in execution_nodes if node.chapter_id == chapter_id)
-        for chapter_id in chapter_ids
-    )
-    worker_count = min(concurrency, len(chains))
-    queue: asyncio.Queue[tuple[int, tuple[PlanNode, ...]] | None] = asyncio.Queue(
-        maxsize=max(1, 2 * worker_count)
-    )
-    stop = asyncio.Event()
-    outcomes: dict[int, _ExecutionOutcome] = {}
-
-    context = _ExecutionContext(
-        plan=plan,
-        document=document,
-        manifest=manifest,
-        run_id=run_id,
-        service=service,
-        journal=journal,
-        media_semaphore=media_semaphore,
-        progress=progress,
-    )
-    async with asyncio.TaskGroup() as group:
-        group.create_task(_produce_chains(queue, chains, worker_count))
-        for _ in range(worker_count):
-            group.create_task(_hosted_worker(queue, outcomes, stop, context))
-    ordered = tuple(outcomes[index] for index in sorted(outcomes))
-    return _ExecutionOutcome(
-        records=tuple(record for outcome in ordered for record in outcome.records),
-        reused=tuple(node for outcome in ordered for node in outcome.reused),
-        failed=tuple(node for outcome in ordered for node in outcome.failed),
-    )
-
-
-async def _produce_chains(
-    queue: asyncio.Queue[tuple[int, tuple[PlanNode, ...]] | None],
-    chains: tuple[tuple[PlanNode, ...], ...],
-    worker_count: int,
-) -> None:
-    for index, chain in enumerate(chains):
-        await queue.put((index, chain))
-    for _ in range(worker_count):
-        await queue.put(None)
-
-
-async def _hosted_worker(
-    queue: asyncio.Queue[tuple[int, tuple[PlanNode, ...]] | None],
-    outcomes: dict[int, _ExecutionOutcome],
-    stop: asyncio.Event,
-    context: _ExecutionContext,
-) -> None:
-    while True:
-        item = await queue.get()
-        if item is None:
-            return
-        index, chain = item
-        if stop.is_set():
-            for node in chain:
-                context.journal.append(
-                    "node_not_run",
-                    node_id=node.id,
-                    fingerprint=node.fingerprint,
-                    error="build stopped after another chapter failed",
-                )
-                context.progress.emit(
-                    BuildProgressEvent.NOT_RUN,
-                    node,
-                    terminal=True,
-                    error="build stopped after another chapter failed",
-                )
-            outcomes[index] = _ExecutionOutcome((), (), ())
-            continue
-        outcome = await _execute_node_chain(
-            chain,
-            plan=context.plan,
-            document=context.document,
-            manifest=context.manifest,
-            run_id=context.run_id,
-            service=context.service,
-            journal=context.journal,
-            media_semaphore=context.media_semaphore,
-            progress=context.progress,
-        )
-        outcomes[index] = outcome
-        if outcome.failed:
-            stop.set()
 
 
 async def _execute_node_chain(
@@ -1249,7 +978,6 @@ async def audition_audiobook(
     target_name: str = "default",
     text: str | None = None,
     chapter_selector: str | None = None,
-    api_key: str | None = None,
     matrix: tuple[str, ...] = (),
 ) -> tuple[ArtifactRecord, ...]:
     """Render bounded comparison samples for one or more backend profiles."""
@@ -1293,7 +1021,6 @@ async def audition_audiobook(
                 service = await stack.enter_async_context(
                     open_speech_backend(
                         profile.backend,
-                        api_key=api_key,
                         isolated_local=_is_local_backend(profile.backend),
                         device=_profile_device(profile),
                         local_worker_timeout_seconds=_profile_worker_timeout(profile),
@@ -1478,13 +1205,6 @@ def _override_audition_profile(
     if isinstance(options, FakeOptions) and key == "sample_rate":
         value = _positive_matrix_int(raw, key)
         return replace(profile, options=replace(options, sample_rate=value)), value
-    if isinstance(options, ResembleOptions):
-        if key == "sample_rate":
-            value = _positive_matrix_int(raw, key)
-            return replace(profile, options=replace(options, sample_rate=value)), value
-        if key == "use_hd":
-            value = _matrix_bool(raw, key)
-            return replace(profile, options=replace(options, use_hd=value)), value
     if isinstance(options, ChatterboxOptions):
         if key in {"cfg_weight", "exaggeration"}:
             value = _finite_matrix_float(raw, key)
@@ -1534,13 +1254,6 @@ def _finite_matrix_float(raw: str, key: str) -> float:
     return value
 
 
-def _matrix_bool(raw: str, key: str) -> bool:
-    normalized = raw.casefold()
-    if normalized not in {"true", "false"}:
-        raise ValidationError(f"Audition matrix {key} must be true or false")
-    return normalized == "true"
-
-
 def _audition_persist_snippet(
     profile: BackendProfile,
     variant_name: str,
@@ -1574,7 +1287,6 @@ async def preview_audiobook(
     profile_override: str | None = None,
     text: str | None = None,
     chapter_selector: str | None = None,
-    api_key: str | None = None,
 ) -> ArtifactRecord:
     """Render a bounded chapter/selection preview outside the production DAG."""
 
@@ -1611,7 +1323,6 @@ async def preview_audiobook(
     destination = root / f"{profile.name}.wav"
     async with open_speech_backend(
         profile.backend,
-        api_key=api_key,
         isolated_local=_is_local_backend(profile.backend),
         device=_profile_device(profile),
         local_worker_timeout_seconds=_profile_worker_timeout(profile),
@@ -2273,7 +1984,9 @@ async def _execute_node(
     logical_voice = manifest.voice(profile.voice)
     logical_voices = _node_logical_voice_names(plan, node, manifest)
     if node.stage is BuildStage.SYNTHESIZE:
-        await _synthesize_node(node, profile, target, manifest, service)
+        await _synthesize_node(
+            node, profile, target, manifest, service, media_semaphore=media_semaphore
+        )
         kind = ArtifactKind.RAW
         protected = False
         media_type = "audio/wav"
@@ -2281,7 +1994,7 @@ async def _execute_node(
         source = _dependency_output(plan, node, BuildStage.SYNTHESIZE)
         async with media_semaphore:
             if target.mastering:
-                await asyncio.to_thread(
+                await run_media(
                     master_wav,
                     source,
                     node.output,
@@ -2289,7 +2002,7 @@ async def _execute_node(
                     overwrite=True,
                 )
             else:
-                await asyncio.to_thread(
+                await run_media(
                     copy_audio,
                     source,
                     node.output,
@@ -2339,7 +2052,7 @@ async def _execute_node(
         source = _dependency_output(plan, node, BuildStage.MASTER)
         chapter = _chapter(document, node.chapter_id)
         async with media_semaphore:
-            await asyncio.to_thread(
+            await run_media(
                 encode_mp3,
                 source,
                 node.output,
@@ -2363,7 +2076,7 @@ async def _execute_node(
         media_type = "audio/mpeg"
     elif node.stage is BuildStage.INSPECT:
         async with media_semaphore:
-            await asyncio.to_thread(
+            await run_media(
                 _write_inspection_report,
                 node,
                 plan,
@@ -2407,6 +2120,8 @@ async def _synthesize_node(
     target: BuildTarget,
     manifest: AudiobookManifest,
     service: TextToSpeechService,
+    *,
+    media_semaphore: asyncio.Semaphore,
 ) -> None:
     primary_sample_rate = _resolved_speech(profile, manifest)[1]
     chunk_paths = [
@@ -2477,11 +2192,15 @@ async def _synthesize_node(
             )
         except Exception as error:
             raise _chunk_failure(node, chunk_paths, manifest.root, error) from error
-        wav_params = _normalize_synthesis_chunks(
-            node,
-            chunk_paths,
-            preferred_sample_rate=_synthesis_sample_rate(profile, primary_sample_rate),
-        )
+        async with media_semaphore:
+            wav_params = await run_media(
+                _normalize_synthesis_chunks,
+                node,
+                chunk_paths,
+                preferred_sample_rate=_synthesis_sample_rate(
+                    profile, primary_sample_rate
+                ),
+            )
         _materialize_pause_chunks(node, chunk_paths, wav_params)
         join_parts = tuple(
             WavJoinPart(
@@ -2508,7 +2227,8 @@ async def _synthesize_node(
             node=node,
             cache_fingerprints=prepared.cache_fingerprints,
         )
-        concatenate_wavs(join_parts, node.output, overwrite=True)
+        async with media_semaphore:
+            await run_media(concatenate_wavs, join_parts, node.output, overwrite=True)
         if (
             aligner is not None
             and manifest.whisper_qa.chapter_verification
@@ -3497,33 +3217,29 @@ def _quality_policy(target: BuildTarget) -> AudioQualityPolicy:
 def _matching_artifact(
     node: PlanNode, *, target: str, artifact_root: Path
 ) -> ArtifactRecord | None:
-    metadata = node.output.with_suffix(f"{node.output.suffix}.artifact.json")
-    if not metadata.is_file():
-        return None
     try:
-        raw = json.loads(metadata.read_text(encoding="utf-8"))
-        if raw.get("fingerprint") != node.fingerprint or raw.get("target") != target:
-            return None
-        record = ArtifactRecord(
-            schema_version=int(raw["schema_version"]),
-            id=str(raw["id"]),
-            kind=ArtifactKind(raw["kind"]),
-            path=(artifact_root / raw["path"]).resolve(),
-            sha256=str(raw["sha256"]),
-            size=int(raw["size"]),
-            fingerprint=str(raw["fingerprint"]),
-            target=str(raw["target"]),
-            run_id=str(raw["run_id"]),
-            protected=bool(raw["protected"]),
-            dependencies=tuple(raw.get("dependencies", [])),
-            media_type=raw.get("media_type"),
-            logical_voice=raw.get("logical_voice"),
-            logical_voices=tuple(raw.get("logical_voices", [])),
-            reference_audio_sha256=raw.get("reference_audio_sha256"),
-            reference_rights_basis=raw.get("reference_rights_basis"),
-            watermark_disclosure=raw.get("watermark_disclosure"),
+        metadata = safe_child(
+            artifact_root,
+            node.output.with_suffix(f"{node.output.suffix}.artifact.json"),
         )
-    except OSError, KeyError, TypeError, ValueError, json.JSONDecodeError:
+        record = load_artifact_record(metadata, root=artifact_root)
+    except ArtifactError, OSError:
+        return None
+    expected_kind = {
+        BuildStage.SYNTHESIZE: ArtifactKind.RAW,
+        BuildStage.MASTER: ArtifactKind.MASTER,
+        BuildStage.ENCODE_MP3: ArtifactKind.DELIVERY,
+        BuildStage.INSPECT: ArtifactKind.REPORT,
+        BuildStage.VERIFY_MANUSCRIPT: ArtifactKind.REPORT,
+    }[node.stage]
+    if (
+        record.fingerprint != node.fingerprint
+        or record.target != target
+        or record.id != node.id
+        or record.kind is not expected_kind
+        or record.dependencies != node.dependencies
+        or record.path != node.output.resolve()
+    ):
         return None
     valid, _ = verify_artifact(record)
     return record if valid else None
@@ -3559,15 +3275,6 @@ def _resolved_speech(
     ChatterboxSynthesisOptions | None,
 ]:
     options = profile.options
-    if isinstance(options, ResembleOptions):
-        return (
-            options.voice_uuid,
-            options.sample_rate,
-            options.project_uuid,
-            options.use_hd,
-            None,
-            None,
-        )
     if isinstance(options, FakeOptions):
         return profile.voice, options.sample_rate, None, False, None, None
     if isinstance(options, ChatterboxOptions):
@@ -3630,8 +3337,6 @@ def _synthesis_sample_rate(
 
 
 def _watermark_disclosure(profile: BackendProfile) -> str:
-    if isinstance(profile.options, ResembleOptions):
-        return "Provider watermarking behavior is governed by the Resemble account/API"
     if isinstance(profile.options, ChatterboxOptions):
         return (
             "Yakbox adds no watermark; local Chatterbox embeds its upstream "
@@ -3656,7 +3361,9 @@ def _normalize_synthesis_chunks(
     params = tuple(_wav_params(path) for path in speech_paths)
     if all(item == params[0] for item in params[1:]):
         return params[0]
-    for path in speech_paths:
+    for path, shape in zip(speech_paths, params, strict=True):
+        if shape == (1, 3, preferred_sample_rate):
+            continue
         normalized = path.with_name(f"{path.stem}.normalized.wav")
         try:
             master_wav(
@@ -4023,7 +3730,6 @@ def _preflight_for_plan(
     profile: BackendProfile,
     target: BuildTarget,
     *,
-    price_per_character: Decimal | None,
     execution_nodes: tuple[PlanNode, ...] | None = None,
     from_stage: BuildStage = BuildStage.SYNTHESIZE,
     through_stage: BuildStage = BuildStage.INSPECT,
@@ -4050,11 +3756,6 @@ def _preflight_for_plan(
         synthesis_nodes,
     )
     texts = cache_analysis.texts
-    hosted_work = (
-        estimate_hosted_work(texts, price_per_character=price_per_character)
-        if profile.backend in {"resemble", "cloud"}
-        else None
-    )
     chapter_characters = {
         node.chapter_id: sum(
             len(chunk) for chunk in node.chunks if _PAUSE.fullmatch(chunk) is None
@@ -4090,7 +3791,7 @@ def _preflight_for_plan(
         estimated_output_bytes=estimated_output_bytes,
         available_bytes=shutil.disk_usage(storage_path).free,
         storage_budget_bytes=target.storage_budget_bytes,
-        hosted_work=hosted_work,
+        hosted_work=None,
         reusable_node_ids=tuple(sorted(reusable)),
         change_summary=_compare_to_previous_success(manifest, plan),
         from_stage=from_stage,
@@ -4197,7 +3898,7 @@ def _uncached_synthesis_texts(
     profile: BackendProfile,
     nodes: tuple[PlanNode, ...],
 ) -> tuple[str, ...]:
-    """Compatibility wrapper for callers that only need hosted work text."""
+    """Return synthesis text for compatibility with earlier cache-analysis callers."""
     return _analyze_synthesis_cache(manifest, profile, nodes).texts
 
 
@@ -4567,52 +4268,6 @@ def _result_dict(result: BuildResult) -> dict[str, object]:
             else None
         ),
     }
-
-
-def _hosted_budget(
-    target: BuildTarget,
-    *,
-    max_submitted_characters: int | None,
-    max_provider_requests: int | None,
-    max_estimated_spend: Decimal | None,
-    currency: str | None,
-    pricing_source: str | None,
-    confirm_above_characters: int | None,
-    confirm_above_requests: int | None,
-) -> HostedUsageBudget:
-    resolved_currency = currency or target.currency
-    resolved_pricing_source = pricing_source or target.pricing_source
-    return HostedUsageBudget(
-        max_submitted_characters=(
-            max_submitted_characters
-            if max_submitted_characters is not None
-            else target.max_submitted_characters
-        ),
-        max_provider_requests=(
-            max_provider_requests
-            if max_provider_requests is not None
-            else target.max_provider_requests
-        ),
-        max_estimated_spend=(
-            max_estimated_spend
-            if max_estimated_spend is not None
-            else target.max_estimated_spend
-        ),
-        currency=CurrencyCode(resolved_currency) if resolved_currency else None,
-        pricing_source=PricingSourceId(resolved_pricing_source)
-        if resolved_pricing_source
-        else None,
-        confirm_above_characters=(
-            confirm_above_characters
-            if confirm_above_characters is not None
-            else target.confirm_above_characters
-        ),
-        confirm_above_requests=(
-            confirm_above_requests
-            if confirm_above_requests is not None
-            else target.confirm_above_requests
-        ),
-    )
 
 
 def _usage_dict(snapshot: HostedUsageSnapshot | None) -> dict[str, object] | None:

@@ -41,8 +41,6 @@ def _backend_versions(backend: str) -> dict[str, str]:
     packages = ["yakbox"]
     if backend in {"local", "chatterbox", "chatterbox-local"}:
         packages.extend(("chatterbox-tts", "torch", "torchaudio"))
-    elif backend in {"resemble", "cloud"}:
-        packages.append("httpx")
     return {name: _package_version(name) for name in packages}
 
 

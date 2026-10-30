@@ -47,7 +47,6 @@ wav_sample_rate = 44100
 mp3_bitrate = "192k"
 m4b = false
 m4b_bitrate = "192k"
-provider_concurrency = 5
 media_concurrency = 2
 
 [targets.release]

@@ -17,6 +17,7 @@ from yakbox._files import (
     safe_child,
     sha256_file,
 )
+from yakbox.audio.processes import run_command
 from yakbox.errors import ArtifactError, BackendUnavailableError, ValidationError
 from yakbox.fingerprints import media_tool_versions
 from yakbox.speech.analysis_fingerprints import semantic_fingerprint
@@ -153,6 +154,8 @@ class CanonicalAudioPreparer:
                 "error",
                 "-i",
                 str(source),
+                "-map",
+                "0:a:0",
                 "-map_metadata",
                 "-1",
                 "-vn",
@@ -231,13 +234,7 @@ def _probe_audio_shape(path: Path) -> tuple[int, int, int]:
         str(path),
     ]
     try:
-        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        completed = run_command(command, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ArtifactError("FFprobe could not inspect analysis audio") from error
     if completed.returncode:
@@ -368,12 +365,13 @@ def _read_pcm_shape(path: Path) -> tuple[int, int]:
 
 def _preprocessing_fingerprint() -> str:
     return semantic_fingerprint(
-        "canonical-audio-preprocessing-v1",
+        "canonical-audio-preprocessing-v2",
         {
             "version": CANONICAL_AUDIO_VERSION,
             "sample_rate": CANONICAL_SAMPLE_RATE,
             "sample_width": CANONICAL_SAMPLE_WIDTH,
             "channels": CANONICAL_CHANNELS,
+            "audio_stream": "0:a:0",
             "channel_mix": "ffmpeg-default-mono",
             "sample_format": "s16",
             "dither": "ffmpeg-default",
@@ -384,13 +382,7 @@ def _preprocessing_fingerprint() -> str:
 
 def _run_ffmpeg(command: list[str]) -> None:
     try:
-        completed = subprocess.run(  # noqa: S603 - validated argv, no shell
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
+        completed = run_command(command, timeout=600)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ArtifactError(
             "FFmpeg could not prepare canonical analysis audio"

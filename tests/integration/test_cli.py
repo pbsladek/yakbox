@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
 import tomllib
-from collections.abc import Coroutine
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,8 +11,6 @@ from click.testing import CliRunner
 from tests.schema_helpers import validate_contract
 
 from yakbox.cli import main
-from yakbox.cloud import Page
-from yakbox.speech import AudioFormat, SpeechArtifact
 from yakbox.speech.analysis_migration import preview_manifest_migration
 from yakbox.speech.analysis_runtime_install import AnalysisRuntimeInstaller
 
@@ -523,34 +519,6 @@ def test_json_usage_errors_use_stable_envelope_and_exit_two() -> None:
     validate_contract("cli-output", payload)
 
 
-def test_ctrl_c_uses_exit_130_in_human_and_json_modes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    script = tmp_path / "script.txt"
-    script.write_text("Tiny line.\n", encoding="utf-8")
-    monkeypatch.setenv("RESEMBLE_API_KEY", "test")
-
-    def interrupted(coroutine: Coroutine[object, object, object]) -> object:
-        coroutine.close()
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr("yakbox.cli.asyncio.run", interrupted)
-    human = CliRunner().invoke(main, ["cloud", "batch", str(script)])
-    assert human.exit_code == 130
-    assert "Aborted!" in human.output
-
-    machine = CliRunner().invoke(
-        main,
-        ["--json", "cloud", "batch", str(script)],
-    )
-    assert machine.exit_code == 130
-    payload = json.loads(machine.output)
-    assert payload["status"] == "aborted"
-    assert payload["exit_code"] == 130
-    validate_contract("cli-output", payload)
-
-
 def test_init_validate_plan_and_doctor_json(tmp_path: Path) -> None:
     runner = CliRunner()
     workspace = tmp_path / "book"
@@ -783,175 +751,6 @@ def test_build_dry_run_and_preview_are_audiobook_first(tmp_path: Path) -> None:
     assert "previews" in Path(artifact["path"]).parts
     validate_contract("cli-output", preview_payload)
     validate_contract("audiobook-artifact", artifact)
-
-
-def test_cloud_batch_confirmation_happens_before_credentials_or_network(
-    tmp_path: Path,
-) -> None:
-    script = tmp_path / "script.txt"
-    script.write_text("Hello hosted world.\n", encoding="utf-8")
-    output = tmp_path / "output"
-    runner = CliRunner()
-
-    refused = runner.invoke(
-        main,
-        [
-            "cloud",
-            "batch",
-            str(script),
-            "--out-dir",
-            str(output),
-            "--voice-uuid",
-            "voice",
-            "--confirm-above-characters",
-            "0",
-        ],
-    )
-    assert refused.exit_code == 1
-    assert "--yes" in refused.output
-    assert not output.exists()
-
-    dry_run = runner.invoke(
-        main,
-        [
-            "--json",
-            "cloud",
-            "batch",
-            str(script),
-            "--out-dir",
-            str(output),
-            "--voice-uuid",
-            "voice",
-            "--confirm-above-characters",
-            "0",
-            "--dry-run",
-        ],
-    )
-    assert dry_run.exit_code == 0, dry_run.output
-    payload = json.loads(dry_run.output)
-    assert payload["data"]["preflight"]["logical_items"] == 1
-    assert payload["data"]["results"][0]["status"] == "not_run"
-    assert not output.exists()
-    validate_contract("cli-output", payload)
-    validate_contract("batch-report", payload["data"])
-
-
-def test_cloud_batch_json_reports_partial_failure_and_effective_exit_code(
-    tmp_path: Path,
-) -> None:
-    script = tmp_path / "script.txt"
-    script.write_text("x" * 3_001, encoding="utf-8")
-    runner = CliRunner()
-    common = [
-        "--json",
-        "cloud",
-        "batch",
-        str(script),
-        "--voice-uuid",
-        "voice",
-        "--dry-run",
-        "--no-report",
-    ]
-
-    failed = runner.invoke(main, common)
-    assert failed.exit_code == 1, failed.output
-    failed_payload = json.loads(failed.output)
-    assert failed_payload["status"] == "partial_failure"
-    assert failed_payload["exit_code"] == 1
-    assert failed_payload["data"]["summary"]["failed"] == 1
-    validate_contract("cli-output", failed_payload)
-
-    ignored = runner.invoke(main, [*common, "--ignore-errors"])
-    assert ignored.exit_code == 0, ignored.output
-    ignored_payload = json.loads(ignored.output)
-    assert ignored_payload["status"] == "partial_failure"
-    assert ignored_payload["exit_code"] == 0
-    assert ignored_payload["data"]["summary"]["failed"] == 1
-    validate_contract("cli-output", ignored_payload)
-
-
-def test_cloud_profile_reads_optional_keyring_without_exposing_secret(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("RESEMBLE_API_KEY", raising=False)
-    monkeypatch.setenv("YAKBOX_CONFIG", str(tmp_path / "missing.toml"))
-    captured: list[str] = []
-    keyring = SimpleNamespace(
-        get_password=lambda service, profile: (
-            "keyring-secret"
-            if (service, profile) == ("yakbox/resemble", "studio")
-            else None
-        )
-    )
-    real_find_spec = importlib.util.find_spec
-    monkeypatch.setattr(
-        "yakbox.cli.importlib.util.find_spec",
-        lambda name: object() if name == "keyring" else real_find_spec(name),
-    )
-    monkeypatch.setattr(
-        "yakbox.cli.importlib.import_module",
-        lambda name: keyring if name == "keyring" else __import__(name),
-    )
-
-    async def list_projects(api_key: str, page: int, page_size: int) -> Page[object]:
-        captured.append(api_key)
-        assert (page, page_size) == (1, 10)
-        return Page(items=(), page=1, page_count=1, total_results=0)
-
-    monkeypatch.setattr("yakbox.cli._list_projects", list_projects)
-    result = CliRunner().invoke(
-        main,
-        ["--json", "cloud", "--profile", "studio", "projects", "list"],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured == ["keyring-secret"]
-    assert "keyring-secret" not in result.output
-
-
-def test_generic_hosted_tts_uses_keyring_before_legacy_config(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = tmp_path / "config.toml"
-    config.write_text('[cloud]\napi_key = "legacy-secret"\n', encoding="utf-8")
-    monkeypatch.delenv("RESEMBLE_API_KEY", raising=False)
-    monkeypatch.setenv("YAKBOX_CONFIG", str(config))
-    monkeypatch.setattr(
-        "yakbox.cli._keyring_password",
-        lambda profile: "keyring-secret" if profile == "default" else None,
-    )
-    captured: list[str | None] = []
-
-    async def direct_tts(
-        *_args: object, **kwargs: object
-    ) -> tuple[SpeechArtifact, None]:
-        captured.append(
-            kwargs["api_key"] if isinstance(kwargs["api_key"], str) else None
-        )
-        return (
-            SpeechArtifact(
-                path=tmp_path / "speech.wav",
-                backend="cloud",
-                voice="narrator",
-                output_format=AudioFormat.WAV,
-                bytes_written=1,
-                sha256="digest",
-            ),
-            None,
-        )
-
-    monkeypatch.setattr("yakbox.cli._direct_tts", direct_tts)
-    result = CliRunner().invoke(
-        main,
-        ["--json", "tts", "hello", "--backend", "cloud", "--yes"],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured == ["keyring-secret"]
-    assert "keyring-secret" not in result.output
-    assert "legacy-secret" not in result.output
 
 
 def test_local_batch_rejects_hosted_backends_before_execution(tmp_path: Path) -> None:

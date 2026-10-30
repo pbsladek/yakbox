@@ -153,11 +153,7 @@ class HostedUsageBudget:
 class SpeechBackendOptions:
     """Typed configuration for opening a speech backend."""
 
-    api_key: str | None = None
     isolated_local: bool = False
-    hosted_budget: HostedUsageBudget | None = None
-    price_per_character: Decimal | None = None
-    max_connections: int | None = None
     device: str | None = None
     local_worker_timeout_seconds: float = 3_600
     local_threads_per_process: int = 1

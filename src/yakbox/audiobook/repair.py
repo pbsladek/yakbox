@@ -408,7 +408,6 @@ async def generate_repair_session(
     takes: int = 4,
     minimum_passing_takes: int | None = None,
     whisper_qa: bool = True,
-    api_key: str | None = None,
 ) -> RepairSession:
     """Generate reviewable takes while keeping each backend worker warm."""
     if not 1 <= takes <= _MAXIMUM_REPAIR_TAKES:
@@ -442,7 +441,6 @@ async def generate_repair_session(
             aligner=aligner,
             services=services,
             stack=stack,
-            api_key=api_key,
         )
     atomic_write_json(session.report_path, session.to_dict(workspace=manifest.root))
     return session
@@ -455,7 +453,6 @@ async def generate_repair_batch(
     takes: int = 4,
     minimum_passing_takes: int | None = None,
     whisper_qa: bool = True,
-    api_key: str | None = None,
 ) -> RepairBatchGeneration:
     """Generate several repair sessions with shared models and one review package."""
     if not plans:
@@ -502,7 +499,6 @@ async def generate_repair_batch(
                 aligner=aligner,
                 services=services,
                 stack=stack,
-                api_key=api_key,
             )
             atomic_write_json(
                 session.report_path,
@@ -532,7 +528,6 @@ async def _generate_session_with_services(
     aligner: WindowSpeechAligner | None,
     services: dict[tuple[str, str | None], TextToSpeechService],
     stack: AsyncExitStack,
-    api_key: str | None,
 ) -> RepairSession:
     generated: list[RepairTake] = []
     passing = 0
@@ -545,7 +540,6 @@ async def _generate_session_with_services(
             aligner=aligner,
             services=services,
             stack=stack,
-            api_key=api_key,
         )
         generated.append(take)
         passing += take.accepted
@@ -957,7 +951,6 @@ async def _generate_take(
     aligner: WindowSpeechAligner | None,
     services: dict[tuple[str, str | None], TextToSpeechService],
     stack: AsyncExitStack,
-    api_key: str | None,
 ) -> RepairTake:
     directory = root / f"take-{number:02d}"
     paths: list[Path] = []
@@ -973,7 +966,6 @@ async def _generate_take(
             profile,
             services=services,
             stack=stack,
-            api_key=api_key,
             log_path=root / "logs" / "local-worker.log",
         )
         destination = directory / f"{chunk.index + 1:04d}-{chunk.id}.wav"
@@ -1073,7 +1065,6 @@ async def _repair_service(
     *,
     services: dict[tuple[str, str | None], TextToSpeechService],
     stack: AsyncExitStack,
-    api_key: str | None,
     log_path: Path,
 ) -> TextToSpeechService:
     from yakbox.audiobook.build import (  # noqa: PLC0415 - avoids build cycle
@@ -1090,7 +1081,6 @@ async def _repair_service(
     service = await stack.enter_async_context(
         open_speech_backend(
             profile.backend,
-            api_key=api_key,
             isolated_local=_is_local_backend(profile.backend),
             device=_profile_device(profile),
             local_worker_timeout_seconds=_profile_worker_timeout(profile),

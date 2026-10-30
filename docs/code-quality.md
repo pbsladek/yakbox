@@ -92,12 +92,10 @@ request and release. The contracts in `pyproject.toml` enforce that:
 
 - application modules do not import the CLI entrypoint (`__main__` is the
   intentional exception);
-- speech models, capabilities, and guardrails do not depend on concrete hosted
-  or local backends;
+- speech models, capabilities, and guardrails do not depend on concrete local backends;
 - audio processing does not depend on audiobook orchestration, diagnostics,
   speech, or concrete backends;
-- hosted and local backends do not directly depend on each other; and
-- imports within the audio, audiobook, cloud, diagnostics, and speech packages
+- imports within the audio, audiobook, diagnostics, and speech packages
   remain acyclic.
 
 Run `uv run lint-imports --no-cache` after moving responsibilities or changing
@@ -151,7 +149,7 @@ Interface coverage is enforced separately from statement coverage:
   `cli_help.py`; new command families should move into cohesive modules rather
   than raising the cap;
 - the public SDK's exports, signatures, enum members, and exception codes match
-  `tests/public-api-v1.yaml`;
+  `tests/public-api-v2.yaml`;
 - every public callable and public method has a docstring, and every export is
   named in `docs/python-api.md`;
 - the built wheel is installed into an isolated virtual environment, then
@@ -159,8 +157,7 @@ Interface coverage is enforced separately from statement coverage:
   resolving the source tree;
 - schema tests reject invalid envelopes instead of validating only
   producer-generated examples; and
-- credential tests cover explicit, environment, keyring, legacy-config, and
-  missing values in precedence order.
+- local-only regression tests reject retired hosted commands and backends.
 
 Stable machine error codes use lowercase snake case and do not depend on Python
 class names. CLI JSON includes a `command` discriminator, and its declared exit
@@ -198,7 +195,7 @@ The default suite is deterministic and offline. Provider calls use mocks, audio
 builds prefer the fake backend, and socket access remains limited to loopback.
 Live and performance suites require explicit markers and opt-in configuration.
 
-Branch-aware project coverage must stay at or above 75%. This is a floor, not a
+Branch-aware project coverage must stay at or above 85%. This is a floor, not a
 goal. New behavior and bug fixes need tests for the success path, expected
 failure path, and important branches. Changed safety-critical code—artifact
 commits, resume validation, cleanup, budgets, schemas, and credential
@@ -213,8 +210,8 @@ operations.
 ### Mutation testing
 
 The weekly Linux assurance workflow runs Mutmut over the covered lines in the
-safety-critical filesystem, runtime-contract, artifact, journal, and hosted
-guardrail modules listed under `[tool.mutmut]`. It requires at least an 80%
+safety-critical filesystem, runtime-contract, artifact, journal, and compatibility-guardrail
+modules listed under `[tool.mutmut]`. It requires at least an 80%
 mutation score, rejects mutants with no associated tests, and uploads the JSON
 statistics for review. The initial baseline is 261 killed of 315 total mutants
 (82.86%), with no untested, timed-out, suspicious, interrupted, or crashing

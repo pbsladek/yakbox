@@ -6,13 +6,12 @@
 yakbox backends list
 yakbox backends capabilities fake
 yakbox backends capabilities chatterbox-local
-yakbox backends capabilities resemble
 ```
 
 `fake` is deterministic test audio. `chatterbox-local` is the on-device
-PyTorch backend. `resemble` is hosted Resemble.ai. A remotely hosted
-Chatterbox backend is intentionally unavailable until a real service contract
-is selected and verified.
+PyTorch backend. Whisper and the other speech-analysis adapters run locally
+through isolated workers; they are analysis engines rather than TTS backends.
+Hosted speech backends are no longer supported.
 
 ## Local Chatterbox
 
@@ -101,13 +100,12 @@ printf 'Piped text.' | yakbox tts --text-file - --backend fake --out pipe.wav
 ```
 
 The direct commands and audiobook nodes share validation, backend resolution,
-artifact models, hosted-budget checks, and errors. Direct commands are useful
+artifact models, and errors. Direct commands are useful
 for testing and automation, but the audiobook lifecycle is the primary
 interface for chapter-scale work.
 
-`yakbox batch` is local-only. It rejects `cloud` and `resemble` backend aliases
-so hosted work cannot bypass confirmation, budget, journal, and resume rules.
-Use `yakbox cloud batch` for provider batches.
+`yakbox batch` runs local synthesis sequentially. Use audiobook builds for
+chunk caching, durable journals, and resumable chapter-scale work.
 
 ## Audition matrices
 
