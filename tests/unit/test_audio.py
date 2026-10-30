@@ -42,8 +42,10 @@ def test_inspection_translates_timeout_and_malformed_provider_output(
         inspect_audio(audio)
 
 
+@pytest.mark.parametrize("silence_start", ["0", "4.16667e-05", "4.16667E-05"])
 def test_inspection_reports_loudness_silence_and_quality_gates(
     tmp_path: Path,
+    silence_start: str,
 ) -> None:
     audio = tmp_path / "quality.wav"
     audio.write_bytes(b"RIFF-quality")
@@ -63,7 +65,8 @@ def test_inspection_reports_loudness_silence_and_quality_gates(
         returncode=0,
         stdout="",
         stderr=(
-            "silence_start: 0\nsilence_end: 0.5\nsilence_start: 8.0\n"
+            f"silence_start: {silence_start}\n"
+            "silence_end: 0.5\nsilence_start: 8.0\n"
             "Integrated loudness:\n I: -24.0 LUFS\n"
             "Loudness range:\n LRA: 4.0 LU\n"
             "True peak:\n Peak: -0.5 dBFS\n"

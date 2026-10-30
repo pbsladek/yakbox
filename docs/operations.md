@@ -150,9 +150,10 @@ consistently, including files with multiple audio tracks. Quality measurements
 are cached independently of policy limits for an unchanged file within the
 current process. Changing a policy re-evaluates the stored measurements;
 changing the file invalidates them. Edge-silence limits below 250 ms are
-measured without the former 250 ms detection floor. Media diagnostics are
-drained continuously with a bounded in-memory tail; required quality metrics
-are extracted as they arrive.
+measured without the former 250 ms detection floor. Decimal and scientific
+notation in FFmpeg timestamps are supported, including silence starts within
+one sample of zero. Media diagnostics are drained continuously with a bounded
+in-memory tail; required quality metrics are extracted as they arrive.
 
 Existing mastered, delivery, and inspection artifacts need to rebuild under
 the updated media algorithms.

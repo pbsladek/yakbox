@@ -14,7 +14,7 @@ _METRICS = {
     "peak": re.compile(r"\bPeak:\s*(-?(?:inf|\d+(?:\.\d+)?))\s+dBFS", re.I),
     "range": re.compile(r"\bLRA:\s*(\d+(?:\.\d+)?)\s+LU", re.I),
 }
-_SILENCE = re.compile(r"silence_(start|end):\s*(\d+(?:\.\d+)?)")
+_SILENCE = re.compile(r"silence_(start|end):\s*([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)")
 _EDGE_TOLERANCE = 0.05
 
 

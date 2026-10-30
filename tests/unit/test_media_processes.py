@@ -246,6 +246,23 @@ def test_quality_edges_survive_truncated_diagnostic_history() -> None:
     assert capture.result(10) == pytest.approx((-18, -3, 1, 0.2, 0.2))
 
 
+@pytest.mark.parametrize("start", ["0", "+4.16667e-05", "-4.16667e-05"])
+def test_quality_capture_parses_submillisecond_silence_edges(start: str) -> None:
+    capture = QualityCapture()
+    for line in (
+        f"silence_start: {start}",
+        "silence_end: 2e-04",
+        "silence_start: 9.9998e+00",
+        "silence_end: 1E+01",
+        "I: -18 LUFS",
+        "Peak: -3 dBFS",
+        "LRA: 1 LU",
+    ):
+        capture.consume(line)
+
+    assert capture.result(10) == pytest.approx((-18, -3, 1, 0.0002, 0.0002))
+
+
 @pytest.mark.parametrize("missing", ["I: -18 LUFS", "Peak: -3 dBFS", "LRA: 1 LU"])
 def test_quality_capture_rejects_incomplete_successful_output(missing: str) -> None:
     capture = QualityCapture()
