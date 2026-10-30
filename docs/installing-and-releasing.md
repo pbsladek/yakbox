@@ -27,10 +27,10 @@ reviewed security overrides:
 
 <!-- x-release-please-start-version -->
 ```console
-uv tool install --python 3.14 "yakbox[local]==0.4.0" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.4.0/constraints/chatterbox-security-overrides.txt
-uv tool install --python 3.14 "yakbox[local,alignment]==0.4.0" \
-  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.4.0/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local]==0.4.1" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.4.1/constraints/chatterbox-security-overrides.txt
+uv tool install --python 3.14 "yakbox[local,alignment]==0.4.1" \
+  --overrides https://raw.githubusercontent.com/pbsladek/yakbox/v0.4.1/constraints/chatterbox-security-overrides.txt
 ```
 <!-- x-release-please-end -->
 
@@ -54,7 +54,7 @@ so all entries in the checksum manifest can be verified:
 
 <!-- x-release-please-start-version -->
 ```console
-gh release download v0.4.0 --repo pbsladek/yakbox --dir yakbox-release
+gh release download v0.4.1 --repo pbsladek/yakbox --dir yakbox-release
 cd yakbox-release
 shasum -a 256 -c SHA256SUMS
 uv tool install --python 3.14 ./yakbox-*.whl

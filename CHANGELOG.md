@@ -2,6 +2,13 @@
 
 Release Please maintains this file from Conventional Commits.
 
+## [0.4.1](https://github.com/pbsladek/yakbox/compare/v0.4.0...v0.4.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **deps:** patch vulnerable dependencies and refresh lockfiles  ([#41](https://github.com/pbsladek/yakbox/issues/41)) ([8c9bbe6](https://github.com/pbsladek/yakbox/commit/8c9bbe6b521d7b0131404e1aab955192fd9161b1))
+
 ## [0.4.0](https://github.com/pbsladek/yakbox/compare/v0.3.2...v0.4.0) (2026-10-14)
 
 
