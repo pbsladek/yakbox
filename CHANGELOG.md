@@ -2,6 +2,13 @@
 
 Release Please maintains this file from Conventional Commits.
 
+## [0.4.2](https://github.com/pbsladek/yakbox/compare/v0.4.1...v0.4.2) (2026-11-07)
+
+
+### Maintenance
+
+* **deps:** bump the python group across 2 directories with 2 updates ([#36](https://github.com/pbsladek/yakbox/issues/36)) ([b5b183e](https://github.com/pbsladek/yakbox/commit/b5b183e205f6d8d113c75e6c52984b584c02b850))
+
 ## [0.4.1](https://github.com/pbsladek/yakbox/compare/v0.4.0...v0.4.1) (2026-10-30)
 
 
