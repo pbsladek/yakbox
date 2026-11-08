@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 import re
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+from difflib import get_close_matches
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
@@ -243,28 +245,28 @@ class AudiobookManifest:
         for profile in self.profiles:
             if profile.name == name:
                 return profile
-        raise ValidationError(f"Unknown profile: {name}")
+        raise _unknown_name("profile", name, (item.name for item in self.profiles))
 
     def target(self, name: str) -> BuildTarget:
         """Return a named build target or raise `ValidationError`."""
         for target in self.targets:
             if target.name == name:
                 return target
-        raise ValidationError(f"Unknown target: {name}")
+        raise _unknown_name("target", name, (item.name for item in self.targets))
 
     def voice(self, name: str) -> LogicalVoice:
         """Return a named logical voice or raise `ValidationError`."""
         for voice in self.voices:
             if voice.name == name:
                 return voice
-        raise ValidationError(f"Unknown logical voice: {name}")
+        raise _unknown_name("logical voice", name, (item.name for item in self.voices))
 
     def character(self, name: str) -> CharacterRole:
         """Return a configured narrator or character role."""
         for character in self.characters:
             if character.name == name:
                 return character
-        raise ValidationError(f"Unknown character: {name}")
+        raise _unknown_name("character", name, (item.name for item in self.characters))
 
     def profile_for_speaker(
         self,
@@ -327,6 +329,14 @@ _ROOT_KEYS = {
     "source",
     "retention",
 }
+
+
+def _unknown_name(kind: str, name: str, choices: Iterable[str]) -> ValidationError:
+    message = f"Unknown {kind}: {name}"
+    matches = get_close_matches(name, sorted(choices), n=3)
+    if matches:
+        message += ". Did you mean " + ", ".join(repr(item) for item in matches) + "?"
+    return ValidationError(message)
 
 
 def load_manifest(path: Path) -> AudiobookManifest:

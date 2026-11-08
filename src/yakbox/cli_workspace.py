@@ -5,15 +5,21 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import NoReturn
 
 import click
 from click.shell_completion import ShellComplete, get_completion_class
 
-from yakbox._files import atomic_write_bytes
+from yakbox._files import atomic_write_bytes, safe_child
+from yakbox.audiobook.manifest import BookMetadata
+from yakbox.errors import YakboxError
 
 
 def register_workspace_commands(
-    main: click.Group, *, emit: Callable[[dict[str, object], str], None]
+    main: click.Group,
+    *,
+    emit: Callable[[dict[str, object], str], None],
+    fail: Callable[[Exception], NoReturn],
 ) -> None:
     """Register workspace helpers without importing the CLI composition root."""
 
@@ -22,19 +28,42 @@ def register_workspace_commands(
     @click.option("--title", default="My Audiobook", help="Set the new book title.")
     @click.option("--author", default="Author Name", help="Set the new book author.")
     @click.option(
+        "--narrator", default="Narrator Name", help="Set the narrator credit."
+    )
+    @click.option("--language", default="en", help="Set the book language metadata.")
+    @click.option(
         "--backend",
         type=click.Choice(["fake", "chatterbox-local"]),
         default="fake",
         help="Configure the starter profile for this speech backend.",
     )
-    def init_command(directory: Path, title: str, author: str, backend: str) -> None:
+    def init_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
+        directory: Path,
+        title: str,
+        author: str,
+        narrator: str,
+        language: str,
+        backend: str,
+    ) -> None:
         """Initialize a minimal audiobook workspace."""
-        for name, value in (("title", title), ("author", author)):
+        for name, value in (
+            ("title", title),
+            ("author", author),
+            ("narrator", narrator),
+            ("language", language),
+        ):
             if not value.strip():
                 raise click.BadParameter("must not be blank", param_hint=f"--{name}")
-        manifest, source = _initialize_workspace(
-            directory, title, author, _starter_profile(backend)
-        )
+        try:
+            manifest, source = _initialize_workspace(
+                directory,
+                BookMetadata(
+                    title=title, author=author, narrator=narrator, language=language
+                ),
+                _starter_profile(backend),
+            )
+        except (YakboxError, OSError) as error:
+            fail(error)
         emit({"manifest": str(manifest), "source": str(source)}, f"Created {manifest}")
 
     @main.command("completion")
@@ -61,11 +90,12 @@ def register_workspace_commands(
 
 
 def _initialize_workspace(
-    directory: Path, title: str, author: str, profile: str
+    directory: Path, book: BookMetadata, profile: str
 ) -> tuple[Path, Path]:
     root = directory.resolve()
-    manifest = root / "yakbox.toml"
-    source = root / "source" / "book.md"
+    manifest = safe_child(root, root / "yakbox.toml")
+    source = safe_child(root, root / "source" / "book.md")
+    pronunciation_path = safe_child(root, root / "pronunciations.toml")
     if manifest.exists():
         raise click.ClickException(f"Manifest already exists: {manifest}")
     source.parent.mkdir(parents=True, exist_ok=True)
@@ -75,10 +105,10 @@ sources = ["source/book.md"]
 pronunciations = "pronunciations.toml"
 
 [book]
-title = {_toml_string(title)}
-author = {_toml_string(author)}
-narrator = "Narrator Name"
-language = "en"
+title = {_toml_string(book.title)}
+author = {_toml_string(book.author or "Author Name")}
+narrator = {_toml_string(book.narrator or "Narrator Name")}
+language = {_toml_string(book.language)}
 
 [voices.narrator]
 display_name = "Narrator"
@@ -145,7 +175,8 @@ raw_until_release = true
 # enabled = true
 """
     atomic_write_bytes(manifest, template.encode())
-    atomic_write_bytes(root / "pronunciations.toml", pronunciations.encode())
+    if not pronunciation_path.exists():
+        atomic_write_bytes(pronunciation_path, pronunciations.encode())
     if not source.exists():
         atomic_write_bytes(
             source,

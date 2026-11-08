@@ -366,3 +366,97 @@ def test_unlocked_stopped_run_is_not_displayed_as_currently_running(
     assert result.exit_code == 130
     assert "State: stopped" in result.output
     assert "Running:" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("event", "state", "exit_code"),
+    [
+        ("run_complete", "complete", 0),
+        ("run_failed", "failed", 1),
+        ("run_cancelled", "cancelled", 1),
+        ("run_interrupted", "interrupted", 1),
+        (None, "stopped", 1),
+    ],
+)
+def test_watch_can_exit_on_a_terminal_run(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event: str | None,
+    state: str,
+    exit_code: int,
+) -> None:
+    journal = _active_run(book_workspace)
+    if event is not None:
+        journal.append(event)
+
+    def unexpected_sleep(_: float) -> None:
+        pytest.fail("A terminal snapshot must exit immediately")
+
+    monkeypatch.setattr("yakbox.cli_status.time.sleep", unexpected_sleep)
+    result = CliRunner().invoke(
+        main,
+        ["status", str(book_workspace / "yakbox.toml"), "--watch", "--exit-when-done"],
+    )
+    assert result.exit_code == exit_code, result.output
+    assert f"State: {state}" in result.output
+    assert not journal.path.with_name("run.json").exists()
+
+
+def test_watch_custom_interval_waits_for_first_run_then_exits(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+
+    def start_and_finish(seconds: float) -> None:
+        sleeps.append(seconds)
+        assert len(sleeps) == 1
+        journal = _active_run(book_workspace)
+        journal.append("run_complete")
+
+    monkeypatch.setattr("yakbox.cli_status.time.sleep", start_and_finish)
+    result = CliRunner().invoke(
+        main,
+        [
+            "status",
+            str(book_workspace / "yakbox.toml"),
+            "--watch",
+            "--interval",
+            "0.25",
+            "--exit-when-done",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert sleeps == [0.25]
+    assert "Waiting for a build" in result.output
+    assert "State: complete" in result.output
+    assert "Refreshing every 0.25 seconds" in result.output
+
+
+def test_watch_exit_when_done_follows_running_build(
+    book_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    journal = _active_run(book_workspace)
+    sleeps: list[float] = []
+
+    def finish(seconds: float) -> None:
+        sleeps.append(seconds)
+        assert len(sleeps) == 1
+        journal.append("run_complete")
+
+    monkeypatch.setattr("yakbox.cli_status.time.sleep", finish)
+    with target_lock(book_workspace / ".yakbox", "default"):
+        result = CliRunner().invoke(
+            main,
+            [
+                "status",
+                str(book_workspace / "yakbox.toml"),
+                "--watch",
+                "--exit-when-done",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert sleeps == [2]
+    assert "State: running" in result.output
+    assert "State: complete" in result.output

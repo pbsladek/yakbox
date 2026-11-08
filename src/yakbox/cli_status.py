@@ -12,20 +12,36 @@ from rich.text import Text
 from yakbox.audiobook.status import RunProgress, read_run_progress
 
 
-def watch_status(workspace: Path, target: str, console: Console) -> None:
-    """Refresh read-only status every two seconds until interrupted."""
+def watch_status(
+    workspace: Path,
+    target: str,
+    console: Console,
+    *,
+    interval: float = 2,
+    exit_when_done: bool = False,
+) -> bool:
+    """Refresh read-only status; optionally return whether a terminal run succeeded."""
     with Live(console=console, auto_refresh=False) as display:
         while True:
             snapshot = read_run_progress(workspace, target)
-            rendered = Text(_progress_message(snapshot, target))
+            rendered = Text(_progress_message(snapshot, target, interval))
             if console.is_terminal:
                 display.update(rendered, refresh=True)
             else:
                 console.print(rendered)
-            time.sleep(2)
+            if (
+                exit_when_done
+                and snapshot is not None
+                and snapshot.state
+                in {"complete", "failed", "interrupted", "cancelled", "stopped"}
+            ):
+                return snapshot.state == "complete"
+            time.sleep(interval)
 
 
-def _progress_message(progress: RunProgress | None, target: str) -> str:
+def _progress_message(
+    progress: RunProgress | None, target: str, interval: float
+) -> str:
     if progress is None:
         return f"Waiting for a build for target {target}. Ctrl+C to stop."
     lines = [
@@ -42,5 +58,5 @@ def _progress_message(progress: RunProgress | None, target: str) -> str:
         if node.state == "failed"
         or (node.state == "running" and progress.state == "running")
     )
-    lines.append("Refreshing every 2 seconds. Ctrl+C to stop.")
+    lines.append(f"Refreshing every {interval:g} seconds. Ctrl+C to stop.")
     return "\n".join(lines)

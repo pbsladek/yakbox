@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import importlib.util
 import json
+import math
 import os
 import sys
 from collections.abc import Generator, Sequence
@@ -51,6 +52,8 @@ from yakbox.audiobook import (
 )
 from yakbox.audiobook.artifacts import verify_artifact
 from yakbox.audiobook.manifest import AudiobookManifest, BuildTarget
+from yakbox.audiobook.status import read_run_history
+from yakbox.cli_completion import configure_cli_completion
 from yakbox.cli_dialogue import register_dialogue_commands
 from yakbox.cli_help import configure_cli_help
 from yakbox.cli_migrate import register_migration_commands
@@ -823,18 +826,57 @@ def release_diff_command(
     is_flag=True,
     help="Refresh build progress every two seconds until Ctrl+C.",
 )
-def status_command(manifest: Path, target: str, watch: bool) -> None:
+@click.option(
+    "--latest", is_flag=True, help="Return only the newest target run summary."
+)
+@click.option(
+    "--limit", type=click.IntRange(min=1), help="Return at most this many target runs."
+)
+@click.option(
+    "--interval",
+    type=click.FloatRange(min=0, min_open=True),
+    help="Refresh watch mode at this interval in seconds (default: 2).",
+)
+@click.option(
+    "--exit-when-done",
+    is_flag=True,
+    help="Stop watching when the latest run finishes; exit 1 if it did not complete.",
+)
+def status_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
+    manifest: Path,
+    target: str,
+    watch: bool,
+    latest: bool,
+    limit: int | None,
+    interval: float | None,
+    exit_when_done: bool,
+) -> None:
     """Show run and managed-artifact status."""
     if watch and (_context().json_output or _context().quiet):
         raise click.UsageError("--watch cannot be combined with --json or --quiet")
+    if latest and limit is not None:
+        raise click.UsageError("--latest and --limit are mutually exclusive")
+    if watch and (latest or limit is not None):
+        raise click.UsageError("--latest and --limit cannot be combined with --watch")
+    if not watch and (interval is not None or exit_when_done):
+        raise click.UsageError("--interval and --exit-when-done require --watch")
+    if interval is not None and not math.isfinite(interval):
+        raise click.BadParameter("must be finite", param_hint="--interval")
     try:
         loaded = load_manifest(manifest)
         loaded.target(target)
         if watch:
-            watch_status(loaded.root, target, console)
+            succeeded = watch_status(
+                loaded.root,
+                target,
+                console,
+                interval=interval if interval is not None else 2,
+                exit_when_done=exit_when_done,
+            )
+            if not succeeded:
+                raise click.exceptions.Exit(1)
             return
-        run_files = sorted((loaded.root / ".yakbox" / "runs").glob("*/run.json"))
-        runs = [json.loads(path.read_text(encoding="utf-8")) for path in run_files]
+        runs = read_run_history(loaded.root, target, limit=1 if latest else limit)
         inventory = inventory_artifacts(loaded.target(target).output_root)
     except (YakboxError, OSError, json.JSONDecodeError) as error:
         _fail(error)
@@ -886,6 +928,8 @@ def explain_command(
             for node in plan.nodes
             if artifact is None or artifact in {node.id, str(node.output)}
         ]
+        if artifact is not None and not nodes:
+            raise ValidationError(f"No planned artifact matches: {artifact}")
         states = {
             node.id: (
                 "reusable",
@@ -1634,9 +1678,20 @@ def _read_text(text: str | None, text_file: Path | None) -> str:
     if text is not None and text_file is not None:
         raise click.UsageError("Provide either TEXT or --text-file, not both")
     if text_file is not None:
-        if str(text_file) == "-":
-            return sys.stdin.read()
-        return text_file.read_text(encoding="utf-8")
+        try:
+            if str(text_file) == "-":
+                return sys.stdin.read()
+            return text_file.read_text(encoding="utf-8")
+        except UnicodeError as error:
+            raise click.BadParameter(
+                "must contain valid UTF-8 text; save the input as UTF-8",
+                param_hint="--text-file",
+            ) from error
+        except OSError as error:
+            raise click.BadParameter(
+                "cannot read input; check that the file exists and is readable",
+                param_hint="--text-file",
+            ) from error
     if text is None:
         raise click.UsageError("Provide TEXT or --text-file")
     return text
@@ -1811,5 +1866,6 @@ register_migration_commands(main, emit=_emit, fail=_fail)
 register_repair_commands(main, emit=_emit, fail=_fail)
 register_runtime_commands(main, emit=_emit, fail=_fail)
 register_whisper_commands(main, emit=_emit, fail=_fail)
-register_workspace_commands(main, emit=_emit)
+register_workspace_commands(main, emit=_emit, fail=_fail)
 configure_cli_help(main)
+configure_cli_completion(main)

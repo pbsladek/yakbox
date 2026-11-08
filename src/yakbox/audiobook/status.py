@@ -71,6 +71,51 @@ class RunProgress:
         return len(self.chapters) - len(unfinished)
 
 
+def read_run_history(
+    workspace: Path, target: str, *, limit: int | None = None
+) -> tuple[dict[str, object], ...]:
+    """Read target summaries newest first, stopping after the requested count."""
+    if limit is not None and limit < 1:
+        raise ValueError("Run history limit must be positive")
+    root = workspace.resolve()
+    runs = safe_child(root, root / ".yakbox" / "runs")
+    candidates: list[tuple[int, str, Path]] = []
+    for candidate in runs.glob("*/run.json"):
+        path = safe_child(root, candidate)
+        try:
+            modified = path.stat().st_mtime_ns
+        except FileNotFoundError:
+            continue
+        candidates.append((modified, path.parent.name, path))
+    summaries: list[dict[str, object]] = []
+    for _, _, path in sorted(candidates, reverse=True):
+        try:
+            summary = _read_summary(path)
+        except FileNotFoundError:
+            continue  # Cleanup can remove a run between discovery and reading.
+        if summary["target"] == target:
+            summaries.append(summary)
+            if limit is not None and len(summaries) >= limit:
+                break
+    return tuple(summaries)
+
+
+def _read_summary(path: Path) -> dict[str, object]:
+    try:
+        raw = json.loads(path.read_bytes())
+    except (ValueError, UnicodeDecodeError) as error:
+        raise BuildError("Invalid saved run summary") from error
+    if (
+        not isinstance(raw, dict)
+        or raw.get("$schema") != schema_uri("audiobook-run")
+        or raw.get("schema_version") != 1
+        or raw.get("run_id") != path.parent.name
+        or not isinstance(raw.get("target"), str)
+    ):
+        raise BuildError("Invalid saved run summary")
+    return cast(dict[str, object], raw)
+
+
 def read_run_progress(workspace: Path, target: str) -> RunProgress | None:
     """Read the most recently active run for a target, including unfinished runs."""
     root = workspace.resolve()
