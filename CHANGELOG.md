@@ -2,6 +2,13 @@
 
 Release Please maintains this file from Conventional Commits.
 
+## [0.5.0](https://github.com/pbsladek/yakbox/compare/v0.4.2...v0.5.0) (2026-11-08)
+
+
+### Features
+
+* **cli:** improve workspace setup, status, and completion ([#44](https://github.com/pbsladek/yakbox/issues/44)) ([43d5718](https://github.com/pbsladek/yakbox/commit/43d5718ec90a3b2b3d59020a732f88e30d629ca8))
+
 ## [0.4.2](https://github.com/pbsladek/yakbox/compare/v0.4.1...v0.4.2) (2026-11-07)
 
 
