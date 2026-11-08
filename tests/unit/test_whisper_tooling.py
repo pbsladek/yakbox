@@ -1036,7 +1036,7 @@ async def test_consensus_prompt_sensitivity_and_targeted_options_are_retained(
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
 
-        def transcribe(self, audio: str, **options: object) -> Mapping[str, object]:
+        def transcribe(self, audio: object, **options: object) -> Mapping[str, object]:
             del audio
             self.calls.append(options)
             word = " no"
@@ -1106,7 +1106,7 @@ async def test_prompt_sensitivity_cannot_rescue_authoritative_mismatch(
     _write_join_wav(audio)
 
     class _PromptRescueMlx:
-        def transcribe(self, audio: str, **options: object) -> Mapping[str, object]:
+        def transcribe(self, audio: object, **options: object) -> Mapping[str, object]:
             del audio
             word = " no" if "initial_prompt" in options else " nah"
             return {

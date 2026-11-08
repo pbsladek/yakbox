@@ -216,6 +216,26 @@ so the next request starts with a fresh handshake.
 Persistent-runtime idle shutdown counts time since the latest authenticated
 request or completed operation and keeps an active operation alive.
 
+Persistent Chatterbox inference runs in a supervised child process. Status and
+stop requests remain responsive while it is busy. Shutdown cancels active
+synthesis, waits for its child process and writers, then removes the endpoint;
+queued requests cannot start new inference during shutdown. The memory limit
+includes the synthesis child's last reported peak RSS as well as the server's
+current RSS. This conservative accounting is checked between operations.
+
+Bounded Whisper inspection materializes only the requested PCM range plus one
+second of context on either side. Word, segment, signal, and clip coordinates
+are returned in the original chapter's time base. Its independent, unprompted
+transcription has a bounded in-process cache keyed by audio and decoder options;
+changing expected text never substitutes a prompted decode for that evidence.
+Decoded audio is shared by the passes for a request. The updated alignment
+fingerprint invalidates prior cached results.
+
+Repair assembly streams unchanged chapter sections and retains only a short
+output tail for crossfades. Speech-region detection also reads bounded PCM
+windows. Replacement audio is prepared once, and multi-repair assembly still
+uses the immutable source frame coordinates and one output commit.
+
 ## Troubleshooting
 
 `FFmpeg is required`: install FFmpeg and ensure both `ffmpeg` and `ffprobe` are

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from collections.abc import AsyncIterator, Coroutine
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +33,7 @@ from yakbox.local_runtime import (
 from yakbox.speech.alignment import AlignmentResult, AlignmentToken
 from yakbox.speech.models import SpeechSynthesisRequest
 from yakbox.speech.services import FakeSpeechService
+from yakbox.speech.workers import IsolatedLocalSpeechService
 
 
 def test_runtime_starts_without_loading_models(tmp_path: Path) -> None:
@@ -378,6 +380,86 @@ async def test_runtime_refuses_a_second_tts_device(tmp_path: Path) -> None:
         )
     with pytest.raises(ValidationError, match="configuration is invalid"):
         await server.execute({"operation": "align"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop_during_inference", [False, True])
+async def test_runtime_control_plane_remains_responsive_during_child_inference(
+    running_runtime: _RuntimeServer,
+    monkeypatch: pytest.MonkeyPatch,
+    stop_during_inference: bool,
+) -> None:
+    marker = running_runtime.workspace / "busy"
+    processes: list[asyncio.subprocess.Process] = []
+    started = asyncio.Event()
+    script = """
+import json, pathlib, sys, time, wave
+request = json.loads(sys.stdin.readline())
+item = request["items"][0]
+pathlib.Path(sys.argv[1]).write_text("busy")
+print(json.dumps({"protocol_version": 2, "event": "started", "index": 0}), flush=True)
+time.sleep(0.5)
+with wave.open(item["destination"], "wb") as writer:
+    writer.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+    writer.writeframes(b"\\0\\0" * 1600)
+result = {
+    "path": item["destination"], "backend": "chatterbox-local", "voice": "narrator",
+    "output_format": "wav", "bytes_written": 3244, "sha256": "a" * 64,
+    "sample_rate": 16000,
+}
+print(json.dumps({"protocol_version": 2, "event": "result", "item": result}),
+      flush=True)
+print(json.dumps({"protocol_version": 2, "event": "complete", "count": 1}), flush=True)
+sys.stdin.readline()
+"""
+
+    async def start(service: IsolatedLocalSpeechService) -> asyncio.subprocess.Process:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-u",
+            "-c",
+            script,
+            str(marker),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        service._process = process
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(IsolatedLocalSpeechService, "_ensure_worker", start)
+    client = PersistentLocalSpeechService(
+        running_runtime.workspace,
+        device="cpu",
+        options=running_runtime.options,
+        request_timeout_seconds=3,
+    )
+    task = asyncio.create_task(
+        client.synthesize_to_file(
+            SpeechSynthesisRequest("A line.", "narrator"),
+            running_runtime.workspace / "speech.wav",
+        )
+    )
+
+    def log(_service: IsolatedLocalSpeechService, message: str) -> None:
+        if message.startswith("worker_item_started"):
+            started.set()
+
+    monkeypatch.setattr(IsolatedLocalSpeechService, "_log", log)
+    await asyncio.wait_for(started.wait(), timeout=2)
+    status = await asyncio.wait_for(
+        local_runtime_status(running_runtime.workspace), timeout=0.2
+    )
+    assert status.running and not task.done()
+    assert len(processes) == 1
+    if stop_during_inference:
+        assert await stop_local_runtime(running_runtime.workspace)
+        with pytest.raises(BuildError):
+            await task
+    else:
+        assert (await task).path.is_file()
+        assert running_runtime.status()["tts_model_loaded"] is True
 
 
 @pytest.mark.asyncio

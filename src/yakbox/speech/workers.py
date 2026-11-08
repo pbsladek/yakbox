@@ -45,15 +45,7 @@ class LocalWorkerItem:
             "reference_audio": str(self.reference_audio)
             if self.reference_audio
             else None,
-            "chatterbox": (
-                {
-                    "cfg_weight": self.chatterbox.cfg_weight,
-                    "exaggeration": self.chatterbox.exaggeration,
-                    "seed": self.chatterbox.seed,
-                }
-                if self.chatterbox is not None
-                else None
-            ),
+            "chatterbox": self.chatterbox.to_dict() if self.chatterbox else None,
         }
 
 
@@ -97,6 +89,7 @@ class IsolatedLocalSpeechService:
         heartbeat_seconds: float = 15,
         log_path: Path | None = None,
         accelerator_lease: AcceleratorLease | None = None,
+        conditioning_cache_size: int = 8,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValidationError("Local worker timeout must be positive")
@@ -110,6 +103,12 @@ class IsolatedLocalSpeechService:
         self.heartbeat_seconds = heartbeat_seconds
         self.log_path = log_path
         self.accelerator_lease = accelerator_lease
+        if conditioning_cache_size < 1:
+            raise ValidationError("Local conditioning cache size must be positive")
+        self.conditioning_cache_size = conditioning_cache_size
+        self.model_loaded = False
+        self.conditioning_cache_entries = 0
+        self.resident_memory_bytes: int | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._request_lock = asyncio.Lock()
         self._stderr_task: asyncio.Task[None] | None = None
@@ -245,6 +244,13 @@ class IsolatedLocalSpeechService:
                 self._log(f"worker_request_failed pid={process.pid} detail={detail}")
                 raise BuildError(f"Local Chatterbox worker failed: {detail}")
             if event == "complete" and len(results) == expected:
+                self.model_loaded = True
+                memory = response.get("resident_memory_bytes")
+                self.resident_memory_bytes = memory if isinstance(memory, int) else None
+                entries = response.get("conditioning_cache_entries", 0)
+                self.conditioning_cache_entries = (
+                    entries if isinstance(entries, int) else 0
+                )
                 return tuple(results)
             raise BuildError("Invalid local worker protocol response")
 
@@ -263,6 +269,8 @@ class IsolatedLocalSpeechService:
                     await _terminate_process(process)
             await self._finish_stderr_task()
             self._process = None
+            self.model_loaded = False
+            self.conditioning_cache_entries = 0
 
     async def _ensure_worker(self) -> asyncio.subprocess.Process:
         process = self._process
@@ -274,6 +282,9 @@ class IsolatedLocalSpeechService:
         thread_budget = str(self.threads_per_process)
         environment["OMP_NUM_THREADS"] = thread_budget
         environment["MKL_NUM_THREADS"] = thread_budget
+        environment["YAKBOX_CONDITIONING_CACHE_SIZE"] = str(
+            self.conditioning_cache_size
+        )
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
@@ -358,6 +369,8 @@ class IsolatedLocalSpeechService:
         await self._finish_stderr_task()
         if self._process is process:
             self._process = None
+            self.model_loaded = False
+            self.conditioning_cache_entries = 0
 
     async def _finish_stderr_task(self) -> None:
         task = self._stderr_task
@@ -421,7 +434,12 @@ async def _worker_server(device: str) -> None:
             LocalChatterboxService,
         )
 
-        service = LocalChatterboxService(device=device)
+        service = LocalChatterboxService(
+            device=device,
+            conditioning_cache_size=int(
+                os.environ.get("YAKBOX_CONDITIONING_CACHE_SIZE", "8")
+            ),
+        )
     while line := sys.stdin.buffer.readline():
         try:
             raw = json.loads(line)
@@ -461,7 +479,14 @@ async def _worker_server(device: str) -> None:
                 )
             _write_worker_message(
                 protocol_output,
-                {"event": "complete", "count": len(request.items)},
+                {
+                    "event": "complete",
+                    "count": len(request.items),
+                    "conditioning_cache_entries": getattr(
+                        service, "conditioning_cache_entries", 0
+                    ),
+                    "resident_memory_bytes": _worker_peak_memory(),
+                },
             )
         except Exception as error:  # noqa: BLE001 - worker protocol returns safe errors
             _write_worker_message(
@@ -491,6 +516,13 @@ def _remove_stale_part_files(destination: Path) -> None:
         for candidate in destination.parent.glob(pattern):
             if candidate.is_file():
                 candidate.unlink(missing_ok=True)
+
+
+def _worker_peak_memory() -> int:
+    import resource  # noqa: PLC0415 - supported POSIX worker boundary
+
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak if sys.platform == "darwin" else peak * 1_024
 
 
 def _read_request(path: Path) -> LocalWorkerRequest:
@@ -535,11 +567,7 @@ def _read_worker_item(value: object) -> LocalWorkerItem:
     if chatterbox_raw is not None:
         if not isinstance(chatterbox_raw, dict):
             raise ValidationError("Local worker Chatterbox options are invalid")
-        chatterbox = ChatterboxSynthesisOptions(
-            cfg_weight=_float_or_none(chatterbox_raw.get("cfg_weight")),
-            exaggeration=_float_or_none(chatterbox_raw.get("exaggeration")),
-            seed=_int_or_none(chatterbox_raw.get("seed")),
-        )
+        chatterbox = ChatterboxSynthesisOptions.from_dict(chatterbox_raw)
     return LocalWorkerItem(
         text=str(text),
         voice=str(voice),

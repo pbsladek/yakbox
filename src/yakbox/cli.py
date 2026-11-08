@@ -53,6 +53,7 @@ from yakbox.audiobook import (
 from yakbox.audiobook.artifacts import verify_artifact
 from yakbox.audiobook.manifest import AudiobookManifest, BuildTarget
 from yakbox.audiobook.status import read_run_history
+from yakbox.chatterbox_models import VARIANTS, record_snapshot, verify_snapshot
 from yakbox.cli_completion import configure_cli_completion
 from yakbox.cli_dialogue import register_dialogue_commands
 from yakbox.cli_help import configure_cli_help
@@ -79,6 +80,7 @@ from yakbox.playback import play_audio
 from yakbox.speech import (
     AudioFormat,
     BackendCapabilities,
+    ChatterboxSynthesisOptions,
     HostedUsageReportingService,
     HostedUsageSnapshot,
     SpeechArtifact,
@@ -1380,6 +1382,18 @@ def artifacts_trash_purge_command(
 @click.option("--voice", default="narrator", show_default=True)
 @click.option("--profile")
 @audio_output_options("speech.wav")
+@click.option(
+    "--variant",
+    type=click.Choice(VARIANTS),
+    default="original",
+    help="Select a Chatterbox model variant.",
+)
+@click.option(
+    "--model-directory",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Load a recorded local Chatterbox snapshot.",
+)
+@click.option("--model-fingerprint", help="Require this recorded model fingerprint.")
 def tts_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
     text: str | None,
     text_file: Path | None,
@@ -1389,12 +1403,24 @@ def tts_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
     out: Path,
     output_format: str,
     overwrite: bool,
+    variant: str,
+    model_directory: Path | None,
+    model_fingerprint: str | None,
 ) -> None:
     """Synthesize a single text using the shared speech service."""
     content = _read_text(text, text_file)
     config = _load_config()
     selected = backend or config.default_backend
     try:
+        options = ChatterboxSynthesisOptions(
+            variant=variant,
+            model_directory=model_directory,
+            model_fingerprint=model_fingerprint,
+        )
+        if selected.casefold() == "fake" and (
+            variant != "original" or model_directory is not None
+        ):
+            raise ValidationError("Chatterbox model options require the local backend")
         artifact, usage = asyncio.run(
             _direct_tts(
                 content,
@@ -1404,6 +1430,9 @@ def tts_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
                 out=out,
                 output_format=AudioFormat(output_format),
                 overwrite=overwrite,
+                chatterbox=options
+                if variant != "original" or model_directory is not None
+                else None,
             )
         )
     except (YakboxError, OSError) as error:
@@ -1490,8 +1519,66 @@ def verify_command(audio: tuple[Path, ...]) -> None:
 
 
 @main.command("models")
-def models_command() -> None:
+@click.option(
+    "--record",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Record a trusted local Chatterbox snapshot.",
+)
+@click.option(
+    "--verify",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Verify a previously recorded local snapshot.",
+)
+@click.option(
+    "--variant",
+    type=click.Choice(VARIANTS),
+    default="original",
+    help="Select the model snapshot variant.",
+)
+@click.option("--repository", help="Record the source Hugging Face owner/name.")
+@click.option("--revision", help="Record the full immutable source commit.")
+@click.option(
+    "--license",
+    "license_id",
+    type=click.Choice(("MIT", "Apache-2.0")),
+    help="Record the reviewed model license; required for MLX conversions.",
+)
+def models_command(
+    *,
+    record: Path | None,
+    verify: Path | None,
+    variant: str,
+    repository: str | None,
+    revision: str | None,
+    license_id: str | None,
+) -> None:
     """Report local model-package availability without loading models."""
+    if record is not None and verify is not None:
+        raise click.UsageError("Choose --record or --verify")
+    if record is not None or verify is not None:
+        try:
+            if record is not None:
+                if repository is None or revision is None:
+                    raise click.UsageError(
+                        "--record requires --repository and --revision"
+                    )
+                value = record_snapshot(
+                    record,
+                    variant=variant,
+                    repository=repository,
+                    revision=revision,
+                    license_id=license_id,
+                )
+            elif verify is not None:
+                value = verify_snapshot(verify, variant=variant)
+        except (YakboxError, OSError) as error:
+            _fail(error)
+        _emit(value, f"Verified {variant} snapshot: {value['fingerprint']}")
+        return
+    if repository is not None or revision is not None or license_id is not None:
+        raise click.UsageError(
+            "--repository, --revision, and --license require --record"
+        )
     available = importlib.util.find_spec("chatterbox") is not None
     _emit(
         {"chatterbox_installed": available},
@@ -1510,7 +1597,10 @@ def backends_list_command() -> None:
         {
             "backends": [
                 {"name": "fake", "available": True},
-                {"name": "chatterbox-local", "available": _module("chatterbox")},
+                {
+                    "name": "chatterbox-local",
+                    "available": _module("chatterbox") or _module("mlx_audio"),
+                },
             ]
         },
         "fake\nchatterbox-local",
@@ -1605,8 +1695,12 @@ async def _direct_tts(
     out: Path,
     output_format: AudioFormat,
     overwrite: bool,
+    chatterbox: ChatterboxSynthesisOptions | None = None,
 ) -> tuple[SpeechArtifact, HostedUsageSnapshot | None]:
-    async with open_speech_backend(backend) as service:
+    async with open_speech_backend(
+        backend,
+        device="auto" if chatterbox and chatterbox.variant == "mlx-turbo" else None,
+    ) as service:
         artifact = await service.synthesize_to_file(
             SpeechSynthesisRequest(
                 text=text,
@@ -1614,6 +1708,7 @@ async def _direct_tts(
                 backend=backend,
                 profile=profile,
                 output_format=output_format,
+                chatterbox=chatterbox,
             ),
             out,
             overwrite=overwrite,

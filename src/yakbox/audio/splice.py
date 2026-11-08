@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import math
 import wave
-from dataclasses import asdict, dataclass
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from yakbox._files import atomic_output_path
+from yakbox.audio.splice_stream import SpliceStream, read_region
 from yakbox.errors import ArtifactError
 
 _CONTEXT_MS = 80
@@ -60,10 +63,11 @@ class _Wave:
     sample_width: int
     sample_rate: int
     samples: tuple[int, ...]
+    source_frames: int = 0
 
     @property
     def frame_count(self) -> int:
-        return len(self.samples) // self.channels
+        return self.source_frames or len(self.samples) // self.channels
 
 
 def splice_wav_region(
@@ -76,70 +80,22 @@ def splice_wav_region(
     overwrite: bool = False,
 ) -> AdaptiveSpliceEvidence:
     """Replace one aligned region using matched level, tone, and adaptive overlaps."""
-    source = _read_wave(original)
-    insert = _read_wave(replacement)
-    if (
-        source.channels,
-        source.sample_width,
-        source.sample_rate,
-    ) != (insert.channels, insert.sample_width, insert.sample_rate):
-        raise ArtifactError("Repair splice WAV formats are incompatible")
-    start = round(start_seconds * source.sample_rate)
-    end = round(end_seconds * source.sample_rate)
-    if not 0 <= start < end <= source.frame_count:
-        raise ArtifactError("Repair splice timing falls outside the original WAV")
-    prefix = source.samples[: start * source.channels]
-    suffix = source.samples[end * source.channels :]
-    context_frames = max(1, round(source.sample_rate * _CONTEXT_MS / 1_000))
-    context = (
-        prefix[-context_frames * source.channels :]
-        + suffix[: context_frames * source.channels]
-    )
-    matched, gain_db, smoothing, before_ratio, after_ratio, context_ratio = (
-        _match_replacement(insert.samples, context, source=source)
-    )
-    trimmed, leading_trim, trailing_trim = _trim_to_quiet_edges(
-        matched,
-        channels=source.channels,
-        sample_rate=source.sample_rate,
-    )
-    leading_frames = _crossfade_frames(
-        prefix,
-        trimmed,
-        channels=source.channels,
-        sample_rate=source.sample_rate,
-    )
-    trailing_frames = _crossfade_frames(
-        trimmed,
-        suffix,
-        channels=source.channels,
-        sample_rate=source.sample_rate,
-    )
-    joined = _crossfade(
-        prefix,
-        trimmed,
-        channels=source.channels,
-        frames=leading_frames,
-    )
-    joined = _crossfade(
-        joined,
-        suffix,
-        channels=source.channels,
-        frames=trailing_frames,
-    )
-    _write_wave(destination, source, joined, overwrite=overwrite)
-    return AdaptiveSpliceEvidence(
-        gain_db=gain_db,
-        replacement_high_frequency_ratio_before=before_ratio,
-        replacement_high_frequency_ratio_after=after_ratio,
-        context_high_frequency_ratio=context_ratio,
-        spectral_smoothing=smoothing,
-        leading_trim_ms=leading_trim * 1_000 / source.sample_rate,
-        trailing_trim_ms=trailing_trim * 1_000 / source.sample_rate,
-        leading_crossfade_ms=leading_frames * 1_000 / source.sample_rate,
-        trailing_crossfade_ms=trailing_frames * 1_000 / source.sample_rate,
-        output_duration_seconds=(len(joined) / source.channels) / source.sample_rate,
-    )
+    if not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+        raise ArtifactError("Repair splice timing must be finite")
+    with _source_wave(original) as (reader, source):
+        item = FrameReplacement(
+            "single",
+            round(start_seconds * source.sample_rate),
+            round(end_seconds * source.sample_rate),
+            replacement,
+        )
+        prepared = _prepare_replacements(reader, source, (item,))
+        frames = _render_replacements(
+            reader, source, prepared, destination, overwrite=overwrite, single=True
+        )
+        return replace(
+            prepared[0][2], output_duration_seconds=frames / source.sample_rate
+        )
 
 
 def splice_wav_regions(
@@ -152,7 +108,6 @@ def splice_wav_regions(
     """Reconstruct once from immutable base slices and canonical replacements."""
     if not replacements:
         raise ArtifactError("Multi-repair splice requires at least one replacement")
-    source = _read_wave(original)
     ordered = tuple(
         sorted(
             replacements,
@@ -161,125 +116,159 @@ def splice_wav_regions(
     )
     if len({item.repair_id for item in ordered}) != len(ordered):
         raise ArtifactError("Multi-repair splice IDs must be unique")
-    previous_end = 0
+    with _source_wave(original) as (reader, source):
+        prepared = _prepare_replacements(reader, source, ordered)
+        _render_replacements(reader, source, prepared, destination, overwrite=overwrite)
+        return tuple(item[2] for item in prepared)
+
+
+@contextmanager
+def _source_wave(path: Path) -> Generator[tuple[wave.Wave_read, _Wave]]:
+    try:
+        with wave.open(str(path), "rb") as reader:
+            if reader.getcomptype() != "NONE" or reader.getsampwidth() not in {
+                1,
+                2,
+                3,
+                4,
+            }:
+                raise ArtifactError("Adaptive repair splice requires PCM WAV audio")
+            source = _Wave(
+                reader.getnchannels(),
+                reader.getsampwidth(),
+                reader.getframerate(),
+                (),
+                reader.getnframes(),
+            )
+            yield reader, source
+    except (OSError, EOFError, wave.Error) as error:
+        raise ArtifactError(f"Cannot process PCM WAV: {path}") from error
+
+
+def _prepare_replacements(
+    reader: wave.Wave_read,
+    source: _Wave,
+    replacements: tuple[FrameReplacement, ...],
+) -> list[tuple[FrameReplacement, tuple[int, ...], AdaptiveSpliceEvidence]]:
     prepared: list[
         tuple[FrameReplacement, tuple[int, ...], AdaptiveSpliceEvidence]
     ] = []
-    context_frames = max(1, round(source.sample_rate * _CONTEXT_MS / 1_000))
-    for replacement in ordered:
-        if replacement.start_frame < previous_end:
+    previous_end = 0
+    for item in replacements:
+        if item.start_frame < previous_end:
             raise ArtifactError("Multi-repair frame intervals overlap")
-        if replacement.end_frame > source.frame_count:
+        if item.end_frame > source.frame_count:
             raise ArtifactError("Multi-repair interval falls outside the base WAV")
-        insert = _read_wave(replacement.audio)
-        if (
-            source.channels,
-            source.sample_width,
-            source.sample_rate,
-        ) != (insert.channels, insert.sample_width, insert.sample_rate):
-            raise ArtifactError("Multi-repair WAV formats are incompatible")
-        prefix_start = max(0, replacement.start_frame - context_frames)
-        suffix_end = min(source.frame_count, replacement.end_frame + context_frames)
-        context = (
-            source.samples[
-                prefix_start * source.channels : replacement.start_frame
-                * source.channels
-            ]
-            + source.samples[
-                replacement.end_frame * source.channels : suffix_end * source.channels
-            ]
-        )
-        matched, gain, smoothing, before, after, context_ratio = _match_replacement(
-            insert.samples,
-            context,
-            source=source,
-        )
-        trimmed, leading_trim, trailing_trim = _trim_to_quiet_edges(
-            matched,
-            channels=source.channels,
-            sample_rate=source.sample_rate,
-        )
-        left = source.samples[
-            previous_end * source.channels : replacement.start_frame * source.channels
-        ]
-        right_context = source.samples[
-            replacement.end_frame * source.channels : min(
-                source.frame_count, replacement.end_frame + context_frames
-            )
-            * source.channels
-        ]
-        leading_frames = _crossfade_frames(
-            left,
-            trimmed,
-            channels=source.channels,
-            sample_rate=source.sample_rate,
-        )
-        trailing_frames = _crossfade_frames(
-            trimmed,
-            right_context,
-            channels=source.channels,
-            sample_rate=source.sample_rate,
-        )
-        evidence = AdaptiveSpliceEvidence(
-            gain,
-            before,
-            after,
-            context_ratio,
-            smoothing,
-            leading_trim * 1_000 / source.sample_rate,
-            trailing_trim * 1_000 / source.sample_rate,
-            leading_frames * 1_000 / source.sample_rate,
-            trailing_frames * 1_000 / source.sample_rate,
-            len(trimmed) / source.channels / source.sample_rate,
-        )
-        prepared.append((replacement, trimmed, evidence))
-        previous_end = replacement.end_frame
-    output: tuple[int, ...] = ()
-    cursor = 0
-    for replacement, insert, _evidence in prepared:
-        base = source.samples[
-            cursor * source.channels : replacement.start_frame * source.channels
-        ]
-        base_overlap = _crossfade_frames(
-            output,
-            base,
-            channels=source.channels,
-            sample_rate=source.sample_rate,
-        )
-        output = _crossfade(
-            output,
-            base,
-            channels=source.channels,
-            frames=base_overlap,
-        )
-        leading = _crossfade_frames(
-            output,
-            insert,
-            channels=source.channels,
-            sample_rate=source.sample_rate,
-        )
-        output = _crossfade(
-            output,
-            insert,
-            channels=source.channels,
-            frames=leading,
-        )
-        cursor = replacement.end_frame
-    suffix = source.samples[cursor * source.channels :]
+        prepared.append(_prepare_one(reader, source, item, previous_end))
+        previous_end = item.end_frame
+    return prepared
+
+
+def _prepare_one(
+    reader: wave.Wave_read,
+    source: _Wave,
+    item: FrameReplacement,
+    previous_end: int,
+) -> tuple[FrameReplacement, tuple[int, ...], AdaptiveSpliceEvidence]:
+    insert = _read_wave(item.audio)
+    if (source.channels, source.sample_width, source.sample_rate) != (
+        insert.channels,
+        insert.sample_width,
+        insert.sample_rate,
+    ):
+        raise ArtifactError("Repair splice WAV formats are incompatible")
+    context_frames = max(1, round(source.sample_rate * _CONTEXT_MS / 1_000))
+    left = read_region(
+        reader, max(previous_end, item.start_frame - context_frames), item.start_frame
+    )
+    right = read_region(
+        reader, item.end_frame, min(source.frame_count, item.end_frame + context_frames)
+    )
+    context_left = read_region(
+        reader, max(0, item.start_frame - context_frames), item.start_frame
+    )
+    matched, gain, smoothing, before, after, context_ratio = _match_replacement(
+        insert.samples, context_left + right, source=source
+    )
+    trimmed, leading_trim, trailing_trim = _trim_to_quiet_edges(
+        matched, channels=source.channels, sample_rate=source.sample_rate
+    )
+    leading = _crossfade_frames(
+        left, trimmed, channels=source.channels, sample_rate=source.sample_rate
+    )
     trailing = _crossfade_frames(
-        output,
-        suffix,
-        channels=source.channels,
-        sample_rate=source.sample_rate,
+        trimmed, right, channels=source.channels, sample_rate=source.sample_rate
     )
-    output = _crossfade(
-        output,
-        suffix,
-        channels=source.channels,
-        frames=trailing,
+    evidence = AdaptiveSpliceEvidence(
+        gain,
+        before,
+        after,
+        context_ratio,
+        smoothing,
+        leading_trim * 1_000 / source.sample_rate,
+        trailing_trim * 1_000 / source.sample_rate,
+        leading * 1_000 / source.sample_rate,
+        trailing * 1_000 / source.sample_rate,
+        len(trimmed) / source.channels / source.sample_rate,
     )
-    _write_wave(destination, source, output, overwrite=overwrite)
-    return tuple(item[2] for item in prepared)
+    return item, trimmed, evidence
+
+
+def _render_replacements(
+    reader: wave.Wave_read,
+    source: _Wave,
+    prepared: list[tuple[FrameReplacement, tuple[int, ...], AdaptiveSpliceEvidence]],
+    destination: Path,
+    *,
+    overwrite: bool,
+    single: bool = False,
+) -> int:
+    def overlap(left: tuple[int, ...], right: tuple[int, ...]) -> int:
+        return _crossfade_frames(
+            left, right, channels=source.channels, sample_rate=source.sample_rate
+        )
+
+    def mix(
+        left: tuple[int, ...], right: tuple[int, ...], frames: int
+    ) -> tuple[int, ...]:
+        return _crossfade(left, right, channels=source.channels, frames=frames)
+
+    with (
+        atomic_output_path(destination, overwrite=overwrite) as temporary,
+        wave.open(str(temporary), "wb") as writer,
+    ):
+        writer.setparams(
+            (
+                source.channels,
+                source.sample_width,
+                source.sample_rate,
+                0,
+                "NONE",
+                "not compressed",
+            )
+        )
+        stream = SpliceStream(
+            writer,
+            channels=source.channels,
+            width=source.sample_width,
+            rate=source.sample_rate,
+            overlap=overlap,
+            mix=mix,
+        )
+        cursor = 0
+        for item, samples, _ in prepared:
+            stream.append_region(reader, cursor, item.start_frame)
+            stream.append_samples(samples)
+            cursor = item.end_frame
+        trailing = (
+            round(prepared[0][2].trailing_crossfade_ms * source.sample_rate / 1_000)
+            if single
+            else None
+        )
+        stream.append_region(
+            reader, cursor, source.frame_count, overlap_frames=trailing
+        )
+        return stream.finish()
 
 
 def _match_replacement(
@@ -463,38 +452,10 @@ def _read_wave(path: Path) -> _Wave:
     return _Wave(channels, width, rate, samples)
 
 
-def _write_wave(
-    path: Path,
-    template: _Wave,
-    samples: tuple[int, ...],
-    *,
-    overwrite: bool,
-) -> None:
-    payload = b"".join(
-        _encode_sample(value, template.sample_width) for value in samples
-    )
-    with (
-        atomic_output_path(path, overwrite=overwrite) as temporary,
-        wave.open(str(temporary), "wb") as writer,
-    ):
-        writer.setnchannels(template.channels)
-        writer.setsampwidth(template.sample_width)
-        writer.setframerate(template.sample_rate)
-        writer.writeframes(payload)
-
-
 def _decode_sample(value: bytes, width: int) -> int:
     return (
         value[0] - 128 if width == 1 else int.from_bytes(value, "little", signed=True)
     )
-
-
-def _encode_sample(value: int, width: int) -> bytes:
-    if width == 1:
-        return bytes((max(0, min(255, value + 128)),))
-    limit = 1 << (width * 8 - 1)
-    bounded = max(-limit, min(limit - 1, value))
-    return bounded.to_bytes(width, "little", signed=True)
 
 
 __all__ = [

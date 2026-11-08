@@ -11,9 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from yakbox.audio.crop import wav_duration_seconds
+from yakbox.audio.crop import detect_speech_regions, wav_duration_seconds
 from yakbox.audio.inspect import AudioQualityPolicy, inspect_audio
 from yakbox.audio.processes import run_command
+from yakbox.audio.splice import splice_wav_region
 
 pytestmark = pytest.mark.performance
 
@@ -93,3 +94,37 @@ def test_policy_changes_launch_one_probe_and_one_signal_scan(
         )
         assert result.duration_seconds == 60
     assert commands == ["ffprobe", "ffmpeg"]
+
+
+def test_long_chapter_repair_has_bounded_python_memory(tmp_path: Path) -> None:
+    source, replacement, output = (
+        tmp_path / name for name in ("chapter.wav", "replacement.wav", "output.wav")
+    )
+    _write_constant_wave(source, 600)
+    _write_constant_wave(replacement, 1)
+    tracemalloc.start()
+    try:
+        splice_wav_region(
+            source, replacement, output, start_seconds=299, end_seconds=300
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert 599 < wav_duration_seconds(output) <= 600
+    assert peak < 8 * 1024 * 1024
+
+
+def test_signal_detection_does_not_expand_a_chapter_into_python_frames(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "chapter.wav"
+    _write_constant_wave(source, 120)
+    tracemalloc.start()
+    try:
+        regions = detect_speech_regions(source)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert len(regions) == 1
+    assert regions[0].end_seconds == 120
+    assert peak < 1024 * 1024

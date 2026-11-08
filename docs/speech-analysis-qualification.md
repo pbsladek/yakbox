@@ -504,3 +504,20 @@ documentation, and public-API cutover described in the architecture plan.
 Routine use will not require listening review. The remaining reviews are a
 one-time qualification gate for a new policy, model revision, calibration
 table, or execution class.
+
+## Loader drift correction and performance integration
+
+The packaged Parakeet and Qwen locks are pinned back to the reviewed
+`parakeet-mlx` 0.5.2 and `mlx-audio` 0.4.8 loader versions, matching the root
+extras, registry, and worker definitions. A regression check compares those
+four sources. The newer 0.6.0/0.6.3 loaders remain candidates for a separate
+qualification change; their version numbers are not substituted into the
+historical evidence above.
+
+The persistent synthesis supervisor, bounded Whisper input preparation,
+independent in-process recognition reuse, and streaming PCM repair path have
+offline regression coverage. These checks do not complete the held-out corpus,
+calibration, quantized-model non-inferiority, or listening-review gates.
+The existing 8-bit candidates and model-major scheduler remain behind their
+current cutover decision. PyTorch Turbo and MLX Turbo are explicit optional
+synthesis integrations, not new qualified defaults.

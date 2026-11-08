@@ -12,7 +12,8 @@ import wave
 from pathlib import Path
 
 from yakbox import __version__
-from yakbox.audiobook.manifest import load_manifest
+from yakbox.audiobook.manifest import ChatterboxOptions, load_manifest
+from yakbox.chatterbox_models import verify_snapshot
 from yakbox.config import YakboxConfig, load_config
 from yakbox.diagnostics.models import (
     Diagnostic,
@@ -20,7 +21,7 @@ from yakbox.diagnostics.models import (
     DiagnosticStatus,
     DoctorReport,
 )
-from yakbox.errors import ConfigurationError, ValidationError
+from yakbox.errors import ConfigurationError, ValidationError, YakboxError
 from yakbox.local_alignment import MlxWhisperAligner
 from yakbox.speech.short_utterances import ShortUtteranceStrategy
 from yakbox.whisper_models import (
@@ -59,12 +60,18 @@ async def run_doctor(
     if manifest is not None:
         checks.extend(_workspace_checks(manifest))
     selected_backend = _infer_backend(manifest, target, backend)
-    checks.extend(
-        await _backend_checks(
-            selected_backend,
-            deep=deep,
+    model_options = _chatterbox_options(manifest, target) if backend is None else None
+    if model_options is not None and model_options.variant == "mlx-turbo":
+        checks.append(_mlx_check(deep=deep))
+    else:
+        checks.extend(
+            await _backend_checks(
+                selected_backend,
+                deep=deep,
+            )
         )
-    )
+    if deep and model_options is not None and model_options.model_directory is not None:
+        checks.append(_snapshot_check(model_options))
     alignment = _infer_alignment(manifest)
     if whisper or deep or alignment is not None:
         model, revision, required = alignment or (
@@ -81,6 +88,68 @@ async def run_doctor(
             )
         )
     return DoctorReport(schema_version=1, diagnostics=tuple(checks))
+
+
+def _chatterbox_options(
+    manifest: Path | None, target: str | None
+) -> ChatterboxOptions | None:
+    if manifest is None:
+        return None
+    try:
+        loaded = load_manifest(manifest)
+        options = loaded.profile(loaded.target(target or "default").profile).options
+    except ValidationError:
+        return None
+    return options if isinstance(options, ChatterboxOptions) else None
+
+
+def _mlx_check(*, deep: bool) -> Diagnostic:
+    installed = importlib.util.find_spec("mlx_audio") is not None
+    compatible = platform.system() == "Darwin" and platform.machine() == "arm64"
+    ready = installed and compatible
+    if deep and ready:
+        try:
+            importlib.import_module("mlx.core")
+        except ImportError, RuntimeError:
+            ready = False
+    return Diagnostic(
+        id="backend.chatterbox.mlx",
+        status=DiagnosticStatus.PASS if ready else DiagnosticStatus.FAIL,
+        severity=DiagnosticSeverity.INFO if ready else DiagnosticSeverity.ERROR,
+        summary="MLX Turbo runtime is available"
+        if ready
+        else "MLX Turbo requires Apple Silicon and the analysis-qwen extra",
+        evidence={
+            "package_available": installed,
+            "platform_compatible": compatible,
+            "model_loaded": False,
+        },
+    )
+
+
+def _snapshot_check(options: ChatterboxOptions) -> Diagnostic:
+    try:
+        if options.model_directory is None:
+            raise ValidationError("Local model directory is missing")
+        verify_snapshot(
+            options.model_directory,
+            variant=options.variant,
+            fingerprint=options.model_fingerprint,
+        )
+    except YakboxError as error:
+        return Diagnostic(
+            id="backend.chatterbox.snapshot",
+            status=DiagnosticStatus.FAIL,
+            severity=DiagnosticSeverity.ERROR,
+            summary="Local Chatterbox snapshot verification failed",
+            detail=_redact(str(error)),
+        )
+    return Diagnostic(
+        id="backend.chatterbox.snapshot",
+        status=DiagnosticStatus.PASS,
+        severity=DiagnosticSeverity.INFO,
+        summary="Local Chatterbox snapshot digests match",
+    )
 
 
 def _infer_alignment(path: Path | None) -> tuple[str, str | None, bool] | None:

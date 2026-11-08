@@ -161,3 +161,16 @@ locally, rejects recognized prefix or suffix words, and supplies word timing
 for the crop. Keep `require_review_for_one_word = true` for release work. See
 the [design and testing plan](../../docs/short-utterance-synthesis.md) for the
 hard gates and review workflow.
+
+## Compare an explicit model variant
+
+To compare PyTorch Turbo, copy a profile and retain its authorized reference
+voice, then add `variant = "turbo"`. Remove nonzero CFG/exaggeration overrides
+from that profile and any routed character overrides. Select the new profile
+explicitly for an audition. The original profiles keep their current model.
+
+For long-term offline use, record the existing model snapshot and add its
+`model_directory` and `model_fingerprint` to the profile. The [Chatterbox
+maintenance guide](../../docs/chatterbox-maintenance.md) includes the exact
+record/verify commands, a manifest example, MLX Turbo's auxiliary tokenizer
+requirements, and instructions for a private Hugging Face mirror.

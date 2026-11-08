@@ -14,6 +14,7 @@ from typing import cast
 from yakbox.contracts import schema_uri
 from yakbox.errors import ValidationError
 from yakbox.speech.alignment import lexical_tokens
+from yakbox.speech.models import ChatterboxSynthesisOptions
 from yakbox.speech.short_utterances import (
     CarrierPosition,
     ShortUtteranceFailure,
@@ -72,6 +73,12 @@ class ChatterboxOptions:
     threads_per_process: int = 1
     worker_timeout_seconds: float = 3_600
     estimated_model_memory_bytes: int | None = None
+    variant: str = "original"
+    model_directory: Path | None = None
+    model_fingerprint: str | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    repetition_penalty: float | None = None
 
 
 type BackendOptions = FakeOptions | ChatterboxOptions
@@ -349,7 +356,7 @@ def load_manifest(path: Path) -> AudiobookManifest:
     book = _parse_book(book_raw, root)
     sources = _parse_sources(raw, book_raw, root)
     voices = _parse_voices(raw.get("voices"), root)
-    profiles = _parse_profiles(raw.get("profiles"))
+    profiles = _parse_profiles(raw.get("profiles"), root)
     characters = _parse_characters(raw.get("characters"))
     dialogue = _parse_dialogue(raw.get("dialogue"), root)
     whisper_qa = _parse_whisper_qa(raw.get("whisper_qa"), root)
@@ -634,7 +641,7 @@ def _parse_voices(value: object, root: Path) -> tuple[LogicalVoice, ...]:
     return tuple(result)
 
 
-def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
+def _parse_profiles(value: object, root: Path) -> tuple[BackendProfile, ...]:
     table = _named_tables(
         value,
         "profiles",
@@ -689,6 +696,12 @@ def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
                     "threads_per_process",
                     "worker_timeout_seconds",
                     "estimated_model_memory_bytes",
+                    "variant",
+                    "model_directory",
+                    "model_fingerprint",
+                    "temperature",
+                    "top_p",
+                    "repetition_penalty",
                 },
                 f"profiles.{name}",
             )
@@ -701,7 +714,31 @@ def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
                     f"profiles.{name}.max_processes must be 1 because a local "
                     "model instance renders sequentially"
                 )
+            generation = ChatterboxSynthesisOptions.from_dict(
+                {
+                    key: item[key]
+                    for key in (
+                        "variant",
+                        "model_directory",
+                        "model_fingerprint",
+                        "cfg_weight",
+                        "exaggeration",
+                        "temperature",
+                        "top_p",
+                        "repetition_penalty",
+                    )
+                    if key in item
+                }
+            )
             options = ChatterboxOptions(
+                variant=generation.variant,
+                model_directory=(root / generation.model_directory).resolve()
+                if generation.model_directory
+                else None,
+                model_fingerprint=generation.model_fingerprint,
+                temperature=generation.temperature,
+                top_p=generation.top_p,
+                repetition_penalty=generation.repetition_penalty,
                 device=_device(item.get("device"), f"profiles.{name}.device"),
                 cfg_weight=_float_or_none(
                     item.get("cfg_weight"), f"profiles.{name}.cfg_weight"

@@ -19,6 +19,7 @@ audiobook builds. Whisper supplies local transcription, alignment, and speech QA
 - [Getting started](getting-started.md)
 - [Manifests, sources, and pronunciations](manifests-and-sources.md)
 - [Backends and direct speech](backends-and-speech.md)
+- [Keeping Chatterbox usable: archives, variants, and forks](chatterbox-maintenance.md)
 - [Artifacts, cleanup, and releases](artifacts-and-releases.md)
 - [Doctor, configuration, security, and troubleshooting](operations.md)
 - [Python API](python-api.md)

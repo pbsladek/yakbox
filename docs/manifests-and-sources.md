@@ -476,3 +476,14 @@ yakbox runtime stop yakbox.toml
 The endpoint token is stored mode `0600` under `.yakbox/runtime/`; status output
 never includes it. When `enabled = false` (the default), existing isolated
 per-command workers remain unchanged.
+
+## Archived Chatterbox models and variants
+
+A local Chatterbox profile can set `variant` to `original` (default), `turbo`,
+or `mlx-turbo`. `model_directory` and `model_fingerprint` select a previously
+recorded, verified snapshot and must be supplied together. Relative model
+paths resolve against the manifest directory. Turbo variants reject nonzero
+`cfg_weight` and `exaggeration`. Optional positive `temperature`, `top_p`
+(at most 1), and `repetition_penalty` controls participate in cache identity.
+See [keeping Chatterbox usable](chatterbox-maintenance.md) for preparation,
+examples, qualification requirements, and offline recovery.
