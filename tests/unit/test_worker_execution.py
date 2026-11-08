@@ -267,7 +267,7 @@ async def test_local_worker_server_recovers_after_invalid_requests(
     ]
     assert messages[-1]["count"] == 1
     assert "bad" not in messages[1]["error"]
-    factory.assert_called_once_with(device="cpu")
+    factory.assert_called_once_with(device="cpu", conditioning_cache_size=8)
 
 
 @pytest.mark.parametrize(

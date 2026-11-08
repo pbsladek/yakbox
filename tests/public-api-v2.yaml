@@ -233,7 +233,10 @@ modules:
         signature: '(device: ''str'' = ''cpu'', cfg_weight: ''float | None'' = None,
           exaggeration: ''float | None'' = None, seed: ''int | None'' = 0, max_processes:
           ''int'' = 1, threads_per_process: ''int'' = 1, worker_timeout_seconds: ''float''
-          = 3600, estimated_model_memory_bytes: ''int | None'' = None) -> None'
+          = 3600, estimated_model_memory_bytes: ''int | None'' = None, variant: ''str''
+          = ''original'', model_directory: ''Path | None'' = None, model_fingerprint:
+          ''str | None'' = None, temperature: ''float | None'' = None, top_p: ''float
+          | None'' = None, repetition_penalty: ''float | None'' = None) -> None'
       ChunkRoute:
         kind: class
         signature: '(speaker: ''str | None'', profile: ''str | None'', cfg_weight:
@@ -582,7 +585,10 @@ modules:
       ChatterboxSynthesisOptions:
         kind: class
         signature: '(cfg_weight: ''float | None'' = None, exaggeration: ''float |
-          None'' = None, seed: ''int | None'' = None) -> None'
+          None'' = None, seed: ''int | None'' = None, variant: ''str'' = ''original'',
+          model_directory: ''Path | None'' = None, model_fingerprint: ''str | None''
+          = None, temperature: ''float | None'' = None, top_p: ''float | None'' =
+          None, repetition_penalty: ''float | None'' = None) -> None'
       CurrencyCode:
         kind: class
         signature: '(value: ''str'') -> ''CurrencyCode'''

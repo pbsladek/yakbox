@@ -39,12 +39,16 @@ absence of failed checks.
 Set the book metadata when creating a new project:
 
 ```console
-yakbox init my-book --title "My Book" --author "Author Name"
+yakbox init my-book --title "My Book" --author "Author Name" \
+  --narrator "Narrator Name" --language en
 ```
 
-The defaults remain `My Audiobook` and `Author Name`. Titles and authors must
-contain non-whitespace text. Quotes, backslashes, and Unicode are safely
-encoded in `yakbox.toml`. Initialization refuses an existing manifest.
+The defaults are `My Audiobook`, `Author Name`, `Narrator Name`, and `en`.
+All four metadata values must contain non-whitespace text. `--language` sets
+book metadata; it does not select a different synthesis model. Quotes,
+backslashes, and Unicode are safely encoded in `yakbox.toml`. Initialization
+refuses an existing manifest and preserves existing `pronunciations.toml`
+and `source/book.md` files.
 
 Choose a backend when creating the project:
 
@@ -88,14 +92,21 @@ In another terminal, run:
 ```console
 yakbox status --watch
 yakbox status --target draft --watch
+yakbox status --watch --interval 5 --exit-when-done
 ```
 
-Each command refreshes every two seconds until Ctrl+C, which exits with code
+By default, watch refreshes every two seconds until Ctrl+C, which exits with code
 130. It follows the most recently active run for the selected target and
 shows completed chapters and stages, reused stages, failures, and active
 chapter/stage pairs. It can display an in-progress build before `run.json`
 exists and wait for the first build in a new project. An unfinished run with
 no target lock is shown as `stopped`.
+
+Use `--interval SECONDS` to set a finite, positive refresh interval.
+`--exit-when-done` stops at the first terminal run snapshot, including a run
+that finished before watching began. It exits 0 for `complete` and 1 for
+`failed`, `cancelled`, `interrupted`, or `stopped`. With no run yet, it keeps
+waiting. These two options require `--watch`.
 
 Watch mode is read-only. It ignores an incomplete final journal append until
 the next refresh and never repairs or truncates the journal. Complete corrupt
@@ -104,6 +115,27 @@ place; redirected output appends a plain snapshot at each refresh.
 
 `--watch` cannot be combined with `--json` or `--quiet`. Use ordinary
 `yakbox --json status` for the existing single-document status response.
+
+## Run history and artifact explanations
+
+Ordinary status returns saved `run.json` summaries for the selected target,
+newest modification time first, with run ID as the tie-breaker. Runs that
+have not written a summary appear only in watch mode. Limit history with:
+
+```console
+yakbox status --target default --latest
+yakbox --json status --target default --limit 5
+```
+
+`--latest` is shorthand for one summary. It cannot be combined with `--limit`,
+and neither option can be combined with `--watch`. Filtering and limiting run
+history leave the target's artifact totals unchanged. JSON keeps the same
+`runs`, `managed_artifacts`, `managed_bytes`, and `unknown_files` fields.
+
+`yakbox explain --artifact VALUE` accepts a planned node ID or its output
+path. An unmatched value returns a validation error instead of an empty
+successful result. Unknown target, profile, voice, and character names include
+close spelling suggestions when available.
 
 ## Configuration
 
@@ -122,6 +154,10 @@ See the [migration guide](migration.md#local-models-only) for retired commands.
 Missing or malformed manifests are application failures because manifest
 loading performs domain validation and may report several related issues.
 Direct file arguments such as audio, batch, and shard inputs are validated by Click as usage errors before an operation begins.
+
+Text input accepts `--text-file PATH` or `--text-file -` for stdin. Unreadable
+files and invalid UTF-8 return a usage error (exit 2, `invalid_argument` in
+JSON) with guidance for correcting the input; errors do not quote its contents.
 
 ## Security
 
@@ -180,6 +216,26 @@ so the next request starts with a fresh handshake.
 Persistent-runtime idle shutdown counts time since the latest authenticated
 request or completed operation and keeps an active operation alive.
 
+Persistent Chatterbox inference runs in a supervised child process. Status and
+stop requests remain responsive while it is busy. Shutdown cancels active
+synthesis, waits for its child process and writers, then removes the endpoint;
+queued requests cannot start new inference during shutdown. The memory limit
+includes the synthesis child's last reported peak RSS as well as the server's
+current RSS. This conservative accounting is checked between operations.
+
+Bounded Whisper inspection materializes only the requested PCM range plus one
+second of context on either side. Word, segment, signal, and clip coordinates
+are returned in the original chapter's time base. Its independent, unprompted
+transcription has a bounded in-process cache keyed by audio and decoder options;
+changing expected text never substitutes a prompted decode for that evidence.
+Decoded audio is shared by the passes for a request. The updated alignment
+fingerprint invalidates prior cached results.
+
+Repair assembly streams unchanged chapter sections and retains only a short
+output tail for crossfades. Speech-region detection also reads bounded PCM
+windows. Replacement audio is prepared once, and multi-repair assembly still
+uses the immutable source frame coordinates and one output commit.
+
 ## Troubleshooting
 
 `FFmpeg is required`: install FFmpeg and ensure both `ffmpeg` and `ffprobe` are
@@ -218,3 +274,9 @@ Regenerate completion after upgrading command surfaces. The command prints
 the raw script without terminal formatting; `--json completion --shell zsh`
 instead returns the script and shell in the standard CLI envelope. The
 existing `_YAKBOX_COMPLETE=SHELL_source yakbox` interface remains available.
+
+For commands that accept an audiobook manifest, completion also suggests its
+target and profile names after `--target`, `--profile`, and `--profiles`.
+It reads the command's manifest argument, or `yakbox.toml` in the current
+directory. Missing or invalid manifests produce no name suggestions.
+Completion stays offline and does not load models.

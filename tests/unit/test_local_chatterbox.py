@@ -9,8 +9,10 @@ from types import ModuleType, SimpleNamespace
 from typing import ClassVar, Protocol, cast
 
 import pytest
+from tests.unit.test_chatterbox_models import snapshot_files
 
-from yakbox.errors import ArtifactError
+from yakbox.chatterbox_models import record_snapshot
+from yakbox.errors import ArtifactError, ModelIntegrityError
 from yakbox.local import LocalChatterboxService, _import_chatterbox_module
 from yakbox.speech import (
     AudioFormat,
@@ -27,9 +29,11 @@ class _Model:
         self.calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
         self.prepare_calls: list[tuple[str, float]] = []
         self.conds: object = object()
+        self.conditioning_calls: list[object] = []
 
     def generate(self, *args: object, **kwargs: object) -> object:
         self.calls.append((args, kwargs))
+        self.conditioning_calls.append(self.conds)
         return object()
 
     def prepare_conditionals(self, path: str, *, exaggeration: float) -> None:
@@ -44,6 +48,12 @@ class _Factory:
     @classmethod
     def from_pretrained(cls, *, device: str) -> _Model:
         assert device == "cpu"
+        cls.loads += 1
+        return cls.model
+
+    @classmethod
+    def from_local(cls, directory: Path, device: str) -> _Model:
+        assert directory.is_dir() and device == "cpu"
         cls.loads += 1
         return cls.model
 
@@ -99,6 +109,8 @@ def mocked_chatterbox(monkeypatch: pytest.MonkeyPatch) -> None:
             return _AudioWriter
         if name == "chatterbox.tts":
             return SimpleNamespace(ChatterboxTTS=_Factory)
+        if name == "chatterbox.tts_turbo":
+            return SimpleNamespace(ChatterboxTurboTTS=_Factory)
         if name == "chatterbox.vc":
             return SimpleNamespace(ChatterboxVC=_Factory)
         if name == "torch":
@@ -113,6 +125,7 @@ async def test_short_local_tts_is_typed_cached_and_atomic(
     tmp_path: Path, mocked_chatterbox: None
 ) -> None:
     _ = mocked_chatterbox
+    _Factory.model.conds = {"voice": "builtin"}
     service = LocalChatterboxService(device="cpu")
     reference = tmp_path / "reference.wav"
     reference.write_bytes(b"reference")
@@ -134,12 +147,16 @@ async def test_short_local_tts_is_typed_cached_and_atomic(
 
     assert first.path.stat().st_size > 44
     assert first.sample_rate == 24_000
-    assert _Factory.loads == 2
+    assert _Factory.loads == 1
     assert _Factory.model.calls[0] == (
         ("Hi.",),
         {},
     )
     assert _Factory.model.prepare_calls == [(str(reference), 0.5)]
+    assert _Factory.model.conditioning_calls == [
+        (str(reference), 0.5),
+        {"voice": "builtin"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -336,3 +353,97 @@ def test_perth_resource_compat_is_narrow_and_removed_after_import(
 
     assert imported.ChatterboxTTS is _Factory
     assert "pkg_resources" not in sys.modules
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variant", ["original", "turbo"])
+async def test_explicit_variants_load_verified_local_snapshots(
+    tmp_path: Path,
+    mocked_chatterbox: None,
+    variant: str,
+) -> None:
+    _ = mocked_chatterbox
+    root = snapshot_files(tmp_path / "model", variant)
+    record = record_snapshot(
+        root, variant=variant, repository="ResembleAI/chatterbox", revision="a" * 40
+    )
+    options = ChatterboxSynthesisOptions(
+        variant=variant,
+        model_directory=root,
+        model_fingerprint=str(record["fingerprint"]),
+        temperature=0.7,
+        top_p=0.9,
+        repetition_penalty=1.1,
+    )
+    service = LocalChatterboxService()
+    artifact = await service.synthesize_to_file(
+        SpeechSynthesisRequest("A line.", "narrator", chatterbox=options),
+        tmp_path / "audio.wav",
+    )
+    assert artifact.path.is_file()
+    assert _Factory.loads == 1
+    assert _Factory.model.calls[0][1] == {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "repetition_penalty": 1.1,
+    }
+    (root / "ve.safetensors").write_bytes(b"modified")
+    with pytest.raises(ModelIntegrityError):
+        await service.synthesize_to_file(
+            SpeechSynthesisRequest("Another line.", "narrator", chatterbox=options),
+            tmp_path / "invalid.wav",
+        )
+    assert not (tmp_path / "invalid.wav").exists()
+
+
+@pytest.mark.asyncio
+async def test_mlx_turbo_uses_local_loader_native_seed_and_audio_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = snapshot_files(tmp_path / "model", "mlx-turbo")
+    record = record_snapshot(
+        root,
+        variant="mlx-turbo",
+        repository="mlx-community/chatterbox-turbo",
+        revision="a" * 40,
+        license_id="Apache-2.0",
+    )
+    calls: list[object] = []
+    model = SimpleNamespace(sample_rate=24000, _conds=None)
+
+    def load(path: Path) -> object:
+        calls.append(path)
+        return model
+
+    def generate(text: str, **options: object) -> object:
+        calls.append((text, options))
+        return iter((SimpleNamespace(audio=object(), sample_rate=24000),))
+
+    model.generate = generate
+    original = importlib.import_module
+
+    def module(name: str, package: str | None = None) -> object:
+        return {
+            "mlx_audio.tts.utils": SimpleNamespace(load_model=load),
+            "mlx_audio.audio_io": SimpleNamespace(sf_write=_AudioWriter.save),
+            "mlx.core": SimpleNamespace(
+                random=SimpleNamespace(seed=_Torch.manual_seed)
+            ),
+            "huggingface_hub": SimpleNamespace(hf_hub_download=lambda **_options: None),
+        }.get(name) or original(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", module)
+    options = ChatterboxSynthesisOptions(
+        variant="mlx-turbo",
+        model_directory=root,
+        model_fingerprint=str(record["fingerprint"]),
+        seed=42,
+    )
+    artifact = await LocalChatterboxService(device="auto").synthesize_to_file(
+        SpeechSynthesisRequest("A line.", "narrator", chatterbox=options),
+        tmp_path / "mlx.wav",
+    )
+    assert artifact.path.is_file()
+    assert calls == [root, ("A line.", {"split_pattern": None, "stream": False})]
+    assert _Torch.seeds == [42]

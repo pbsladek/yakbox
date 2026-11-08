@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import importlib.util
 import json
+import math
 import os
 import sys
 from collections.abc import Generator, Sequence
@@ -51,6 +52,9 @@ from yakbox.audiobook import (
 )
 from yakbox.audiobook.artifacts import verify_artifact
 from yakbox.audiobook.manifest import AudiobookManifest, BuildTarget
+from yakbox.audiobook.status import read_run_history
+from yakbox.chatterbox_models import VARIANTS, record_snapshot, verify_snapshot
+from yakbox.cli_completion import configure_cli_completion
 from yakbox.cli_dialogue import register_dialogue_commands
 from yakbox.cli_help import configure_cli_help
 from yakbox.cli_migrate import register_migration_commands
@@ -76,6 +80,7 @@ from yakbox.playback import play_audio
 from yakbox.speech import (
     AudioFormat,
     BackendCapabilities,
+    ChatterboxSynthesisOptions,
     HostedUsageReportingService,
     HostedUsageSnapshot,
     SpeechArtifact,
@@ -823,18 +828,57 @@ def release_diff_command(
     is_flag=True,
     help="Refresh build progress every two seconds until Ctrl+C.",
 )
-def status_command(manifest: Path, target: str, watch: bool) -> None:
+@click.option(
+    "--latest", is_flag=True, help="Return only the newest target run summary."
+)
+@click.option(
+    "--limit", type=click.IntRange(min=1), help="Return at most this many target runs."
+)
+@click.option(
+    "--interval",
+    type=click.FloatRange(min=0, min_open=True),
+    help="Refresh watch mode at this interval in seconds (default: 2).",
+)
+@click.option(
+    "--exit-when-done",
+    is_flag=True,
+    help="Stop watching when the latest run finishes; exit 1 if it did not complete.",
+)
+def status_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
+    manifest: Path,
+    target: str,
+    watch: bool,
+    latest: bool,
+    limit: int | None,
+    interval: float | None,
+    exit_when_done: bool,
+) -> None:
     """Show run and managed-artifact status."""
     if watch and (_context().json_output or _context().quiet):
         raise click.UsageError("--watch cannot be combined with --json or --quiet")
+    if latest and limit is not None:
+        raise click.UsageError("--latest and --limit are mutually exclusive")
+    if watch and (latest or limit is not None):
+        raise click.UsageError("--latest and --limit cannot be combined with --watch")
+    if not watch and (interval is not None or exit_when_done):
+        raise click.UsageError("--interval and --exit-when-done require --watch")
+    if interval is not None and not math.isfinite(interval):
+        raise click.BadParameter("must be finite", param_hint="--interval")
     try:
         loaded = load_manifest(manifest)
         loaded.target(target)
         if watch:
-            watch_status(loaded.root, target, console)
+            succeeded = watch_status(
+                loaded.root,
+                target,
+                console,
+                interval=interval if interval is not None else 2,
+                exit_when_done=exit_when_done,
+            )
+            if not succeeded:
+                raise click.exceptions.Exit(1)
             return
-        run_files = sorted((loaded.root / ".yakbox" / "runs").glob("*/run.json"))
-        runs = [json.loads(path.read_text(encoding="utf-8")) for path in run_files]
+        runs = read_run_history(loaded.root, target, limit=1 if latest else limit)
         inventory = inventory_artifacts(loaded.target(target).output_root)
     except (YakboxError, OSError, json.JSONDecodeError) as error:
         _fail(error)
@@ -886,6 +930,8 @@ def explain_command(
             for node in plan.nodes
             if artifact is None or artifact in {node.id, str(node.output)}
         ]
+        if artifact is not None and not nodes:
+            raise ValidationError(f"No planned artifact matches: {artifact}")
         states = {
             node.id: (
                 "reusable",
@@ -1336,6 +1382,18 @@ def artifacts_trash_purge_command(
 @click.option("--voice", default="narrator", show_default=True)
 @click.option("--profile")
 @audio_output_options("speech.wav")
+@click.option(
+    "--variant",
+    type=click.Choice(VARIANTS),
+    default="original",
+    help="Select a Chatterbox model variant.",
+)
+@click.option(
+    "--model-directory",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Load a recorded local Chatterbox snapshot.",
+)
+@click.option("--model-fingerprint", help="Require this recorded model fingerprint.")
 def tts_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
     text: str | None,
     text_file: Path | None,
@@ -1345,12 +1403,24 @@ def tts_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
     out: Path,
     output_format: str,
     overwrite: bool,
+    variant: str,
+    model_directory: Path | None,
+    model_fingerprint: str | None,
 ) -> None:
     """Synthesize a single text using the shared speech service."""
     content = _read_text(text, text_file)
     config = _load_config()
     selected = backend or config.default_backend
     try:
+        options = ChatterboxSynthesisOptions(
+            variant=variant,
+            model_directory=model_directory,
+            model_fingerprint=model_fingerprint,
+        )
+        if selected.casefold() == "fake" and (
+            variant != "original" or model_directory is not None
+        ):
+            raise ValidationError("Chatterbox model options require the local backend")
         artifact, usage = asyncio.run(
             _direct_tts(
                 content,
@@ -1360,6 +1430,9 @@ def tts_command(  # noqa: PLR0917 - Click injects one parameter per CLI option.
                 out=out,
                 output_format=AudioFormat(output_format),
                 overwrite=overwrite,
+                chatterbox=options
+                if variant != "original" or model_directory is not None
+                else None,
             )
         )
     except (YakboxError, OSError) as error:
@@ -1446,8 +1519,66 @@ def verify_command(audio: tuple[Path, ...]) -> None:
 
 
 @main.command("models")
-def models_command() -> None:
+@click.option(
+    "--record",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Record a trusted local Chatterbox snapshot.",
+)
+@click.option(
+    "--verify",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Verify a previously recorded local snapshot.",
+)
+@click.option(
+    "--variant",
+    type=click.Choice(VARIANTS),
+    default="original",
+    help="Select the model snapshot variant.",
+)
+@click.option("--repository", help="Record the source Hugging Face owner/name.")
+@click.option("--revision", help="Record the full immutable source commit.")
+@click.option(
+    "--license",
+    "license_id",
+    type=click.Choice(("MIT", "Apache-2.0")),
+    help="Record the reviewed model license; required for MLX conversions.",
+)
+def models_command(
+    *,
+    record: Path | None,
+    verify: Path | None,
+    variant: str,
+    repository: str | None,
+    revision: str | None,
+    license_id: str | None,
+) -> None:
     """Report local model-package availability without loading models."""
+    if record is not None and verify is not None:
+        raise click.UsageError("Choose --record or --verify")
+    if record is not None or verify is not None:
+        try:
+            if record is not None:
+                if repository is None or revision is None:
+                    raise click.UsageError(
+                        "--record requires --repository and --revision"
+                    )
+                value = record_snapshot(
+                    record,
+                    variant=variant,
+                    repository=repository,
+                    revision=revision,
+                    license_id=license_id,
+                )
+            elif verify is not None:
+                value = verify_snapshot(verify, variant=variant)
+        except (YakboxError, OSError) as error:
+            _fail(error)
+        _emit(value, f"Verified {variant} snapshot: {value['fingerprint']}")
+        return
+    if repository is not None or revision is not None or license_id is not None:
+        raise click.UsageError(
+            "--repository, --revision, and --license require --record"
+        )
     available = importlib.util.find_spec("chatterbox") is not None
     _emit(
         {"chatterbox_installed": available},
@@ -1466,7 +1597,10 @@ def backends_list_command() -> None:
         {
             "backends": [
                 {"name": "fake", "available": True},
-                {"name": "chatterbox-local", "available": _module("chatterbox")},
+                {
+                    "name": "chatterbox-local",
+                    "available": _module("chatterbox") or _module("mlx_audio"),
+                },
             ]
         },
         "fake\nchatterbox-local",
@@ -1561,8 +1695,12 @@ async def _direct_tts(
     out: Path,
     output_format: AudioFormat,
     overwrite: bool,
+    chatterbox: ChatterboxSynthesisOptions | None = None,
 ) -> tuple[SpeechArtifact, HostedUsageSnapshot | None]:
-    async with open_speech_backend(backend) as service:
+    async with open_speech_backend(
+        backend,
+        device="auto" if chatterbox and chatterbox.variant == "mlx-turbo" else None,
+    ) as service:
         artifact = await service.synthesize_to_file(
             SpeechSynthesisRequest(
                 text=text,
@@ -1570,6 +1708,7 @@ async def _direct_tts(
                 backend=backend,
                 profile=profile,
                 output_format=output_format,
+                chatterbox=chatterbox,
             ),
             out,
             overwrite=overwrite,
@@ -1634,9 +1773,20 @@ def _read_text(text: str | None, text_file: Path | None) -> str:
     if text is not None and text_file is not None:
         raise click.UsageError("Provide either TEXT or --text-file, not both")
     if text_file is not None:
-        if str(text_file) == "-":
-            return sys.stdin.read()
-        return text_file.read_text(encoding="utf-8")
+        try:
+            if str(text_file) == "-":
+                return sys.stdin.read()
+            return text_file.read_text(encoding="utf-8")
+        except UnicodeError as error:
+            raise click.BadParameter(
+                "must contain valid UTF-8 text; save the input as UTF-8",
+                param_hint="--text-file",
+            ) from error
+        except OSError as error:
+            raise click.BadParameter(
+                "cannot read input; check that the file exists and is readable",
+                param_hint="--text-file",
+            ) from error
     if text is None:
         raise click.UsageError("Provide TEXT or --text-file")
     return text
@@ -1811,5 +1961,6 @@ register_migration_commands(main, emit=_emit, fail=_fail)
 register_repair_commands(main, emit=_emit, fail=_fail)
 register_runtime_commands(main, emit=_emit, fail=_fail)
 register_whisper_commands(main, emit=_emit, fail=_fail)
-register_workspace_commands(main, emit=_emit)
+register_workspace_commands(main, emit=_emit, fail=_fail)
 configure_cli_help(main)
+configure_cli_completion(main)

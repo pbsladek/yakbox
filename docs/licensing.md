@@ -96,8 +96,9 @@ The speech-analysis extras add two permissively licensed runtimes:
 
 - `parakeet-mlx` is Apache-2.0 licensed; and
 - `mlx-audio` is MIT licensed. Yakbox imports only its local speech-to-text
-  implementation. It does not initialize the package's server, microphone,
-  text-to-speech, or speech-to-speech features.
+  implementation. The explicit `mlx-turbo` profile also imports its MIT-licensed
+  Chatterbox Turbo implementation. It does not initialize the package's server,
+  microphone, or speech-to-speech features.
 
 The reviewed model set is installed only by the explicit model lifecycle
 service. Model files stay in the user's platform cache and are not included in
@@ -144,3 +145,14 @@ it; the optional backend invokes a separately installed command. This is an
 explicitly reviewed exception to the repository's permissive-dependency
 preference. Deployments that cannot accept that runtime obligation should keep
 `phoneme_alignment = false`.
+
+## Archived Chatterbox models
+
+The original and Turbo upstream model cards declare MIT licensing, as does
+`chatterbox-tts`. Keep their source revision, original license, model card,
+and notices with any mirror or fork. A local model record inventories trusted
+files; it does not independently determine their licensing or consent status.
+Model weights remain user-managed and are not bundled in Yakbox distributions.
+MLX conversions and the auxiliary S3TokenizerV2 snapshot require their own
+source/revision/license review before recording the combined local file set.
+See [keeping Chatterbox usable](chatterbox-maintenance.md).

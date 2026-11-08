@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 import re
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+from difflib import get_close_matches
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
@@ -12,6 +14,7 @@ from typing import cast
 from yakbox.contracts import schema_uri
 from yakbox.errors import ValidationError
 from yakbox.speech.alignment import lexical_tokens
+from yakbox.speech.models import ChatterboxSynthesisOptions
 from yakbox.speech.short_utterances import (
     CarrierPosition,
     ShortUtteranceFailure,
@@ -70,6 +73,12 @@ class ChatterboxOptions:
     threads_per_process: int = 1
     worker_timeout_seconds: float = 3_600
     estimated_model_memory_bytes: int | None = None
+    variant: str = "original"
+    model_directory: Path | None = None
+    model_fingerprint: str | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    repetition_penalty: float | None = None
 
 
 type BackendOptions = FakeOptions | ChatterboxOptions
@@ -243,28 +252,28 @@ class AudiobookManifest:
         for profile in self.profiles:
             if profile.name == name:
                 return profile
-        raise ValidationError(f"Unknown profile: {name}")
+        raise _unknown_name("profile", name, (item.name for item in self.profiles))
 
     def target(self, name: str) -> BuildTarget:
         """Return a named build target or raise `ValidationError`."""
         for target in self.targets:
             if target.name == name:
                 return target
-        raise ValidationError(f"Unknown target: {name}")
+        raise _unknown_name("target", name, (item.name for item in self.targets))
 
     def voice(self, name: str) -> LogicalVoice:
         """Return a named logical voice or raise `ValidationError`."""
         for voice in self.voices:
             if voice.name == name:
                 return voice
-        raise ValidationError(f"Unknown logical voice: {name}")
+        raise _unknown_name("logical voice", name, (item.name for item in self.voices))
 
     def character(self, name: str) -> CharacterRole:
         """Return a configured narrator or character role."""
         for character in self.characters:
             if character.name == name:
                 return character
-        raise ValidationError(f"Unknown character: {name}")
+        raise _unknown_name("character", name, (item.name for item in self.characters))
 
     def profile_for_speaker(
         self,
@@ -329,6 +338,14 @@ _ROOT_KEYS = {
 }
 
 
+def _unknown_name(kind: str, name: str, choices: Iterable[str]) -> ValidationError:
+    message = f"Unknown {kind}: {name}"
+    matches = get_close_matches(name, sorted(choices), n=3)
+    if matches:
+        message += ". Did you mean " + ", ".join(repr(item) for item in matches) + "?"
+    return ValidationError(message)
+
+
 def load_manifest(path: Path) -> AudiobookManifest:
     """Load, validate, and resolve an audiobook TOML manifest."""
     resolved = path.expanduser().resolve()
@@ -339,7 +356,7 @@ def load_manifest(path: Path) -> AudiobookManifest:
     book = _parse_book(book_raw, root)
     sources = _parse_sources(raw, book_raw, root)
     voices = _parse_voices(raw.get("voices"), root)
-    profiles = _parse_profiles(raw.get("profiles"))
+    profiles = _parse_profiles(raw.get("profiles"), root)
     characters = _parse_characters(raw.get("characters"))
     dialogue = _parse_dialogue(raw.get("dialogue"), root)
     whisper_qa = _parse_whisper_qa(raw.get("whisper_qa"), root)
@@ -624,7 +641,7 @@ def _parse_voices(value: object, root: Path) -> tuple[LogicalVoice, ...]:
     return tuple(result)
 
 
-def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
+def _parse_profiles(value: object, root: Path) -> tuple[BackendProfile, ...]:
     table = _named_tables(
         value,
         "profiles",
@@ -679,6 +696,12 @@ def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
                     "threads_per_process",
                     "worker_timeout_seconds",
                     "estimated_model_memory_bytes",
+                    "variant",
+                    "model_directory",
+                    "model_fingerprint",
+                    "temperature",
+                    "top_p",
+                    "repetition_penalty",
                 },
                 f"profiles.{name}",
             )
@@ -691,7 +714,31 @@ def _parse_profiles(value: object) -> tuple[BackendProfile, ...]:
                     f"profiles.{name}.max_processes must be 1 because a local "
                     "model instance renders sequentially"
                 )
+            generation = ChatterboxSynthesisOptions.from_dict(
+                {
+                    key: item[key]
+                    for key in (
+                        "variant",
+                        "model_directory",
+                        "model_fingerprint",
+                        "cfg_weight",
+                        "exaggeration",
+                        "temperature",
+                        "top_p",
+                        "repetition_penalty",
+                    )
+                    if key in item
+                }
+            )
             options = ChatterboxOptions(
+                variant=generation.variant,
+                model_directory=(root / generation.model_directory).resolve()
+                if generation.model_directory
+                else None,
+                model_fingerprint=generation.model_fingerprint,
+                temperature=generation.temperature,
+                top_p=generation.top_p,
+                repetition_penalty=generation.repetition_penalty,
                 device=_device(item.get("device"), f"profiles.{name}.device"),
                 cfg_weight=_float_or_none(
                     item.get("cfg_weight"), f"profiles.{name}.cfg_weight"

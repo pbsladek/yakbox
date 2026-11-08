@@ -5,15 +5,19 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.metadata
+import json
 import math
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Protocol, cast
 
+from yakbox._files import sha256_file
 from yakbox.audio.crop import detect_speech_regions, wav_duration_seconds
 from yakbox.errors import BackendUnavailableError, BuildError
+from yakbox.local_alignment_audio import alignment_audio, rebase_alignment
 from yakbox.speech.alignment import (
     AlignmentResult,
     AlignmentSegment,
@@ -24,9 +28,12 @@ from yakbox.speech.alignment import (
 )
 from yakbox.whisper_models import require_model_path
 
+_AUTHORITY_CACHE_MAXIMUM_BYTES = 1_000_000
+_AUTHORITY_CACHE_ENTRIES = 8
+
 
 class _MlxWhisper(Protocol):
-    def transcribe(self, audio: str, **options: object) -> Mapping[str, object]: ...
+    def transcribe(self, audio: object, **options: object) -> Mapping[str, object]: ...
 
 
 class _MlxRandom(Protocol):
@@ -56,6 +63,9 @@ class MlxWhisperAligner:
         self.revision = revision
         self._module: _MlxWhisper | None = None
         self._model_path: str | None = None
+        self._authority_cache: OrderedDict[tuple[str, str], Mapping[str, object]] = (
+            OrderedDict()
+        )
         self.timeout_seconds = timeout_seconds
         self.prompted_timing = prompted_timing
         self.decode_consensus = decode_consensus
@@ -72,6 +82,7 @@ class MlxWhisperAligner:
             identity,
             version,
             settings={
+                "audio_preparation": "bounded-pcm-window-v2",
                 "condition_on_previous_text": False,
                 "word_timestamps": True,
                 "authority_temperature": [0.0, 0.2, 0.4],
@@ -162,7 +173,24 @@ class MlxWhisperAligner:
         language: str,
         clip: tuple[float, float] | None,
     ) -> AlignmentResult:
+        with alignment_audio(audio, clip) as (prepared, offset, local_clip):
+            result = self._align_prepared(prepared, expected_text, language, local_clip)
+            return rebase_alignment(result, offset, clip)
+
+    def _align_prepared(
+        self,
+        audio: Path,
+        expected_text: str,
+        language: str,
+        clip: tuple[float, float] | None,
+    ) -> AlignmentResult:
         module = self._load_module()
+        # The real loader accepts a decoded NumPy array. Decode once for all
+        # independent passes while retaining the injected adapter boundary.
+        audio_input: object = str(audio)
+        if getattr(module, "__name__", None) == "mlx_whisper":
+            loader = importlib.import_module("mlx_whisper.audio")
+            audio_input = loader.load_audio(str(audio))
         options: dict[str, object] = {
             "path_or_hf_repo": self._resolve_model_path(),
             "word_timestamps": True,
@@ -178,7 +206,7 @@ class MlxWhisperAligner:
         normalized_language = language.split("-", maxsplit=1)[0].strip().casefold()
         if normalized_language:
             options["language"] = normalized_language
-        raw = module.transcribe(str(audio), **options)
+        raw = self._authority_transcription(module, audio, audio_input, options)
         duration = wav_duration_seconds(audio)
         parsed = _parse_transcription(raw, audio_duration_seconds=duration)
         tokens = parsed.tokens
@@ -203,7 +231,7 @@ class MlxWhisperAligner:
                 "temperature": 0.2,
                 "best_of": 5,
             }
-            consensus_raw = module.transcribe(str(audio), **consensus_options)
+            consensus_raw = module.transcribe(audio_input, **consensus_options)
             consensus = _parse_transcription(
                 consensus_raw,
                 audio_duration_seconds=duration,
@@ -240,7 +268,7 @@ class MlxWhisperAligner:
                 "temperature": 0.0,
                 "initial_prompt": expected_text,
             }
-            prompted_raw = module.transcribe(str(audio), **prompted_options)
+            prompted_raw = module.transcribe(audio_input, **prompted_options)
             prompted = _parse_transcription(
                 prompted_raw,
                 audio_duration_seconds=duration,
@@ -293,6 +321,31 @@ class MlxWhisperAligner:
             clip_start_seconds=clip[0] if clip else None,
             clip_end_seconds=clip[1] if clip else None,
         )
+
+    def _authority_transcription(
+        self,
+        module: _MlxWhisper,
+        audio: Path,
+        audio_input: object,
+        options: dict[str, object],
+    ) -> Mapping[str, object]:
+        # Expected text is deliberately absent: prompted passes never populate
+        # or satisfy independent recognition evidence.
+        key = (sha256_file(audio), json.dumps(options, sort_keys=True))
+        cached = self._authority_cache.get(key)
+        if cached is not None:
+            self._authority_cache.move_to_end(key)
+            return cached
+        raw = module.transcribe(audio_input, **options)
+        try:
+            size = len(json.dumps(dict(raw)))
+        except TypeError:
+            return raw
+        if size <= _AUTHORITY_CACHE_MAXIMUM_BYTES:
+            self._authority_cache[key] = raw
+            while len(self._authority_cache) > _AUTHORITY_CACHE_ENTRIES:
+                self._authority_cache.popitem(last=False)
+        return raw
 
     def _load_module(self) -> _MlxWhisper:
         if self._module is not None:

@@ -16,7 +16,16 @@ if TYPE_CHECKING:
 
 
 def backend_fingerprint(profile: BackendProfile) -> str:
-    return _backend_fingerprint(profile.backend, profile.executor)
+    base = _backend_fingerprint(profile.backend, profile.executor)
+    if getattr(profile.options, "variant", "original") == "mlx-turbo":
+        return _digest(
+            {
+                "base": base,
+                "mlx": _package_version("mlx"),
+                "mlx_audio": _package_version("mlx-audio"),
+            }
+        )
+    return base
 
 
 def backend_versions(profile: BackendProfile) -> dict[str, str]:

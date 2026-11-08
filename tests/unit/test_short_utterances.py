@@ -1461,7 +1461,7 @@ async def test_mlx_aligner_is_lazy_local_and_does_not_prompt_expected_text(
         def __init__(self) -> None:
             self.options: dict[str, object] = {}
 
-        def transcribe(self, audio: str, **options: object) -> Mapping[str, object]:
+        def transcribe(self, audio: object, **options: object) -> Mapping[str, object]:
             assert audio == expected_audio
             self.options = options
             return {
@@ -1521,7 +1521,7 @@ async def test_mlx_aligner_uses_prompt_only_to_refine_an_exact_authority_pass(
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
 
-        def transcribe(self, audio: str, **options: object) -> Mapping[str, object]:
+        def transcribe(self, audio: object, **options: object) -> Mapping[str, object]:
             del audio
             self.calls.append(options)
             prompted = "initial_prompt" in options
@@ -1580,7 +1580,7 @@ async def test_mlx_aligner_preserves_malformed_words_as_rejection_evidence(
     _write_tone_with_silence(audio)
 
     class _FakeMlx:
-        def transcribe(self, audio: str, **options: object) -> Mapping[str, object]:
+        def transcribe(self, audio: object, **options: object) -> Mapping[str, object]:
             del audio, options
             return {
                 "segments": [

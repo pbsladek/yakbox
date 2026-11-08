@@ -263,3 +263,35 @@ source installs both printed the snapshot commit with `yakbox --version`, and
 the builder restored the source metadata afterward. These checks used macOS
 and CPython 3.14.4; Linux CI, real-model qualification, and live-provider tests
 were not run. No release or remote repository change was made.
+
+## Performance follow-up: runtime and model preservation
+
+The persistent Chatterbox control-plane issue is fixed by reusing the
+cancellable local worker supervisor. Tests run a deliberately slow child
+process and verify responsive status and stop requests. Shutdown cancels active
+operations before waiting for client connections, terminates the child, and
+rejects queued inference after stopping begins. Default-voice restoration now
+reuses the saved conditioning object without reloading model weights.
+
+Repair assembly streams unchanged chapter PCM and retains a bounded overlap
+tail. Thirty-two controlled comparisons against the previous implementation
+matched byte for byte across PCM widths, mono/stereo, short/long sources, and
+single/multiple replacements. Golden-output regressions preserve those bytes.
+The explicit performance suite includes a ten-minute source repair constrained
+to less than 8 MiB of traced Python heap and a two-minute speech-region scan
+constrained to less than 1 MiB. All eight offline performance checks passed on
+the local macOS/Python 3.14 host. These are fixture measurements, not model
+inference or listening-quality evidence.
+
+Whisper prepares a bounded PCM range with one second of context, restores
+absolute result coordinates, and decodes its input once per request. A bounded
+in-process cache reuses independent unprompted recognition when only expected
+text changes. Prompted timing and sensitivity passes remain separate; a prompt
+rescue cannot replace the independent lexical result.
+
+The packaged Parakeet/Qwen locks again match the reviewed loader definitions
+and registry. A regression checks all three against each other. Newer loaders
+and the existing quantized candidates retain their real-model qualification
+requirements. Optional original/Turbo/MLX model snapshots now have explicit
+source revisions, file digests, and load-time verification; their integration
+tests do not approve a new model as the default narrator.

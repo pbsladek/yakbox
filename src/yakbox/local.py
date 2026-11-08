@@ -13,12 +13,14 @@ import sys
 import tempfile
 import wave
 from collections import OrderedDict
+from copy import copy
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Protocol, cast
 
 from yakbox._files import atomic_output_path, sha256_file
+from yakbox.chatterbox_models import SnapshotVerifier
 from yakbox.errors import ArtifactError, BackendUnavailableError, ValidationError
 from yakbox.speech.capabilities import BackendCapabilities
 from yakbox.speech.chunking import CHATTERBOX_CHUNK_CHARACTERS, plan_text_chunks
@@ -50,6 +52,9 @@ class _ChatterboxModel(Protocol):
 class _ChatterboxFactory(Protocol):
     @classmethod
     def from_pretrained(cls, *, device: str) -> _ChatterboxModel: ...
+
+    @classmethod
+    def from_local(cls, directory: Path, device: str) -> _ChatterboxModel: ...
 
 
 class _ChatterboxTTSModule(Protocol):
@@ -107,6 +112,9 @@ class LocalChatterboxService:
         self.device = device
         self.conditioning_cache_size = conditioning_cache_size
         self._tts_model: _ChatterboxModel | None = None
+        self._default_conditioning: object = None
+        self._model_identity: tuple[str, str | None] | None = None
+        self._snapshot_verifier = SnapshotVerifier()
         self._vc_model: _ChatterboxModel | None = None
         self._tts_reference_key: tuple[str, float] | None = None
         self._tts_conditioning_cache: OrderedDict[tuple[str, float], object] = (
@@ -197,23 +205,17 @@ class LocalChatterboxService:
         if request.output_format is not AudioFormat.WAV:
             raise ValidationError("Local Chatterbox currently writes WAV")
         try:
-            torchaudio = cast(_AudioWriter, importlib.import_module("torchaudio"))
-            tts_module = cast(
-                _ChatterboxTTSModule,
-                _import_chatterbox_module("chatterbox.tts"),
-            )
-            factory = tts_module.ChatterboxTTS
+            options = request.chatterbox or ChatterboxSynthesisOptions()
+            torchaudio = self._load_tts(options)
         except ImportError as error:
             raise BackendUnavailableError(
                 "Local Chatterbox is not installed; install with: "
                 'uv tool install "yakbox[local]"'
             ) from error
         if self._tts_model is None:
-            self.device = _resolve_device(self.device)
-            self._tts_model = factory.from_pretrained(device=self.device)
-            self._tts_reference_key = None
+            raise BackendUnavailableError("Local Chatterbox model is not loaded")
         kwargs, exaggeration = _generation_controls(request)
-        self._prepare_tts_reference(factory, request, exaggeration)
+        self._prepare_tts_reference(request, exaggeration)
         waveform = self._tts_model.generate(request.text, **kwargs)
         sample_rate = int(self._tts_model.sr)
         with atomic_output_path(destination, overwrite=overwrite) as temporary:
@@ -230,9 +232,64 @@ class LocalChatterboxService:
             sample_rate=sample_rate,
         )
 
+    def _load_tts(self, options: ChatterboxSynthesisOptions) -> _AudioWriter:
+        identity = (options.variant, options.model_fingerprint)
+        if options.model_directory is not None:
+            self._snapshot_verifier.verify(
+                options.model_directory,
+                variant=options.variant,
+                fingerprint=options.model_fingerprint,
+            )
+        if self._model_identity != identity:
+            # Drop the previous variant and its conditioning before allocating
+            # another model in the same persistent worker.
+            self._tts_model = None
+            self._default_conditioning = None
+            self._tts_reference_key = None
+            self._tts_conditioning_cache.clear()
+            self._model_identity = None
+        if options.variant == "mlx-turbo":
+            if self.device not in {"auto", "mps"}:
+                raise ValidationError("MLX Turbo requires device auto or mps")
+            from yakbox.local_mlx import MlxAudioWriter, MlxTurboModel  # noqa: PLC0415 - lazy optional runtime
+
+            if self._tts_model is None or self._model_identity != identity:
+                if options.model_directory is None:
+                    raise ValidationError("MLX Turbo requires a local model directory")
+                self._set_tts_model(MlxTurboModel(options.model_directory), identity)
+            return MlxAudioWriter()
+        writer = cast(_AudioWriter, importlib.import_module("torchaudio"))
+        module = _import_chatterbox_module(
+            "chatterbox.tts_turbo" if options.variant == "turbo" else "chatterbox.tts"
+        )
+        factory = cast(
+            _ChatterboxFactory,
+            getattr(
+                module,
+                "ChatterboxTurboTTS" if options.variant == "turbo" else "ChatterboxTTS",
+            ),
+        )
+        if self._tts_model is None or self._model_identity != identity:
+            self.device = _resolve_device(self.device)
+            model = (
+                factory.from_local(options.model_directory, self.device)
+                if options.model_directory is not None
+                else factory.from_pretrained(device=self.device)
+            )
+            self._set_tts_model(model, identity)
+        return writer
+
+    def _set_tts_model(
+        self, model: _ChatterboxModel, identity: tuple[str, str | None]
+    ) -> None:
+        self._tts_model = model
+        self._model_identity = identity
+        self._default_conditioning = copy(model.conds)
+        self._tts_reference_key = None
+        self._tts_conditioning_cache.clear()
+
     def _prepare_tts_reference(
         self,
-        factory: _ChatterboxFactory,
         request: SpeechSynthesisRequest,
         exaggeration: float,
     ) -> None:
@@ -258,7 +315,7 @@ class LocalChatterboxService:
                     self._tts_model.conds = cached
                 self._tts_reference_key = reference_key
         elif self._tts_reference_key is not None:
-            self._tts_model = factory.from_pretrained(device=self.device)
+            self._tts_model.conds = copy(self._default_conditioning)
             self._tts_reference_key = None
 
     def _transform_sync(
@@ -317,8 +374,15 @@ def _generation_controls(
     if options.exaggeration is not None:
         kwargs["exaggeration"] = exaggeration
     if options.seed is not None:
-        torch = cast(_TorchSeed, importlib.import_module("torch"))
-        torch.manual_seed(options.seed)
+        if options.variant == "mlx-turbo":
+            module = importlib.import_module("mlx.core")
+            module.random.seed(options.seed)
+        else:
+            torch = cast(_TorchSeed, importlib.import_module("torch"))
+            torch.manual_seed(options.seed)
+    for name in ("temperature", "top_p", "repetition_penalty"):
+        if (value := getattr(options, name)) is not None:
+            kwargs[name] = value
     return kwargs, exaggeration
 
 

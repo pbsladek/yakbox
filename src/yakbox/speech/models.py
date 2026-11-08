@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -55,6 +57,94 @@ class ChatterboxSynthesisOptions:
     cfg_weight: float | None = None
     exaggeration: float | None = None
     seed: int | None = None
+    variant: str = "original"
+    model_directory: Path | None = None
+    model_fingerprint: str | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    repetition_penalty: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.variant not in {"original", "turbo", "mlx-turbo"}:
+            raise ValidationError("Unknown Chatterbox variant")
+        if (self.model_directory is None) != (self.model_fingerprint is None):
+            raise ValidationError(
+                "Local models require a directory and recorded fingerprint"
+            )
+        if (
+            self.model_fingerprint is not None
+            and re.fullmatch(r"[0-9a-f]{64}", self.model_fingerprint) is None
+        ):
+            raise ValidationError("Model fingerprint must be SHA-256")
+        if self.variant == "mlx-turbo" and self.model_directory is None:
+            raise ValidationError("MLX Turbo requires a verified local model snapshot")
+        if self.variant != "original" and any(
+            value not in (None, 0) for value in (self.cfg_weight, self.exaggeration)
+        ):
+            raise ValidationError("Turbo variants do not support CFG or exaggeration")
+        for name, value in (
+            ("temperature", self.temperature),
+            ("top_p", self.top_p),
+            ("repetition_penalty", self.repetition_penalty),
+        ):
+            if value is not None and (not math.isfinite(value) or value <= 0):
+                raise ValidationError(f"Chatterbox {name} must be positive and finite")
+        if self.top_p is not None and self.top_p > 1:
+            raise ValidationError("Chatterbox top_p must be at most 1")
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize generation controls and optional local snapshot identity."""
+        result: dict[str, object] = {
+            "cfg_weight": self.cfg_weight,
+            "exaggeration": self.exaggeration,
+            "seed": self.seed,
+        }
+        if self.variant != "original" or self.model_directory is not None:
+            result.update(
+                variant=self.variant,
+                model_directory=str(self.model_directory)
+                if self.model_directory
+                else None,
+                model_fingerprint=self.model_fingerprint,
+            )
+        for name in ("temperature", "top_p", "repetition_penalty"):
+            if (value := getattr(self, name)) is not None:
+                result[name] = value
+        return result
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> ChatterboxSynthesisOptions:
+        """Decode worker options through the shared validation boundary."""
+        numbers: dict[str, float | None] = {}
+        for name in (
+            "cfg_weight",
+            "exaggeration",
+            "temperature",
+            "top_p",
+            "repetition_penalty",
+        ):
+            item = value.get(name)
+            if item is not None and (
+                isinstance(item, bool) or not isinstance(item, (int, float))
+            ):
+                raise ValidationError("Invalid Chatterbox numeric option")
+            numbers[name] = float(item) if isinstance(item, (int, float)) else None
+        seed = value.get("seed")
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
+            raise ValidationError("Invalid Chatterbox seed")
+        path = value.get("model_directory")
+        fingerprint = value.get("model_fingerprint")
+        if (path is not None and not isinstance(path, str)) or (
+            fingerprint is not None and not isinstance(fingerprint, str)
+        ):
+            raise ValidationError("Invalid local model identity")
+        return cls(
+            **numbers,
+            seed=seed,
+            variant=str(value.get("variant", "original")),
+            model_directory=Path(path) if isinstance(path, str) else None,
+            model_fingerprint=fingerprint if isinstance(fingerprint, str) else None,
+        )
 
 
 @dataclass(frozen=True, slots=True)

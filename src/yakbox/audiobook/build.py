@@ -3288,6 +3288,12 @@ def _resolved_speech(
                 cfg_weight=options.cfg_weight,
                 exaggeration=options.exaggeration,
                 seed=options.seed,
+                variant=options.variant,
+                model_directory=options.model_directory,
+                model_fingerprint=options.model_fingerprint,
+                temperature=options.temperature,
+                top_p=options.top_p,
+                repetition_penalty=options.repetition_penalty,
             ),
         )
     return (
@@ -3483,15 +3489,7 @@ def _cache_request_metadata(request: SpeechSynthesisRequest) -> dict[str, object
         "reference_audio_sha256": (
             sha256_file(request.reference_audio) if request.reference_audio else None
         ),
-        "chatterbox": (
-            {
-                "cfg_weight": chatterbox.cfg_weight,
-                "exaggeration": chatterbox.exaggeration,
-                "seed": chatterbox.seed,
-            }
-            if chatterbox is not None
-            else None
-        ),
+        "chatterbox": chatterbox.to_dict() if chatterbox is not None else None,
     }
 
 

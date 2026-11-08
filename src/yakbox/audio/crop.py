@@ -9,6 +9,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from yakbox._files import atomic_output_path
+from yakbox.audio.pcm import decode_pcm
 from yakbox.errors import ArtifactError
 
 _MAXIMUM_BOUNDARY_PROTECTION_MS = 130
@@ -100,28 +101,57 @@ def detect_speech_regions(
     merge_gap_ms: int = 40,
 ) -> tuple[SpeechRegion, ...]:
     """Detect audible PCM regions as an ASR-independent guard signal."""
-    audio = _read_pcm_wave(path)
-    window_frames = max(1, round(audio.sample_rate * window_ms / 1_000))
-    full_scale = float(1 << (audio.sample_width * 8 - 1))
-    threshold = full_scale * (10 ** (threshold_dbfs / 20))
-    audible: list[tuple[int, int]] = []
-    for start in range(0, len(audio.frames), window_frames):
-        end = min(len(audio.frames), start + window_frames)
-        values = (sample for frame in audio.frames[start:end] for sample in frame)
-        count = (end - start) * audio.channels
-        energy = sum(sample * sample for sample in values) / max(1, count)
+    try:
+        with wave.open(str(path), "rb") as reader:
+            width, rate = reader.getsampwidth(), reader.getframerate()
+            if (
+                reader.getcomptype() != "NONE"
+                or width not in {1, 2, 3, 4}
+                or reader.getnframes() < 1
+            ):
+                raise ArtifactError(f"Unsupported PCM WAV format: {path}")
+            merged = _stream_audible_windows(
+                reader, threshold_dbfs, window_ms, merge_gap_ms
+            )
+            minimum_frames = round(rate * minimum_speech_ms / 1_000)
+            return tuple(
+                SpeechRegion(start / rate, end / rate)
+                for start, end in merged
+                if end - start >= minimum_frames
+            )
+    except (OSError, EOFError, wave.Error) as error:
+        raise ArtifactError(f"Cannot read PCM WAV: {path}") from error
+
+
+def _stream_audible_windows(
+    reader: wave.Wave_read,
+    threshold_dbfs: float,
+    window_ms: int,
+    merge_gap_ms: int,
+) -> list[tuple[int, int]]:
+    channels, width, rate = (
+        reader.getnchannels(),
+        reader.getsampwidth(),
+        reader.getframerate(),
+    )
+    window = max(1, round(rate * window_ms / 1_000))
+    threshold = (1 << (width * 8 - 1)) * (10 ** (threshold_dbfs / 20))
+    gap = round(rate * merge_gap_ms / 1_000)
+    regions: list[tuple[int, int]] = []
+    for start in range(0, reader.getnframes(), window):
+        count = min(window, reader.getnframes() - start)
+        data = reader.readframes(count)
+        if len(data) != count * channels * width:
+            raise ArtifactError("PCM WAV has truncated frame data")
+        samples = decode_pcm(data, width)
+        energy = sum(value * value for value in samples) / max(1, count * channels)
         if math.sqrt(energy) >= threshold:
-            audible.append((start, end))
-    merged = _merge_regions(
-        audible,
-        maximum_gap=round(audio.sample_rate * merge_gap_ms / 1_000),
-    )
-    minimum_frames = round(audio.sample_rate * minimum_speech_ms / 1_000)
-    return tuple(
-        SpeechRegion(start / audio.sample_rate, end / audio.sample_rate)
-        for start, end in merged
-        if end - start >= minimum_frames
-    )
+            end = start + count
+            if regions and start - regions[-1][1] <= gap:
+                regions[-1] = (regions[-1][0], end)
+            else:
+                regions.append((start, end))
+    return regions
 
 
 def inspect_speech_islands(

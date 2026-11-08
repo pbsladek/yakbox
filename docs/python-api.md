@@ -250,3 +250,12 @@ Callers should compare enum members or their `.value`, never class names or
 human-readable exception messages. The CLI envelope is a separate contract;
 Python programs should call these services instead of invoking or scraping the
 CLI.
+
+### Chatterbox model preservation
+
+`ChatterboxSynthesisOptions` and `ChatterboxOptions` retain their existing
+positional parameters. Additive options select `variant`, `model_directory`,
+`model_fingerprint`, `temperature`, `top_p`, and `repetition_penalty`.
+`ChatterboxSynthesisOptions.to_dict()` and `.from_dict()` use the same typed,
+validated representation as the local workers. See the [model preservation
+guide](chatterbox-maintenance.md) for supported variants and snapshot provenance.

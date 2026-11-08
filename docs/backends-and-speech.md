@@ -53,8 +53,12 @@ inherit that format, while sentence, clause, and paragraph boundaries receive
 stable spacing and short fades. A deterministic per-chunk seed is derived from
 the profile seed and chunk identity so cached and regenerated builds agree.
 
-The current upstream Chatterbox package is maintained but pins several stale
-ML/UI dependencies. Yakbox applies reviewed, versioned uv overrides to fixed
+Upstream now describes Chatterbox as retired research and no longer maintained.
+The existing MIT-licensed code and model snapshots can be archived and used
+locally. See [keeping Chatterbox usable](chatterbox-maintenance.md) for verified
+local snapshots, Turbo/MLX profiles, private mirrors, and maintaining a fork.
+The published package pins several stale ML/UI dependencies.
+Yakbox applies reviewed, versioned uv overrides to fixed
 releases and audits the complete local stack as a release blocker. Use the
 local installation command in the
 [installation guide](installing-and-releasing.md); omitting its override file

@@ -37,6 +37,7 @@ from yakbox.speech.models import (
     SpeechSynthesisRequest,
 )
 from yakbox.speech.services import TextToSpeechService
+from yakbox.speech.workers import IsolatedLocalSpeechService
 
 RUNTIME_PROTOCOL_VERSION = 1
 _START_TIMEOUT_SECONDS = 15.0
@@ -155,7 +156,7 @@ class PersistentLocalSpeechService:
                     "sample_rate": request.sample_rate,
                     "reference_audio": str(reference) if reference else None,
                     "chatterbox": (
-                        asdict(request.chatterbox)
+                        request.chatterbox.to_dict()
                         if request.chatterbox is not None
                         else None
                     ),
@@ -537,6 +538,7 @@ class _RuntimeServer:
         self.operation_lock = asyncio.Lock()
         self.tts_services: dict[str, TextToSpeechService] = {}
         self.aligners: dict[str, WindowSpeechAligner] = {}
+        self.operations: set[asyncio.Task[dict[str, object]]] = set()
         self.port: int | None = None
 
     async def serve(self) -> None:
@@ -574,7 +576,15 @@ class _RuntimeServer:
                 except TimeoutError:
                     continue
         finally:
+            self.stop_event.set()
             server.close()
+            operations = tuple(self.operations)
+            for operation in operations:
+                operation.cancel()
+            await asyncio.gather(*operations, return_exceptions=True)
+            for service in self.tts_services.values():
+                if isinstance(service, IsolatedLocalSpeechService):
+                    await service.aclose()
             await server.wait_closed()
             path.unlink(missing_ok=True)
 
@@ -607,7 +617,14 @@ class _RuntimeServer:
                 self.stop_event.set()
             else:
                 async with self.operation_lock:
-                    response = await self.execute(request)
+                    if self.stop_event.is_set():
+                        raise BuildError("Persistent runtime is stopping")
+                    operation_task = asyncio.create_task(self.execute(request))
+                    self.operations.add(operation_task)
+                    try:
+                        response = await operation_task
+                    finally:
+                        self.operations.discard(operation_task)
                     self.last_activity = time.monotonic()
             await self._write(writer, {"ok": True, **response})
         except Exception as error:  # noqa: BLE001 - protocol returns safe errors
@@ -633,14 +650,12 @@ class _RuntimeServer:
         return response
 
     async def _synthesize(self, request: dict[str, object]) -> dict[str, object]:
-        from yakbox.local import LocalChatterboxService  # noqa: PLC0415 - heavy
-
         device = str(request.get("device", "cpu"))
         service = self.tts_services.get(device)
         if service is None:
             if self.tts_services:
                 raise ValidationError("Runtime supports one resident TTS device")
-            service = LocalChatterboxService(
+            service = IsolatedLocalSpeechService(
                 device=device,
                 conditioning_cache_size=self.options.conditioning_cache_size,
             )
@@ -729,6 +744,11 @@ class _RuntimeServer:
     def _memory_limit_exceeded(self) -> bool:
         maximum = self.options.maximum_memory_bytes
         current = _resident_memory_bytes()
+        if current is not None:
+            current += sum(
+                getattr(service, "resident_memory_bytes", None) or 0
+                for service in self.tts_services.values()
+            )
         return maximum is not None and current is not None and current > maximum
 
     async def _write(
@@ -763,11 +783,7 @@ def _runtime_item(
         if not isinstance(chatterbox_raw, dict):
             raise ValidationError("Runtime Chatterbox options are invalid")
         values = cast(dict[str, object], chatterbox_raw)
-        chatterbox = ChatterboxSynthesisOptions(
-            cfg_weight=_optional_float(values.get("cfg_weight")),
-            exaggeration=_optional_float(values.get("exaggeration")),
-            seed=_optional_int(values.get("seed")),
-        )
+        chatterbox = ChatterboxSynthesisOptions.from_dict(values)
     return (
         SpeechSynthesisRequest(
             text=str(raw["text"]),
