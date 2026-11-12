@@ -4,7 +4,7 @@ version = "0"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "mlx-whisper==0.4.3",
-  "regex>=2026.7.19,<2027",
+  "regex>=2026.11.9,<2027",
 ]
 
 [tool.uv]
